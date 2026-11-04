@@ -33,7 +33,7 @@ fn role_directory(role: DataRole) -> Result<&'static str, String> {
         _ => Err("evaluation only accepts validation or held-out data".into()),
     }
 }
-fn private_subdirectory(
+pub(super) fn private_subdirectory(
     parent: &Path,
     name: &str,
     create: bool,

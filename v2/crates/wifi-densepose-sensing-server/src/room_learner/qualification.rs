@@ -52,6 +52,19 @@ pub struct ConditionCriterion {
     pub unconditional_sensitivity: Option<f64>,
     pub false_positive_rate: Option<f64>,
 }
+/// v1 keeps historical numeric bytes; v2 uses exact decimal strings for UTC ns
+/// beyond JavaScript's safe-integer range. Neither form asserts source time.
+#[derive(Debug,Clone,Serialize,Deserialize,PartialEq)]
+#[serde(untagged)]
+pub enum ReceiptTimestamp { Legacy(u64), Decimal(String) }
+impl ReceiptTimestamp {
+    fn new(value:u64,proof:bool)->Self {if proof {Self::Decimal(value.to_string())} else {Self::Legacy(value)}}
+    fn value(&self)->Result<u64,String> {match self {
+        Self::Legacy(n)=>Ok(*n),
+        Self::Decimal(s) if !s.is_empty()&&s.len()<=20&&s.bytes().all(|b|b.is_ascii_digit())&&(!s.starts_with('0')||s=="0")=>s.parse().map_err(|_|"invalid qualification timestamp".into()),
+        _=>Err("invalid qualification timestamp".into()),
+    }}
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct QualificationReceipt {
@@ -70,13 +83,19 @@ pub struct QualificationReceipt {
     pub policy_sha256: String,
     pub label_provenance: String,
     pub sealed_history_sha256: String,
-    pub first_observed_at_ns: u64,
-    pub last_observed_at_ns: u64,
+    pub first_observed_at_ns: ReceiptTimestamp,
+    pub last_observed_at_ns: ReceiptTimestamp,
     pub criteria: Vec<ConditionCriterion>,
     pub report: EvaluationReport,
     pub independence_verified: bool,
     pub physically_validated: bool,
     pub authority_scope: String,
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    pub training_lineage_basis: Option<String>,
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    pub managed_training_proof_sha256: Option<String>,
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    pub managed_sealed_phase_fence_sha256: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -164,6 +183,8 @@ pub(crate) struct ManagedEvidence {
     pub first_observed_at_ns: u64,
     pub last_observed_at_ns: u64,
     pub last_held_out_observed_ns: u64,
+    pub training_proof_sha256: Option<String>,
+    pub sealed_phase_fence_sha256: Option<String>,
 }
 pub(crate) fn managed_evidence(
     model: &RoomModel,
@@ -171,12 +192,24 @@ pub(crate) fn managed_evidence(
     history: &[PhaseReceipt],
     evaluation: &super::artifact::EvaluationReceipt,
 ) -> Result<ManagedEvidence, String> {
-    if dataset.context() != model.context()
-        || dataset.train().is_empty()
-        || hash(&dataset.train())? != model.training_manifest().training_data_sha256
-    {
-        return Err("qualification requires retained exact Train manifest lineage".into());
-    }
+    managed_evidence_with_proof(model,dataset,history,evaluation,None)
+}
+pub(crate) fn managed_evidence_with_proof(
+    model:&RoomModel, dataset:&ValidatedDataset, history:&[PhaseReceipt],
+    evaluation:&super::artifact::EvaluationReceipt,
+    proof:Option<&super::managed_training::ManagedTrainingProof>,
+)->Result<ManagedEvidence,String> {
+    if dataset.context()!=model.context() {return Err("qualification context mismatch".into());}
+    let persisted_proof=if dataset.train().is_empty() {
+        let p=proof.ok_or("qualification requires retained exact Train rows or a verified managed training proof")?;
+        p.check_held_out(model,dataset)?; Some(p)
+    } else {
+        // Never hide changed retained rows behind a formerly valid proof.
+        if hash(&dataset.train())? != model.training_manifest().training_data_sha256 {
+            return Err("qualification requires retained exact Train manifest lineage".into());
+        }
+        None
+    };
     let rows: Vec<_> = dataset.train().iter().chain(dataset.held_out()).collect();
     if rows.iter().any(|c| {
         c.provenance != CaptureProvenance::LiveReceiverObserved
@@ -225,8 +258,9 @@ pub(crate) fn managed_evidence(
             relevant.push(phase);
         }
     }
-    let counts =
-        CONDITIONS.map(|label| dataset.train().iter().filter(|c| c.label == label).count());
+    let counts = persisted_proof.map_or_else(
+        || CONDITIONS.map(|label|dataset.train().iter().filter(|c|c.label==label).count()),
+        |p|p.seed.train_counts);
     evaluation.report.validate()?;
     for (i, label) in CONDITIONS.iter().enumerate() {
         if counts[i] < 4
@@ -265,9 +299,11 @@ pub(crate) fn managed_evidence(
 
     Ok(ManagedEvidence {
         counts,
-        sealed_history_sha256: hash(&relevant)?,
-        first_observed_at_ns: first,
+        sealed_history_sha256: if let Some(p)=persisted_proof {hash(&("managed-training-proof-v1+sealed-heldout-v1",&p.proof_sha256,&p.seed.sealed_train_history_sha256,&relevant))?} else {hash(&relevant)?},
+        first_observed_at_ns: persisted_proof.map_or(first,|p|p.seed.first_observed_ns.min(first)),
         last_observed_at_ns: last,
+        training_proof_sha256: persisted_proof.map(|p|p.proof_sha256.clone()),
+        sealed_phase_fence_sha256: None,
         last_held_out_observed_ns: dataset
             .held_out()
             .iter()
@@ -278,6 +314,18 @@ pub(crate) fn managed_evidence(
     })
 }
 
+pub(crate) fn managed_evidence_with_fence(
+    model:&RoomModel,dataset:&ValidatedDataset,history:&[PhaseReceipt],evaluation:&super::artifact::EvaluationReceipt,
+    proof:Option<&super::managed_training::ManagedTrainingProof>,fence_sha:Option<&str>,
+)->Result<ManagedEvidence,String> {
+    let mut evidence=managed_evidence_with_proof(model,dataset,history,evaluation,proof)?;
+    if evidence.training_proof_sha256.is_some() {
+        let sha=fence_sha.filter(|s|s.len()==64&&s.bytes().all(|b|b.is_ascii_digit()||(b'a'..=b'f').contains(&b))).ok_or("managed qualification requires its durable sealed phase fence")?;
+        evidence.sealed_history_sha256=hash(&("managed-phase-fence-v1",&evidence.sealed_history_sha256,sha))?;
+        evidence.sealed_phase_fence_sha256=Some(sha.into());
+    }
+    Ok(evidence)
+}
 impl QualificationEnvelope {
     pub(crate) fn issue(
         model: &RoomModel,
@@ -285,12 +333,20 @@ impl QualificationEnvelope {
         history: &[PhaseReceipt],
         evaluation: &super::artifact::EvaluationReceipt,
     ) -> Result<Self, String> {
-        let evidence = managed_evidence(model, dataset, history, evaluation)?;
+        Self::issue_with_proof(model,dataset,history,evaluation,None,None)
+    }
+    pub(crate) fn issue_with_proof(
+        model:&RoomModel,dataset:&ValidatedDataset,history:&[PhaseReceipt],
+        evaluation:&super::artifact::EvaluationReceipt,
+        proof:Option<&super::managed_training::ManagedTrainingProof>,
+        fence_sha:Option<&str>,
+    )->Result<Self,String> {
+        let evidence = managed_evidence_with_fence(model,dataset,history,evaluation,proof,fence_sha)?;
         let checks = criteria(&evaluation.report, &evidence.counts)?;
         let c = model.context();
         let policy = QualificationPolicy::default();
         let receipt = QualificationReceipt {
-            schema: "ruview.local-operational-qualification.v1".into(),
+            schema: if evidence.training_proof_sha256.is_some() {"ruview.local-operational-qualification.v2"} else {"ruview.local-operational-qualification.v1"}.into(),
             owner_scope: c.owner_scope.clone(),
             installation_id: c.installation_id.clone(),
             room_digest: c.room_digest.clone(),
@@ -303,15 +359,18 @@ impl QualificationEnvelope {
             evaluated_at_unix_ms: evaluation.evaluated_at_unix_ms,
             policy_sha256: hash(&policy)?,
             policy,
-            label_provenance: "managed-sealed-history-v1".into(),
+            label_provenance: if evidence.training_proof_sha256.is_some() {"managed-training-proof-v1+sealed-heldout-v1"} else {"managed-sealed-history-v1"}.into(),
             sealed_history_sha256: evidence.sealed_history_sha256,
-            first_observed_at_ns: evidence.first_observed_at_ns,
-            last_observed_at_ns: evidence.last_observed_at_ns,
+            first_observed_at_ns: ReceiptTimestamp::new(evidence.first_observed_at_ns,evidence.training_proof_sha256.is_some()),
+            last_observed_at_ns: ReceiptTimestamp::new(evidence.last_observed_at_ns,evidence.training_proof_sha256.is_some()),
             criteria: checks,
             report: evaluation.report.clone(),
             independence_verified: false,
             physically_validated: false,
             authority_scope: "local_operator_binary_presence".into(),
+            training_lineage_basis: evidence.training_proof_sha256.as_ref().map(|_|"managed_training_proof_v1".into()),
+            managed_training_proof_sha256: evidence.training_proof_sha256,
+            managed_sealed_phase_fence_sha256: evidence.sealed_phase_fence_sha256,
         };
         let envelope = Self {
             receipt_sha256: hash(&receipt)?,
@@ -332,7 +391,9 @@ impl QualificationEnvelope {
                 && x.bytes()
                     .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
         };
-        if r.schema != "ruview.local-operational-qualification.v1"
+        let v1=r.schema=="ruview.local-operational-qualification.v1" && r.training_lineage_basis.is_none() &&r.managed_training_proof_sha256.is_none()&&r.managed_sealed_phase_fence_sha256.is_none() &&r.label_provenance=="managed-sealed-history-v1" &&matches!(r.first_observed_at_ns,ReceiptTimestamp::Legacy(_))&&matches!(r.last_observed_at_ns,ReceiptTimestamp::Legacy(_));
+        let v2=r.schema=="ruview.local-operational-qualification.v2" &&r.training_lineage_basis.as_deref()==Some("managed_training_proof_v1") &&r.managed_training_proof_sha256.as_deref().is_some_and(hex)&&r.managed_sealed_phase_fence_sha256.as_deref().is_some_and(hex) &&r.label_provenance=="managed-training-proof-v1+sealed-heldout-v1" && !eval.train_lineage_checked &&matches!(r.first_observed_at_ns,ReceiptTimestamp::Decimal(_))&&matches!(r.last_observed_at_ns,ReceiptTimestamp::Decimal(_));
+        if !(v1||v2)
             || self.receipt_sha256 != hash(r)?
             || r.owner_scope != c.owner_scope
             || r.installation_id != c.installation_id
@@ -348,10 +409,9 @@ impl QualificationEnvelope {
             || eval.role != DataRole::HeldOut
             || r.policy != QualificationPolicy::default()
             || r.policy_sha256 != hash(&r.policy)?
-            || r.label_provenance != "managed-sealed-history-v1"
             || !hex(&r.sealed_history_sha256)
-            || r.first_observed_at_ns == 0
-            || r.last_observed_at_ns < r.first_observed_at_ns
+            || r.first_observed_at_ns.value()? == 0
+            || r.last_observed_at_ns.value()? < r.first_observed_at_ns.value()?
             || r.independence_verified
             || r.physically_validated
             || r.authority_scope != "local_operator_binary_presence"

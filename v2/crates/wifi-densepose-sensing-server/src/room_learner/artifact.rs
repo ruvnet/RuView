@@ -303,3 +303,9 @@ mod selection_store;
 
 #[path="assessment_store.rs"]
 mod assessment_store;
+
+#[path="managed_training_store.rs"]
+mod managed_training_store;
+
+#[path="managed_capture_fence_store.rs"]
+mod managed_capture_fence_store;
