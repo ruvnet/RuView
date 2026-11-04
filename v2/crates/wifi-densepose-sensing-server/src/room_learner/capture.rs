@@ -11,6 +11,8 @@ pub const MIN_PHASE_MS: u64 = 12_000;
 pub const MAX_PHASE_MS: u64 = 600_000;
 pub const MAX_CAPTURE_BINS: usize = 128;
 const MAX_PHASE_HISTORY: usize = 128;
+// Protected diagnostics are consumed by JavaScript clients as exact integers.
+const MAX_SEQUENCE_DIAGNOSTIC_COUNT: u64 = (1u64 << 53) - 1;
 
 /// Borrowed actual packet metadata. The caller must reject unknown bandwidth
 /// and retain the known raw grid identity. Amplitudes may be length-only
@@ -59,6 +61,11 @@ struct SourceBuffer {
     ordinal: u64,
     last_time_ns: u64,
     admitted_packets: u64,
+    // Transient diagnostics only. Never restore observations/rejections as
+    // fresh input, and never let them advance the admission watermark.
+    last_observed_sequence: Option<u32>,
+    sequence_rejection_count: u64,
+    sequence_rejection_reason: Option<SequenceRejectionReason>,
     live: VecDeque<Packet>,
 }
 #[derive(Debug)]
@@ -70,6 +77,12 @@ struct Phase {
     representatives: Vec<CaptureCohort>,
     admitted: HashMap<u8, u64>,
 }
+
+/// A bounded diagnostic of the most recent sequence admission failure.
+/// It does not establish a source reboot or authenticated source epoch.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SequenceRejectionReason { Duplicate, Reversed }
 
 /// Counts and receiver freshness only. No learned/qualified state is implied.
 #[derive(Debug, Clone, Serialize)]
@@ -98,6 +111,13 @@ pub struct SourceProgress {
     pub source_id: u8,
     pub grid_id: String,
     pub admitted_packets: u64,
+    /// Last admitted wire sequence, including an original recovery watermark.
+    pub last_accepted_sequence: Option<u32>,
+    /// Last sequence tested by this receiver after PHY/shape/time validation.
+    pub last_observed_sequence: Option<u32>,
+    /// Transient since this capture was created/restored; never persisted.
+    pub sequence_rejection_count: u64,
+    pub sequence_rejection_reason: Option<SequenceRejectionReason>,
     pub phase_admitted_packets: u64,
     pub live_buffer_frames: usize,
     pub phase_buffer_frames: usize,
@@ -166,6 +186,10 @@ impl CaptureSession {
                 else if source.live.len() != WINDOW_PACKETS { Some("incomplete_window") } else { None };
             SourceProgress { source_id: spec.source_id, grid_id: spec.grid_id.clone(),
                 admitted_packets: source.admitted_packets,
+                last_accepted_sequence: source.sequence,
+                last_observed_sequence: source.last_observed_sequence,
+                sequence_rejection_count: source.sequence_rejection_count,
+                sequence_rejection_reason: source.sequence_rejection_reason,
                 phase_admitted_packets: self.phase.as_ref().and_then(|p| p.admitted.get(&spec.source_id)).copied().unwrap_or(0),
                 live_buffer_frames: source.live.len(),
                 phase_buffer_frames: self.phase.as_ref().and_then(|p| p.pending.get(&spec.source_id)).map_or(0, VecDeque::len),
@@ -209,10 +233,17 @@ impl CaptureSession {
         }
         let source = self.sources.get_mut(&frame.source_id).ok_or("source buffer unavailable")?;
         if now_ns == 0 || now_ns < self.last_seen_ns || now_ns <= source.last_time_ns { return Err("nonmonotonic receiver time".into()); }
+        source.last_observed_sequence = Some(frame.sequence);
         let delta = match source.sequence {
             Some(last) => {
                 let delta = frame.sequence.wrapping_sub(last);
-                if delta == 0 || delta >= (1u32 << 31) { return Err("replayed or reversed source sequence".into()); }
+                if delta == 0 || delta >= (1u32 << 31) {
+                    source.sequence_rejection_count = source.sequence_rejection_count.saturating_add(1).min(MAX_SEQUENCE_DIAGNOSTIC_COUNT);
+                    source.sequence_rejection_reason = Some(if delta == 0 {
+                        SequenceRejectionReason::Duplicate
+                    } else { SequenceRejectionReason::Reversed });
+                    return Err("replayed or reversed source sequence".into());
+                }
                 u64::from(delta)
             }
             None => 1,
@@ -221,6 +252,7 @@ impl CaptureSession {
         let packet = Packet { values: frame.amplitudes.iter().map(|x| *x as f32).collect(),
             frame_id: (u128::from(self.prefix) << 64) | (u128::from(frame.source_id) << 56) | u128::from(ordinal),
             ordinal, received_ns: now_ns };
+        source.sequence_rejection_reason = None;
         source.sequence = Some(frame.sequence);
         source.ordinal = ordinal;
         source.last_time_ns = now_ns;
