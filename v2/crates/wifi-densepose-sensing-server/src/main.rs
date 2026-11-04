@@ -12,6 +12,7 @@
 mod adaptive_classifier;
 mod companion_integration;
 mod companion_room;
+mod managed_worldgraph;
 mod companion_spatial;
 pub mod cli;
 pub mod csi;
@@ -16394,6 +16395,7 @@ async fn main() {
         .route("/api/v1/rf/vendors/:vendor/events", post(ingest_vendor_events))
         // Per-node health endpoint
         .route("/api/v1/nodes", get(nodes_endpoint))
+        .route("/api/v1/worldgraph/snapshot", get(managed_worldgraph::snapshot))
         // ADR-110 iter 29 — per-node mesh sync state for HTTP clients.
         .route("/api/v1/nodes/:id/sync", get(node_sync_endpoint))
         .route("/api/v1/mesh", get(mesh_endpoint))

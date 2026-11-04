@@ -34,6 +34,7 @@ pub struct Envelope {
 pub struct SharedRoomStore {
     path: PathBuf,
     current: Mutex<Envelope>,
+    worldgraph_cursor: Mutex<crate::managed_worldgraph::Cursor>,
 }
 fn invalid() -> std::io::Error {
     std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid shared room state")
@@ -240,8 +241,15 @@ impl SharedRoomStore {
         Ok(Arc::new(Self {
             path,
             current: Mutex::new(current),
+            worldgraph_cursor: Mutex::new(crate::managed_worldgraph::Cursor::default()),
         }))
     }
+    /// Lock publication then cursor: no mixed binding/geometry response under CAS.
+    pub fn worldgraph_snapshot(&self, privacy_denied: bool) -> Result<Value, StatusCode> {
+        let room = self.current.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        self.worldgraph_cursor.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?.project(&room, privacy_denied)
+    }
+
     pub fn snapshot(&self) -> Option<Envelope> { self.current.lock().ok().map(|v| v.clone()) }
     pub fn matches_binding(&self, binding: &str, node_ids: &[u8]) -> bool {
         let Ok(e) = self.current.lock() else {
