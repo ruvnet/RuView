@@ -487,3 +487,7 @@ mod selection_tests;
 #[cfg(test)]
 #[path="lifecycle_assessment_tests.rs"]
 mod assessment_tests;
+
+#[path = "paired_progress.rs"]
+mod paired_progress;
+pub use paired_progress::{PairedCalibrationProgress, PublishedProgressRoom, PAIRED_PROGRESS_TTL_MS};

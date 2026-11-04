@@ -451,3 +451,7 @@ pub(super) use publication::{project_cached_selection, project_live_selection, r
 #[path = "room_learner_api_selection.rs"]
 mod selection_routes;
 pub(super) use selection_routes::{owner_selection_routes, selection};
+
+#[path = "room_learner_api_progress.rs"]
+mod paired_progress;
+pub(super) use paired_progress::progress;
