@@ -118,6 +118,22 @@ impl ArtifactStore {
             .pop()
             .ok_or("managed capture fence unavailable".into())
     }
+    /// Resolve historical comparison provenance against the already verified
+    /// bounded append-only chain. This never moves or repairs its head.
+    pub(crate) fn load_managed_capture_fence_by_sha(
+        &self,
+        model: &RoomModel,
+        proof: &ManagedTrainingProof,
+        sha: &str,
+    ) -> Result<ManagedCaptureFence, String> {
+        if !hex_digest(sha) {
+            return Err("invalid managed fence digest".into());
+        }
+        self.read_fence_chain(model, proof, false)?
+            .into_iter()
+            .find(|fence| fence.fence_sha256 == sha)
+            .ok_or("referenced managed capture fence unavailable".into())
+    }
     fn commit_fence(
         &self,
         model: &RoomModel,

@@ -541,3 +541,46 @@ mod selection_tests;
 
 #[path = "room_learner_api_selection_composer_tests.rs"]
 mod selection_composer_tests;
+
+#[test]
+fn comparison_recording_is_explicit_strict_and_false_by_default() {
+    let expected = MutationGuard {
+        runtime_epoch: "synthetic-epoch".into(),
+        generation: 0,
+        workflow_revision: 0,
+        context_digest: None,
+        phase: None,
+    };
+    let mut body = serde_json::json!({"expected":expected,"role":"HeldOut"});
+    let legacy: EvaluationRequest = serde_json::from_value(body.clone()).unwrap();
+    assert!(!legacy.record_comparison_evidence);
+    body["record_comparison_evidence"] = serde_json::json!(true);
+    assert!(
+        serde_json::from_value::<EvaluationRequest>(body.clone())
+            .unwrap()
+            .record_comparison_evidence
+    );
+    body["record_comparison_evidence"] = serde_json::json!("true");
+    assert!(serde_json::from_value::<EvaluationRequest>(body.clone()).is_err());
+    body["record_comparison_evidence"] = serde_json::Value::Null;
+    assert!(serde_json::from_value::<EvaluationRequest>(body).is_err());
+}
+#[tokio::test]
+async fn comparison_optin_does_not_bypass_the_existing_owner_runtime_guard() {
+    let (_dir, state) = fixture();
+    let router = Router::new()
+        .route("/evaluate", post(evaluate))
+        .with_state(state);
+    let response = router.oneshot(Request::builder().method(Method::POST).uri("/evaluate")
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&serde_json::json!({
+            "expected":{"runtime_epoch":"wrong-runtime","generation":0,"workflow_revision":0,"context_digest":null,"phase":null},
+            "role":"HeldOut","record_comparison_evidence":true
+        })).unwrap())).unwrap()).await.unwrap();
+    let bytes = axum::body::to_bytes(response.into_body(), 65536)
+        .await
+        .unwrap();
+    let result: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(result["success"], false);
+    assert!(result.get("evaluation").is_none());
+}
