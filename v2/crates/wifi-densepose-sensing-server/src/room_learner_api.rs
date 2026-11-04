@@ -325,6 +325,8 @@ pub(super) async fn cancel_training(
 pub(super) struct EvaluationRequest {
     expected: MutationGuard,
     role: DataRole,
+    #[serde(default)]
+    record_comparison_evidence: bool,
 }
 pub(super) async fn evaluate(
     State(state): State<SharedState>,
@@ -334,7 +336,7 @@ pub(super) async fn evaluate(
         Ok(r) => r,
         Err(e) => return e,
     };
-    match rt.evaluate(&request.expected, request.role) {
+    match rt.evaluate_with_comparison(&request.expected, request.role, request.record_comparison_evidence) {
         Ok(report) => Json(serde_json::json!({"success":true,"evaluation":report})),
         Err(e) => failure("learner_evaluation_rejected", e),
     }

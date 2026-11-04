@@ -297,6 +297,7 @@ pub use catalog::{CandidateCatalog,SavedCandidate};
 #[path="evaluation_store.rs"]
 mod evaluation_store;
 pub use evaluation_store::EvaluationReceipt;
+pub use evaluation_store::ComparisonLedgerSummary;
 
 #[path="selection_store.rs"]
 mod selection_store;

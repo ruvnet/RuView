@@ -1,7 +1,7 @@
 //! Hashed metadata only. Input provenance/declared trials do not grant adoption.
 use super::super::{digest, encode, hex_digest};
 use crate::room_learner::{
-    model::RoomModel,
+    model::{RoomModel, RoomPrediction},
     observation::{CaptureCohort, CaptureProvenance, ClockKind, DataRole},
     training::EvaluationReport,
 };
@@ -74,6 +74,31 @@ impl EvaluationReceipt {
         at: u64,
         train_checked: bool,
     ) -> Result<Self, String> {
+        Self::from_report(model, rows, role, at, train_checked, model.evaluate(rows)?)
+    }
+    pub(super) fn new_recorded(
+        model: &RoomModel,
+        rows: &[CaptureCohort],
+        role: DataRole,
+        at: u64,
+        train_checked: bool,
+    ) -> Result<(Self, Vec<RoomPrediction>), String> {
+        let (report, predictions) = EvaluationReport::compute_recorded(model, rows)?;
+        Ok((
+            Self::from_report(model, rows, role, at, train_checked, report)?,
+            predictions,
+        ))
+    }
+    // Only the actual evaluator above may supply this report. No caller/API
+    // report or fabricated per-source inference enters a durable receipt.
+    fn from_report(
+        model: &RoomModel,
+        rows: &[CaptureCohort],
+        role: DataRole,
+        at: u64,
+        train_checked: bool,
+        report: EvaluationReport,
+    ) -> Result<Self, String> {
         if rows.is_empty()
             || rows.iter().any(|r| {
                 r.role != role
@@ -114,7 +139,7 @@ impl EvaluationReceipt {
             measurement_clock_available: available,
             train_lineage_checked: train_checked,
             training_data_sha256: model.training_manifest().training_data_sha256.clone(),
-            report: model.evaluate(rows)?,
+            report,
             independence_verified: false,
             physically_validated: false,
             adoption_authorized: false,

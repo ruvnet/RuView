@@ -179,3 +179,85 @@ pub(super) fn assert_no_raw_observation_arrays(value: &Value) {
         _ => {}
     }
 }
+
+#[tokio::test]
+async fn comparison_optin_records_bound_outcomes_without_changing_default_receipt() {
+    let dir = tempfile::tempdir().unwrap();
+    let rt = fitted(dir.path()).await;
+    phase(&rt, DataRole::HeldOut, RoomLabel::Empty, 4);
+    phase(&rt, DataRole::HeldOut, RoomLabel::OccupiedStatic, 5);
+    let expected = rt.mutation_guard().unwrap();
+    let ordinary = rt.evaluate(&expected, DataRole::HeldOut).unwrap();
+    assert!(ordinary.get("comparison_ledger").is_none());
+    assert!(!evaluation_directory(dir.path(), &ordinary)
+        .join("comparison-ledgers-v1")
+        .exists());
+    let recorded = rt
+        .evaluate_with_comparison(&rt.mutation_guard().unwrap(), DataRole::HeldOut, true)
+        .unwrap();
+    assert_eq!(recorded["receipt"], ordinary["receipt"]);
+    assert_eq!(recorded["receipt_sha256"], ordinary["receipt_sha256"]);
+    assert_eq!(recorded["comparison_recording_requested"], true);
+    assert_eq!(recorded["comparison_ledger"]["cohort_count"], 8);
+    assert_eq!(recorded["comparison_ledger"]["physically_validated"], false);
+    assert_eq!(recorded["comparison_ledger"]["adoption_authorized"], false);
+    assert!(recorded.get("comparison_warning").is_none());
+    // Later sealed phases append the replay fence. Historical sidecar custody
+    // resolves its original fence in the verified chain; it never rewinds head.
+    phase(&rt, DataRole::HeldOut, RoomLabel::OccupiedMoving, 6);
+    let loaded_model = rt.inner.lock().unwrap().model.as_ref().unwrap().clone();
+    let ledger = rt
+        .store
+        .load_comparison_ledger_summary(
+            &loaded_model,
+            DataRole::HeldOut,
+            ordinary["receipt_sha256"].as_str().unwrap(),
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(ledger.cohort_count, 8);
+    let cold = runtime(dir.path());
+    cold.configure(
+        &cold.mutation_guard().unwrap(),
+        context(),
+        "comparison-cold".into(),
+        false,
+    )
+    .unwrap();
+    let restored = cold.status(START);
+    assert_eq!(
+        restored["last_evaluation"]["receipt_sha256"],
+        ordinary["receipt_sha256"]
+    );
+    assert!(restored["last_evaluation"]
+        .get("comparison_ledger")
+        .is_none());
+    assert_eq!(restored["last_evaluation"]["train_lineage_checked"], false);
+}
+#[tokio::test]
+async fn optional_comparison_failure_keeps_successful_rf_receipt_and_candidate_visible() {
+    let dir = tempfile::tempdir().unwrap();
+    let rt = fitted(dir.path()).await;
+    phase(&rt, DataRole::HeldOut, RoomLabel::Empty, 4);
+    let expected = rt.mutation_guard().unwrap();
+    let ordinary = rt.evaluate(&expected, DataRole::HeldOut).unwrap();
+    crate::companion::atomic_private_write(
+        &evaluation_directory(dir.path(), &ordinary).join("comparison-ledgers-v1"),
+        b"blocked",
+    )
+    .unwrap();
+    let result = rt
+        .evaluate_with_comparison(&rt.mutation_guard().unwrap(), DataRole::HeldOut, true)
+        .unwrap();
+    assert_eq!(result["receipt"], ordinary["receipt"]);
+    assert_eq!(result["durable"], true);
+    assert!(result["comparison_ledger"].is_null());
+    assert!(result["comparison_warning"].is_string());
+    let status = rt.status(START);
+    assert_eq!(status["candidate_loaded"], true);
+    assert_eq!(
+        status["last_evaluation"]["receipt_sha256"],
+        ordinary["receipt_sha256"]
+    );
+    assert!(status["evaluation_warning"].is_null());
+}

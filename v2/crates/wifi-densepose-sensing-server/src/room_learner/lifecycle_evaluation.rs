@@ -47,6 +47,16 @@ impl RoomLearningRuntime {
     /// Only a frozen private candidate and a validated role split can produce a
     /// durable diagnostic. This never adopts the candidate or changes control.
     pub fn evaluate(&self, expected: &MutationGuard, role: DataRole) -> Result<Value, String> {
+        self.evaluate_with_comparison(expected, role, false)
+    }
+    /// Derived prediction recording is a separate explicit opt-in. A failed
+    /// sidecar never revokes a successfully committed RF evaluation receipt.
+    pub fn evaluate_with_comparison(
+        &self,
+        expected: &MutationGuard,
+        role: DataRole,
+        record_comparison_evidence: bool,
+    ) -> Result<Value, String> {
         if !matches!(role, DataRole::Validation | DataRole::HeldOut) {
             return Err("evaluate only validation or held-out data".into());
         }
@@ -60,10 +70,25 @@ impl RoomLearningRuntime {
             return Err("finish the current phase before evaluation".into());
         }
         let dataset = capture.validated_dataset()?;
-        let result = self
-            .store
-            .evaluate_candidate(&model, &dataset, role)
-            .and_then(|receipt| presentation(&receipt, false, !dataset.train().is_empty()));
+        let result = if record_comparison_evidence {
+            self.store.evaluate_candidate_with_comparison(&model, &dataset, role)
+                .and_then(|(receipt, comparison)| {
+                    let mut value = presentation(&receipt, false, !dataset.train().is_empty())?;
+                    value["comparison_recording_requested"] = json!(true);
+                    match comparison {
+                        Ok(summary) => { value["comparison_ledger"] = json!(summary); }
+                        Err(_) => {
+                            value["comparison_ledger"] = Value::Null;
+                            value["comparison_warning"] = json!("Optional comparison evidence was not recorded; the RF evaluation receipt remains valid. Existing comparison files were retained.");
+                        }
+                    }
+                    Ok(value)
+                })
+        } else {
+            self.store
+                .evaluate_candidate(&model, &dataset, role)
+                .and_then(|receipt| presentation(&receipt, false, !dataset.train().is_empty()))
+        };
         match result {
             Ok(value) => {
                 state.last_evaluation = Some(value.clone());

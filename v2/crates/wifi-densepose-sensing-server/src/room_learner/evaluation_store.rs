@@ -3,7 +3,11 @@ use super::*;
 use crate::room_learner::observation::{DataRole, ValidatedDataset};
 #[path = "evaluation_receipt.rs"]
 mod receipt;
+use crate::room_learner::model::RoomPrediction;
 use receipt::data_sha256;
+#[path = "comparison_ledger.rs"]
+mod comparison_ledger;
+pub use comparison_ledger::ComparisonLedgerSummary;
 #[path = "evaluation_index.rs"]
 mod index;
 pub use receipt::EvaluationReceipt;
@@ -178,6 +182,47 @@ impl ArtifactStore {
         role: DataRole,
         at: u64,
     ) -> Result<EvaluationReceipt, String> {
+        self.evaluate_candidate_recorded_at(model, dataset, role, at, false)
+            .map(|(receipt, _)| receipt)
+    }
+    /// The ordinary RF receipt remains authoritative even when optional
+    /// comparison recording is unavailable. No reference or learning occurs.
+    pub fn evaluate_candidate_with_comparison(
+        &self,
+        model: &RoomModel,
+        dataset: &ValidatedDataset,
+        role: DataRole,
+    ) -> Result<(EvaluationReceipt, Result<ComparisonLedgerSummary, String>), String> {
+        let at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| "evaluation clock unavailable")?
+            .as_millis()
+            .try_into()
+            .map_err(|_| "evaluation clock outside bounds")?;
+        let (receipt, predictions) =
+            self.evaluate_candidate_recorded_at(model, dataset, role, at, true)?;
+        let comparison = predictions
+            .ok_or_else(|| "comparison outcomes unavailable".into())
+            .and_then(|result| result)
+            .and_then(|predictions| {
+                self.save_comparison_ledger(model, dataset, &receipt, predictions)
+            });
+        Ok((receipt, comparison))
+    }
+    fn evaluate_candidate_recorded_at(
+        &self,
+        model: &RoomModel,
+        dataset: &ValidatedDataset,
+        role: DataRole,
+        at: u64,
+        record: bool,
+    ) -> Result<
+        (
+            EvaluationReceipt,
+            Option<Result<Vec<RoomPrediction>, String>>,
+        ),
+        String,
+    > {
         role_directory(role)?;
         if dataset.context() != model.context() {
             return Err("evaluation dataset/candidate context mismatch".into());
@@ -213,9 +258,30 @@ impl ArtifactStore {
             {
                 self.publish_evaluation_pointer(&directory, &original)?;
             }
-            return Ok(original);
+            // A cached aggregate alone cannot supply a ledger. Recompute only
+            // from the exact retained rows and frozen model, and refuse a
+            // disagreement without changing the historical receipt or time.
+            let predictions = record.then(|| {
+                crate::room_learner::training::EvaluationReport::compute_recorded(model, rows)
+                    .and_then(|(report, predictions)| {
+                        if report != original.report {
+                            return Err("comparison differs from original evaluation".into());
+                        }
+                        Ok(predictions)
+                    })
+            });
+            return Ok((original, predictions));
         }
-        let receipt = EvaluationReceipt::new(model, rows, role, at, train_checked)?;
+        let (receipt, predictions) = if record {
+            let (receipt, predictions) =
+                EvaluationReceipt::new_recorded(model, rows, role, at, train_checked)?;
+            (receipt, Some(Ok(predictions)))
+        } else {
+            (
+                EvaluationReceipt::new(model, rows, role, at, train_checked)?,
+                None,
+            )
+        };
         let key = receipt.sha256()?;
         let envelope = EvaluationEnvelope {
             schema: SCHEMA.into(),
@@ -227,7 +293,7 @@ impl ArtifactStore {
         self.read_evaluation(&directory, &key, model, role)?;
         self.save_evidence_index(&directory, &receipt, model, role)?;
         self.publish_evaluation_pointer(&directory, &receipt)?;
-        Ok(receipt)
+        Ok((receipt, predictions))
     }
     fn publish_evaluation_pointer(
         &self,
@@ -265,11 +331,22 @@ impl ArtifactStore {
 mod tests;
 
 impl ArtifactStore {
-    pub(crate) fn load_exact_evaluation(&self, model: &RoomModel, role: DataRole, key: &str) -> Result<EvaluationReceipt,String> {
-        let directory=self.evaluation_directory(model,role,false)?.ok_or("evaluation unavailable")?;
-        let receipt=self.read_evaluation(&directory,key,model,role)?;
-        let original=self.read_evidence_index(&directory,&receipt.dataset_sha256,model,role)?.ok_or("original evaluation index missing")?;
-        if original.sha256()?!=key {return Err("evaluation differs from original dataset index".into())}
+    pub(crate) fn load_exact_evaluation(
+        &self,
+        model: &RoomModel,
+        role: DataRole,
+        key: &str,
+    ) -> Result<EvaluationReceipt, String> {
+        let directory = self
+            .evaluation_directory(model, role, false)?
+            .ok_or("evaluation unavailable")?;
+        let receipt = self.read_evaluation(&directory, key, model, role)?;
+        let original = self
+            .read_evidence_index(&directory, &receipt.dataset_sha256, model, role)?
+            .ok_or("original evaluation index missing")?;
+        if original.sha256()? != key {
+            return Err("evaluation differs from original dataset index".into());
+        }
         Ok(receipt)
     }
 }

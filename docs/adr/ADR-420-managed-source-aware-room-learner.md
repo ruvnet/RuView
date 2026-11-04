@@ -2,6 +2,7 @@
 
 **Status:** Proposed
 **Date:** 2026-11-01
+**Updated:** 2026-11-04 — opt-in private comparison prediction ledger source increment; reference admission and physical benefit remain unqualified.
 **Deciders:** RuView maintainers and app delivery owners; privacy and reference-sensor owners for teacher admission
 
 ## Context
@@ -264,6 +265,40 @@ teaching; RF-only inference must remain usable under its own acceptance gates.
 Measured spatial benefit belongs to
 [mobile #105](https://github.com/cognitum-one/ruview-mobile/issues/105), including
 current anchors/transforms and aligned, whole-sequence comparisons.
+
+#### November 4 source increment: preserve the comparison seam first
+
+The owner-only evaluation request may explicitly set
+`record_comparison_evidence: true`. It defaults to false; ordinary evaluation
+does not allocate, hash or persist per-cohort comparison metadata and retains
+the existing receipt schema, bytes, role guards and qualification policy.
+
+The opt-in path records the **joint room prediction**, including abstentions,
+from the same inference outcomes used by the aggregate evaluation report.
+It does not invent per-source predictions. A private immutable sidecar binds
+the original evaluation, dataset, model, context and Train hashes; genuine
+managed proof/fence hashes are included only when the private store resolves
+them. Cohort/trial/session/frame identities are commitments, source windows
+retain exact nanoseconds as decimal strings, and clock uncertainty/unknown
+measurement-clock claims remain explicit. No RF samples, raw frame identities,
+camera/depth data or teacher stream is retained in this sidecar.
+
+The sidecar is bounded to 128 cohorts, 16 sources and 1 MiB, stored with the
+existing account-owned artifact tree's private permissions. It remains there
+until its owner explicitly erases the corresponding local evidence. This is
+separate from temporary capture recovery and never extends recovery expiry.
+Old aggregate receipts remain valid without a sidecar. An exact retained
+dataset and frozen model may reproduce a missing sidecar only when outcomes
+match the original report, without changing its timestamp or historical Train
+flags. Aggregates alone and expired/missing samples cannot supply it.
+
+Optional sidecar failure reports comparison unavailable while preserving a
+successfully committed RF receipt and candidate. It grants no adoption,
+physical-validation or measurement-grade authority. It performs no alignment,
+lag fitting, reference ingestion, supervision, Vitals estimation or sensor
+activation; these remain the separate registry/clock/coverage and independent
+trial work described above. This increment and the ADR remain **Proposed**,
+not a claim of completed multimodal learning or measured spatial benefit.
 
 ### Preserve the control and require explicit adoption
 
