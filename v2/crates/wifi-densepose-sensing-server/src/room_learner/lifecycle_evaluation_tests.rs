@@ -261,3 +261,61 @@ async fn optional_comparison_failure_keeps_successful_rf_receipt_and_candidate_v
     );
     assert!(status["evaluation_warning"].is_null());
 }
+
+#[tokio::test]
+async fn reference_actual_decoder_server_phase_same_rf_cohorts_stay_unknown_and_keep_receipt(){
+    use crate::companion_references::{ReferenceMessage,tests as phone};
+    let dir=tempfile::tempdir().unwrap();let rt=runtime(dir.path());let mut ctx=context();ctx.room_digest="b".repeat(64);
+    rt.configure(&rt.mutation_guard().unwrap(),ctx.clone(),"reference-synthetic-run".into(),true).unwrap();train_phases(&rt);
+    rt.start_training(&rt.mutation_guard().unwrap(),FitConfig{epochs:2,..FitConfig::default()}).unwrap();assert_eq!(finished(&rt).await["state"],"ready");
+    let (_phone_dir,refs,_revoke,grant)=phone::setup();let at=rt.receiver_now_ns();refs.permit("phone",true,at/1_000_000_000).unwrap();
+    assert!(rt.with_reference_scope(&ctx.room_digest,&[1,2],at,|_|Ok(())).is_err());
+    rt.begin_phase(&rt.mutation_guard().unwrap(),PhaseRequest{trial_id:"reference-check".into(),session_id:"reference-check-session".into(),role:DataRole::HeldOut,label:RoomLabel::Empty,duration_ms:12_000,lead_in_ms:0,conditions_confirmed:true},at).unwrap();
+    let guard=rt.mutation_guard().unwrap();
+    let begin_bytes=serde_json::to_vec(&json!({"type":"begin","schema":"ruview.companion.calibration-reference.v1","lineage":{"capture_session_id":"synthetic-capture","coordinate_frame_id":"synthetic-frame","clock_model_id":"arkit-monotonic+session-wall-offset-v1","room_binding_digest":ctx.room_digest,"room_revision":1}})).unwrap();
+    let begin=ReferenceMessage::decode(&begin_bytes,at/1_000_000).unwrap();
+    let ready=rt.with_reference_scope(&ctx.room_digest,&[1,2],at,|scope|refs.admit(&grant,scope,begin,at)).unwrap();
+    assert_eq!(rt.mutation_guard().unwrap(),guard,"reference ingress consumed the RF mutation guard");
+    assert!(rt.with_reference_scope("different-room",&[1,2],at,|_|Ok(())).is_err());
+    assert!(rt.with_reference_scope(&ctx.room_digest,&[1,9],at,|_|Ok(())).is_err());
+    for quarter in 0..4u64 {
+        for sample in 0..8u64 {for source in 1..=2u8 {
+            let t=at+quarter*3_000_000_000+1_000_000+sample*10_000_000+u64::from(source);
+            rt.ingest(RawSourceFrame{source_id:source,grid_id:"ht64-canonical8",frequency_hz:2_437_000_000,bandwidth_hz:20_000_000,sequence:1000+quarter as u32*8+sample as u32,amplitudes:&[2.2;8]},t).unwrap();
+        }}
+        let t=at+quarter*3_000_000_000+35_000_000;
+        let obs=phone::observation(&ready.reference_session_id,quarter+1,t);
+        rt.with_reference_scope(&ctx.room_digest,&[1,2],t,|scope|refs.admit(&grant,scope,obs,t)).unwrap();
+    }
+    let snapshot=refs.snapshot(at/1_000_000_000).unwrap();assert_eq!(snapshot.rows.len(),4);
+    rt.finish_phase(&rt.mutation_guard().unwrap(),at+12_000_000_000,true).unwrap();
+    assert!(rt.with_reference_scope(&ctx.room_digest,&[1,2],at+12_000_000_001,|_|Ok(())).is_err());
+    let plain=rt.evaluate(&rt.mutation_guard().unwrap(),DataRole::HeldOut).unwrap();
+    let compared=rt.evaluate_with_references(&rt.mutation_guard().unwrap(),DataRole::HeldOut,&snapshot).unwrap();
+    assert_eq!(plain["receipt"],compared["receipt"]);assert_eq!(plain["receipt_sha256"],compared["receipt_sha256"]);
+    assert_eq!(compared["reference_comparison"]["cohort_count"],4);assert_eq!(compared["reference_comparison"]["unknown_cohorts"],4);
+    assert_eq!(compared["reference_comparison"]["associated_reference_rows"],4);assert_eq!(compared["reference_comparison"]["physically_validated"],false);
+    let parent=evaluation_directory(dir.path(),&compared).join("reference-comparisons-v1");let path=parent.join(format!("{}.json",compared["reference_comparison"]["sidecar_sha256"].as_str().unwrap()));
+    let bytes=std::fs::read(path).unwrap();let text=String::from_utf8(bytes).unwrap();
+    for raw in ["visible_body_count","source_time","received_ns","camera","samples","views"]{assert!(!text.contains(raw),"unexpected source payload {raw}");}
+    // Optional storage failure cannot change the already-committed ordinary RF receipt.
+    std::fs::rename(&parent,parent.with_extension("retained")).unwrap();
+    crate::companion::atomic_private_write(&parent,b"synthetic sidecar obstacle").unwrap();
+    let warning=rt.evaluate_with_references(&rt.mutation_guard().unwrap(),DataRole::HeldOut,&snapshot).unwrap();
+    assert_eq!(warning["receipt_sha256"],plain["receipt_sha256"]);assert!(warning["reference_comparison"].is_null());assert!(warning["comparison_warning"].is_string());
+    rt.configure(&rt.mutation_guard().unwrap(),ctx,"replacement-run-same-binding".into(),false).unwrap();
+    assert!(rt.evaluate_with_references(&rt.mutation_guard().unwrap(),DataRole::HeldOut,&snapshot).is_err(),"same binding cannot revive an earlier run's references");
+    refs.revoke("phone").unwrap();assert!(rt.evaluate_with_references(&rt.mutation_guard().unwrap(),DataRole::HeldOut,&snapshot).is_err());
+    assert_eq!(rt.status(at)["candidate_loaded"],true);
+}
+
+#[tokio::test]
+async fn reference_scope_keeps_lead_in_and_overdue_phase_unlabelled_without_advancing_rf_guard(){
+    let dir=tempfile::tempdir().unwrap();let rt=fitted(dir.path()).await;let at=rt.receiver_now_ns();
+    rt.begin_phase(&rt.mutation_guard().unwrap(),PhaseRequest{trial_id:"reference-lead-in".into(),session_id:"reference-lead-in-session".into(),role:DataRole::HeldOut,label:RoomLabel::OccupiedStatic,duration_ms:12_000,lead_in_ms:5_000,conditions_confirmed:true},at).unwrap();
+    let before=rt.mutation_guard().unwrap();
+    assert!(rt.with_reference_scope(&context().room_digest,&[1,2],at,|_|Ok(())).is_err());
+    assert!(rt.with_reference_scope(&context().room_digest,&[1,2],at+5_000_000_000,|_|Ok(())).is_ok());
+    assert!(rt.with_reference_scope(&context().room_digest,&[1,2],at+17_000_000_000,|_|Ok(())).is_err());
+    assert_eq!(rt.mutation_guard().unwrap(),before);
+}

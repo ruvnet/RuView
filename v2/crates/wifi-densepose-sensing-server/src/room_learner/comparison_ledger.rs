@@ -108,7 +108,7 @@ fn decimal(value: &str) -> Result<u64, String> {
 }
 // Same bounded, no-follow pattern as encrypted recovery, with its own explicit
 // budget. The global 64KiB private_read limit and all its callers stay unchanged.
-fn read(path: &Path) -> Result<Vec<u8>, String> {
+pub(super) fn read(path: &Path) -> Result<Vec<u8>, String> {
     fn metadata(meta: &fs::Metadata) -> Result<(), String> {
         if !meta.is_file() || meta.file_type().is_symlink() || meta.len() > MAX_BYTES as u64 {
             return Err("unsafe comparison file".into());
@@ -146,7 +146,7 @@ fn read(path: &Path) -> Result<Vec<u8>, String> {
     }
     Ok(output)
 }
-fn install(path: &Path, content: &[u8]) -> Result<(), String> {
+pub(super) fn install(path: &Path, content: &[u8]) -> Result<(), String> {
     if content.len() > MAX_BYTES {
         return Err("comparison metadata budget exceeded".into());
     }

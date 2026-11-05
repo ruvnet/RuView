@@ -242,6 +242,11 @@ impl SharedRoomStore {
             current: Mutex::new(current),
         }))
     }
+    /// Stable publication for comparison admission; callback never republishes.
+    pub fn with_reference_publication<T>(&self, operation: impl FnOnce(&Envelope) -> T) -> Result<T, StatusCode> {
+        let room=self.current.lock().map_err(|_|StatusCode::SERVICE_UNAVAILABLE)?;
+        Ok(operation(&room))
+    }
     pub fn snapshot(&self) -> Option<Envelope> { self.current.lock().ok().map(|v| v.clone()) }
     pub fn matches_binding(&self, binding: &str, node_ids: &[u8]) -> bool {
         let Ok(e) = self.current.lock() else {

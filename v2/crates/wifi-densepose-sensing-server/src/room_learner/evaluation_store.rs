@@ -8,6 +8,9 @@ use receipt::data_sha256;
 #[path = "comparison_ledger.rs"]
 mod comparison_ledger;
 pub use comparison_ledger::ComparisonLedgerSummary;
+#[path="reference_comparison.rs"]
+mod reference_comparison;
+pub use reference_comparison::ReferenceComparisonSummary;
 #[path = "evaluation_index.rs"]
 mod index;
 pub use receipt::EvaluationReceipt;
@@ -208,6 +211,22 @@ impl ArtifactStore {
                 self.save_comparison_ledger(model, dataset, &receipt, predictions)
             });
         Ok((receipt, comparison))
+    }
+    /// Separate reference recording opt-in; the exact single prediction pass is
+    /// shared with the ordinary RF receipt and 2453 ledger.
+    pub fn evaluate_candidate_with_references(
+        &self, model:&RoomModel, dataset:&ValidatedDataset, role:DataRole,
+        references:&crate::companion_references::ReferenceSnapshot,
+    )->Result<(EvaluationReceipt,Result<(ComparisonLedgerSummary,ReferenceComparisonSummary),String>),String>{
+        let at=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_|"evaluation clock unavailable")?.as_millis().try_into().map_err(|_|"evaluation clock outside bounds")?;
+        let (receipt,predictions)=self.evaluate_candidate_recorded_at(model,dataset,role,at,true)?;
+        let optional=predictions.ok_or_else(||"comparison outcomes unavailable".to_string()).and_then(|p|p).and_then(|predictions|{
+            let ledger=self.save_comparison_ledger(model,dataset,&receipt,predictions.clone())?;
+            let reference=self.save_reference_comparison(model,dataset,&receipt,&ledger,&predictions,references)?;
+            Ok((ledger,reference))
+        });
+        Ok((receipt,optional))
     }
     fn evaluate_candidate_recorded_at(
         &self,

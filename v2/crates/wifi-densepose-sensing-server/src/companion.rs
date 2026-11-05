@@ -158,6 +158,12 @@ pub struct Grant {
     pub revoked: watch::Receiver<bool>,
 }
 impl Companion {
+    /// Internal comparison admission uses the existing managed account/install,
+    /// never an owner identity supplied by a paired reference message.
+    pub(crate) fn reference_owner_matches(&self, owner:&str, installation:&str)->bool {
+        self.owner_account_scope.as_deref()==Some(owner) && self.installation_id==installation
+    }
+
     pub fn load_for_account(path: &Path, installation_id: String, cert_sha256: String, origin: String, owner_account_scope: Option<String>) -> io::Result<Shared> {
         if owner_account_scope.as_ref().is_some_and(|key| key.len() != 64 || !key.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))) {
             return Err(io::Error::other("invalid owner account namespace"));
