@@ -11,6 +11,7 @@
 
 mod adaptive_classifier;
 mod companion_integration;
+mod companion_reference_api;
 mod companion_room;
 mod companion_spatial;
 pub mod cli;
@@ -325,6 +326,10 @@ struct Args {
     /// Enable the account-owned managed capture/train/candidate room learner.
     #[arg(long)]
     room_learner: bool,
+
+    /// Experimental derived-reference comparison ingress, off by default; no teacher authority.
+    #[arg(long)]
+    calibration_reference_comparison: bool,
 
     // ---------------------------------------------------------------
     // ADR-102: Edge Module Registry — surface the canonical Cognitum
@@ -2217,6 +2222,7 @@ struct AppStateInner {
     source_bank_shadow_enabled: bool,
     source_bank_shadow: Option<source_bank_shadow::ShadowCapture>,
     room_learning: Option<Arc<wifi_densepose_sensing_server::room_learner::lifecycle::RoomLearningRuntime>>,
+    calibration_references: Option<Arc<wifi_densepose_sensing_server::companion_references::ReferenceStore>>,
     room_learning_sources: HashMap<room_learner_api::NativeSourceKey, room_learner_api::LiveSource>,
     current_room_store: Option<Arc<companion_room::SharedRoomStore>>,
     /// Stable installation identity used only to bind local persisted state.
@@ -3157,6 +3163,7 @@ impl AppStateInner {
             source_bank_shadow_enabled: false,
             source_bank_shadow: None,
             room_learning: None,
+            calibration_references: None,
             room_learning_sources: HashMap::new(),
             current_room_store: None,
             installation_id: None,
@@ -15991,6 +15998,7 @@ async fn main() {
         source_bank_shadow_enabled: args.source_bank_shadow,
         source_bank_shadow: None,
         room_learning,
+        calibration_references: None,
         room_learning_sources: HashMap::new(),
         current_room_store: None,
         installation_id: args.installation_id.clone(),

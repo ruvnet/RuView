@@ -57,6 +57,18 @@ impl RoomLearningRuntime {
         role: DataRole,
         record_comparison_evidence: bool,
     ) -> Result<Value, String> {
+        self.evaluate_reference_optional(expected, role, record_comparison_evidence, None)
+    }
+    pub fn evaluate_with_references(
+        &self,expected:&MutationGuard,role:DataRole,
+        references:&crate::companion_references::ReferenceSnapshot,
+    )->Result<Value,String>{
+        self.evaluate_reference_optional(expected,role,true,Some(references))
+    }
+    fn evaluate_reference_optional(
+        &self, expected:&MutationGuard,role:DataRole,record_comparison_evidence:bool,
+        references:Option<&crate::companion_references::ReferenceSnapshot>,
+    )->Result<Value,String>{
         if !matches!(role, DataRole::Validation | DataRole::HeldOut) {
             return Err("evaluate only validation or held-out data".into());
         }
@@ -70,7 +82,21 @@ impl RoomLearningRuntime {
             return Err("finish the current phase before evaluation".into());
         }
         let dataset = capture.validated_dataset()?;
-        let result = if record_comparison_evidence {
+        let result = if let Some(references)=references {
+            if references.rows.iter().any(|r|r.scope.runtime_epoch!=self.runtime_epoch || r.scope.generation!=state.generation || r.scope.context_digest!=capture.context().digest() || r.scope.model_sha256!=state.receipt.as_ref().map(|r|r.model_sha256.as_str()).unwrap_or("")) {
+                return Err("reference_runtime_context_changed".into());
+            }
+            references.ensure_live()?;
+            self.store.evaluate_candidate_with_references(&model,&dataset,role,references).and_then(|(receipt,optional)|{
+                let mut value=presentation(&receipt,false,!dataset.train().is_empty())?;
+                value["reference_recording_requested"]=json!(true);
+                match optional {
+                    Ok((ledger,reference))=>{value["comparison_ledger"]=json!(ledger);value["reference_comparison"]=json!(reference);}
+                    Err(_)=>{value["reference_comparison"]=Value::Null;value["comparison_warning"]=json!("Optional reference comparison was not recorded; the RF evaluation receipt remains valid.");}
+                }
+                Ok(value)
+            })
+        } else if record_comparison_evidence {
             self.store.evaluate_candidate_with_comparison(&model, &dataset, role)
                 .and_then(|(receipt, comparison)| {
                     let mut value = presentation(&receipt, false, !dataset.train().is_empty())?;

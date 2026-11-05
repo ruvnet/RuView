@@ -28,6 +28,7 @@ fn failure(code: &str, error: impl ToString) -> Json<serde_json::Value> {
 async fn runtime(state: &SharedState) -> Result<Arc<RoomLearningRuntime>, Json<serde_json::Value>> {
     let s = state.read().await;
     if s.privacy_mode {
+        if let Some(references) = &s.calibration_references { references.withdraw(); }
         return Err(failure(
             "learner_privacy_mode",
             "Room learning is unavailable in privacy-redacted mode.",
@@ -327,6 +328,8 @@ pub(super) struct EvaluationRequest {
     role: DataRole,
     #[serde(default)]
     record_comparison_evidence: bool,
+    #[serde(default)]
+    record_reference_comparison: bool,
 }
 pub(super) async fn evaluate(
     State(state): State<SharedState>,
@@ -336,7 +339,20 @@ pub(super) async fn evaluate(
         Ok(r) => r,
         Err(e) => return e,
     };
-    match rt.evaluate_with_comparison(&request.expected, request.role, request.record_comparison_evidence) {
+    let report=if request.record_reference_comparison {
+        if !request.record_comparison_evidence{return failure("reference_comparison_requires_ledger","Reference comparison requires explicit comparison recording.");}
+        let s=state.read().await;
+        if s.privacy_mode{return failure("learner_privacy_mode","References are unavailable in privacy mode.");}
+        if !s.room_learning.as_ref().is_some_and(|current|Arc::ptr_eq(current,&rt)){return failure("learner_state_changed","Learner runtime changed.");}
+        let Some(references)=&s.calibration_references else{return failure("reference_disabled","Reference comparison is disabled.");};
+        let snapshot=match references.snapshot(rt.receiver_now_ns()/1_000_000_000){Ok(v)=>v,Err(e)=>return failure("reference_not_consented",e)};
+        let Some(room)=&s.current_room_store else{return failure("reference_publication_missing","Publish the exact current room first.");};
+        match room.with_current_binding(|binding|{
+            if snapshot.rows_room_digest()!=binding{return Err("reference_publication_changed".into());}
+            rt.evaluate_with_references(&request.expected,request.role,&snapshot)
+        }) {Ok(result)=>result,Err(_)=>Err("reference_publication_unavailable".into())}
+    }else{rt.evaluate_with_comparison(&request.expected,request.role,request.record_comparison_evidence)};
+    match report {
         Ok(report) => Json(serde_json::json!({"success":true,"evaluation":report})),
         Err(e) => failure("learner_evaluation_rejected", e),
     }

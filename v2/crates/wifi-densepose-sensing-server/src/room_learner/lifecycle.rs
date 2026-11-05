@@ -504,3 +504,7 @@ mod managed_training_readiness;
 #[cfg(test)]
 #[path="managed_training_tests.rs"]
 mod managed_training_tests;
+
+#[path = "reference_admission.rs"]
+mod reference_admission;
+pub use reference_admission::ReferenceScope;

@@ -310,3 +310,5 @@ mod managed_training_store;
 
 #[path="managed_capture_fence_store.rs"]
 mod managed_capture_fence_store;
+
+pub use evaluation_store::ReferenceComparisonSummary;

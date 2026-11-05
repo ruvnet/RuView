@@ -42,6 +42,7 @@ pub struct Integration {
     room: Arc<companion_room::SharedRoomStore>,
     control: Control,
     sensors: companion_sensors::Shared,
+    references: Option<companion_reference_api::ReferenceApi>,
     spatial: Option<Arc<companion_spatial::SpatialStore>>,
     advertiser: Option<wifi_densepose_sensing_server::discovery::DiscoveryAdvertiser>,
 }
@@ -100,6 +101,13 @@ impl Integration {
             serial: Arc::new(tokio::sync::Mutex::new(())),
         };
         let sensors = companion_sensors::SensorStore::new(service.clone());
+        let references = if args.calibration_reference_comparison && args.room_learner {
+            let references=wifi_densepose_sensing_server::companion_references::ReferenceStore::new(service.clone());
+            references.spawn_expiry_sweeper();
+            state.write().await.calibration_references=Some(references.clone());
+            Some(companion_reference_api::ReferenceApi{state:state.clone(),room:room.clone(),references})
+        } else { None };
+
         let spatial = auth.owner_account_scope().map(|scope| companion_spatial::SpatialStore::load(&dir, scope, &identity.installation_id, service.clone(), room.clone())).transpose()?;
         Ok(Some(Self {
             service,
@@ -111,6 +119,7 @@ impl Integration {
             room,
             control,
             sensors,
+            references,
             spatial,
         }))
     }
@@ -120,6 +129,7 @@ impl Integration {
     pub fn owner_router(&self) -> Router {
         companion::owner_router(self.service.clone())
             .merge(companion_sensors::owner_router(self.sensors.clone()))
+            .merge(self.references.as_ref().map(|r|companion_reference_api::owner_router(r.clone())).unwrap_or_default())
             .merge(companion_room::owner_router(self.room.clone()))
             .merge(self.spatial.as_ref().map(|s| companion_spatial::owner_router(s.clone())).unwrap_or_default())
             .layer(axum::middleware::from_fn_with_state(
@@ -141,6 +151,7 @@ impl Integration {
     pub async fn start(self, app: Router) {
         let app = attach_peer_artifacts(
             app.merge(companion_sensors::companion_router(self.sensors.clone()))
+                .merge(self.references.as_ref().map(|r|companion_reference_api::peer_router(r.clone())).unwrap_or_default())
                 .merge(companion_room::read_router(self.room.clone())),
             self.spatial.as_ref().map(|s| companion_spatial::peer_router(s.clone())).unwrap_or_default(),
             self.control.clone(),
@@ -268,7 +279,7 @@ fn policy(method: &axum::http::Method, path: &str) -> Option<bool> {
             return Some(false);
         }
     }
-    if *method == Method::POST && path == "/companion/v1/spatial" { return Some(false); }
+    if *method == Method::POST && matches!(path, "/companion/v1/spatial" | "/companion/v1/calibration-references") { return Some(false); }
     if *method == Method::POST
         && matches!(
             path,
@@ -452,3 +463,7 @@ mod tests {
     }
 
 }
+
+#[cfg(test)]
+#[path = "companion_reference_auth_tests.rs"]
+mod reference_auth_tests;
