@@ -1,4 +1,4 @@
-//! Owner-only model-selection commands and bounded read projection.
+//! Owner-only learner controls, model selection and bounded read projection.
 use super::*;
 
 /// Selection mutations are restricted to the local owner, even if ordinary
@@ -7,6 +7,7 @@ pub(crate) fn owner_selection_routes(
     auth: wifi_densepose_sensing_server::bearer_auth::AuthState,
 ) -> Router<SharedState> {
     Router::new()
+        .route("/api/v1/room-learner/recovery/enable-current", post(enable_current_recovery))
         .route("/api/v1/room-learner/qualify", post(qualify))
         .route("/api/v1/room-learner/select", post(select_model))
         .route("/api/v1/room-learner/deselect", post(deselect_model))

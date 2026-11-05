@@ -8,6 +8,7 @@ async fn selection_mutations_are_local_owner_only_even_without_outer_bearer_gate
     )
     .with_state(state.clone());
     for path in [
+        "/api/v1/room-learner/recovery/enable-current",
         "/api/v1/room-learner/qualify",
         "/api/v1/room-learner/select",
         "/api/v1/room-learner/deselect",
