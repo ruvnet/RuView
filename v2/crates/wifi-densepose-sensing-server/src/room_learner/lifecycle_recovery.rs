@@ -20,6 +20,14 @@ pub(super) struct RecoveryState {
     volatile_after_expiry: bool,
 }
 impl RecoveryState {
+    pub(super) fn observe_clock(&mut self, now_ns: u64) -> u64 {
+        self.last_now_ns = self.last_now_ns.max(now_ns);
+        self.last_now_ns
+    }
+    pub(super) fn last_observed_ns(&self) -> u64 { self.last_now_ns }
+    pub(super) fn current_run_saved(descriptor: RecoveryDescriptor, summary: CaptureCheckpointSummary, now_ns: u64) -> Self {
+        Self { enabled:true, descriptor:Some(descriptor), summary:Some(summary), last_now_ns:now_ns, ..Default::default() }
+    }
     pub(super) fn derived_persisted(&self) -> Option<bool> {
         // Unreadable retained contents are unknown, never evidence of absence.
         // An error also invalidates any older cached summary for this claim.
@@ -36,18 +44,18 @@ impl RecoveryState {
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RuntimeCheckpoint {
-    schema: String,
-    capture: CaptureCheckpoint,
-    frozen_training: bool,
-    job_phase: JobPhase,
-    model_sha256: Option<String>,
+pub(super) struct RuntimeCheckpoint {
+    pub(super) schema: String,
+    pub(super) capture: CaptureCheckpoint,
+    pub(super) frozen_training: bool,
+    pub(super) job_phase: JobPhase,
+    pub(super) model_sha256: Option<String>,
 }
-const SCHEMA: &str = "ruview.room-learner.runtime-recovery.v1";
+pub(super) const SCHEMA: &str = "ruview.room-learner.runtime-recovery.v1";
 pub(super) fn model_sha(model: &RoomModel) -> Result<String, String> {
     Ok(format!("{:x}", Sha256::digest(model.export()?)))
 }
-fn checkpoint_payload(
+pub(super) fn checkpoint_payload(
     bytes: &[u8],
     d: &RecoveryDescriptor,
     owner: &str,
@@ -342,7 +350,8 @@ impl RoomLearningRuntime {
         json!({"supported":supported,"enabled":state.recovery.enabled,"state":status,"error":error,
             "saved":saved,"discard_id":state.recovery.descriptor.as_ref().map(|d| &d.id),
             "restored_disposition":state.recovery.disposition,"raw_iq_persisted":false,
-            "derived_samples_persisted":state.recovery.derived_persisted(),"automatic_resume":false})
+            "derived_samples_persisted":state.recovery.derived_persisted(),"automatic_resume":false,
+            "enable_current_run":self.recovery_enable_status(state, now_ns)})
     }
     pub fn saved_recovery_context(
         &self,
@@ -419,6 +428,7 @@ impl RoomLearningRuntime {
             .generation
             .checked_add(1)
             .ok_or("learner generation exhausted")?;
+        state.recovery_enable = None;
         state.capture = Some(restored.session);
         state.model = model.map(Arc::new);
         state.receipt = None;

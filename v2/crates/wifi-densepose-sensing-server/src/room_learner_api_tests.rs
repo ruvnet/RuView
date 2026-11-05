@@ -54,6 +54,7 @@ fn app(state: SharedState) -> Router {
         .route("/status", get(status))
         .route("/phase", post(begin_phase))
         .route("/finish", post(finish_phase))
+        .route("/enable-current", post(enable_current_recovery))
         .with_state(state)
 }
 async fn json_request(
@@ -199,6 +200,7 @@ fn every_new_mutation_requires_admin_and_default_cli_does_not_enable_capture() {
         "evaluate",
         "recovery/restore",
         "recovery/discard",
+        "recovery/enable-current",
     ] {
         assert_eq!(
             required_scope_for(&Method::POST, &format!("/api/v1/room-learner/{suffix}")),
@@ -541,3 +543,15 @@ mod selection_tests;
 
 #[path = "room_learner_api_selection_composer_tests.rs"]
 mod selection_composer_tests;
+
+#[tokio::test]
+async fn enable_current_recovery_requires_explicit_versioned_consent_and_does_not_configure() {
+    let (_dir,state)=fixture();
+    let rt=state.read().await.room_learning.clone().unwrap();
+    for body in [serde_json::json!({"schema":"wrong","run_id":"old","consent":true}),serde_json::json!({"schema":"ruview.room-learner.enable-current-recovery.v1","run_id":"old","consent":false})] {
+        let result=json_request(app(state.clone()),"/enable-current",Method::POST,body).await;
+        assert_eq!(result["success"],false);
+        assert_eq!(result["error_code"],"learner_recovery_consent_required");
+        assert!(rt.status(rt.receiver_now_ns())["context_digest"].is_null());
+    }
+}

@@ -417,6 +417,29 @@ pub(super) async fn restore_capture(
         Err(e) => failure("learner_recovery_restore_failed", e),
     }
 }
+/// Owner-only: paired read/calibration grants do not include this mutation.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct EnableCurrentRecoveryRequest {
+    schema: String,
+    expected: MutationGuard,
+    run_id: String,
+    consent: bool,
+}
+pub(super) async fn enable_current_recovery(
+    State(state): State<SharedState>,
+    Json(request): Json<EnableCurrentRecoveryRequest>,
+) -> Json<serde_json::Value> {
+    if request.schema != "ruview.room-learner.enable-current-recovery.v1" || !request.consent {
+        return failure("learner_recovery_consent_required", "Explicit current-run recovery consent is required.");
+    }
+    let rt = match runtime(&state).await { Ok(rt) => rt, Err(e) => return e };
+    match rt.enable_current_capture_recovery(&request.expected, &request.run_id, request.consent, now_ns(&rt)) {
+        Ok(()) => Json(serde_json::json!({"success":true,"status":rt.status(now_ns(&rt))})),
+        Err(e) => failure("learner_recovery_enable_failed", e),
+    }
+}
+
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct DiscardCaptureRequest {

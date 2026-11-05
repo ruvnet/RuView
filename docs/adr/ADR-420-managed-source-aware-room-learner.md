@@ -404,3 +404,27 @@ cold resume, all-condition qualification, explicit selection, corrupted or pendi
 proof/ledger files, unchanged retained-row lineage, role/counter/time regression,
 phase-ack ordering, and 2026-scale Rust-to-client wire fixtures. Physical
 qualification and delivered-artifact acceptance remain separate work.
+
+
+### Proposed November 5 extension: protect the current new RAM run in place
+
+An explicit local-owner-only `recovery/enable-current` command may checkpoint a
+new RAM capture without configure/reset, training, selection or phase relabelling.
+Its versioned request requires the current mutation guard, an opaque server-issued
+run ticket and explicit reduced-sample consent. The ticket exists only for a new
+training session configured in this process without recovery; restored captures
+and resumed models cannot mint it. The fixed deadline is **24 hours from that
+new run's creation**, not 24 hours from pressing Enable. Success consumes it;
+discard, retry, delayed requests and clock regression cannot renew that deadline.
+
+The first version requires no active phase or training job. It saves and verifies
+the exact existing snapshot through the existing encrypted atomic store before
+publishing enabled status. RAM capture, counters, roles, model and selection remain
+unchanged on failure. Persistence failures report unknown retained contents rather
+than claiming no samples were saved. Only a partial write under the same opaque
+ticket/context/original deadline can be retried. Any other retained slot, including
+an expired copy, requires a separate explicit discard decision; it is never silently
+replaced. Existing recovery descriptor/checkpoint versions and expiry semantics are
+unchanged. This is proposed source work, not protection of a currently running
+older helper: installing it would require stopping that helper, so live volatile
+cohorts must not be sacrificed to obtain this capability.

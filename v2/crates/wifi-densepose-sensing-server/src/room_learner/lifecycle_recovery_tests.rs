@@ -845,3 +845,6 @@ fn cold_inspection_of_expired_copy_fences_earlier_queued_loads_without_creating_
     assert!(status["recovery"]["saved"].is_null());assert!(status["capture"].is_null());assert!(!status["candidate_loaded"].as_bool().unwrap());
     assert_eq!(original_descriptor(temp.path()),descriptor);assert_eq!(std::fs::read(recovery_file(temp.path())).unwrap(),bytes);
 }
+
+#[path = "lifecycle_recovery_enable_tests.rs"]
+mod enable_tests;

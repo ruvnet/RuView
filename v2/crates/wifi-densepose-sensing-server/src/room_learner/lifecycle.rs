@@ -55,6 +55,7 @@ struct Inner {
     evaluation_warning: Option<String>,
     input_error: Option<String>,
     recovery: RecoveryState,
+    recovery_enable: Option<recovery_enable::CurrentNewRun>,
     selection: selection_control::SelectionState,
     qualification: Option<super::qualification::QualificationEnvelope>,
     qualification_error: Option<String>,
@@ -165,6 +166,7 @@ impl RoomLearningRuntime {
                 evaluation_warning: None,
                 input_error: None,
                 recovery: RecoveryState::default(),
+                recovery_enable: None,
                 selection: selection_control::SelectionState::default(),
                 qualification: None,
                 qualification_error: None,
@@ -263,6 +265,9 @@ impl RoomLearningRuntime {
             .generation
             .checked_add(1)
             .ok_or("learner generation exhausted")?;
+        state.recovery_enable = if new_training && !recovery_consent {
+            recovery_enable::CurrentNewRun::new(&session, now_ns)
+        } else { None };
         state.capture = Some(session);
         state.model = if new_training {
             None
@@ -507,3 +512,6 @@ mod managed_training_tests;
 #[path = "paired_progress.rs"]
 mod paired_progress;
 pub use paired_progress::{PairedCalibrationProgress, PublishedProgressRoom, PAIRED_PROGRESS_TTL_MS};
+
+#[path = "lifecycle_recovery_enable.rs"]
+mod recovery_enable;
