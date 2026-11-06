@@ -75,8 +75,11 @@ def send_cmd(s: socket.socket, cmd: str, timeout: float = CMD_TIMEOUT) -> str:
             if not chunk:
                 break
             response += chunk
-            # QEMU monitor prompt ends with "(qemu) "
-            if "(qemu)" in chunk:
+            # QEMU monitor prompt ends with "(qemu) ". Check the accumulated
+            # response, not just this chunk: a prompt split across two recv()
+            # calls was never detected and every command waited out the full
+            # timeout (#1267).
+            if "(qemu)" in response:
                 break
     except socket.timeout:
         pass  # Response may not have a clean prompt
