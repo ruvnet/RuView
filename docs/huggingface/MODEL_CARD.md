@@ -31,6 +31,13 @@ The "Using with the Rust sensing server" section below is not on the Hub page
 — it documents the `--convert-model` / `--model` RVF conversion path
 (issue #894, #1480) that HF users of this repo actually need and that the
 upstream card doesn't cover.
+
+The "The published presence-head.json is saturated" warning below is also
+not on the Hub page yet. It states the arithmetic of issue #1521 (the
+published head's |bias| 8.188348 exceeds the L2-normalized embedding bound
+‖w‖ 3.667707, so the head can never output "absent"), which the maintainer
+asked to be disclosed on the model card. Publishing it on the Hub is a
+maintainer action on a separate repository.
 -->
 
 # RuView — WiFi Sensing Models
@@ -43,7 +50,7 @@ WiFi signals bounce off people. When someone breathes, their chest moves the air
 
 | What it senses | How well | Without |
 |----------------|----------|---------|
-| **Is someone there?** | presence detection (v1 "100%" retracted — single-class) | No camera needed |
+| **Is someone there?** | presence detection (v1 "100%" retracted — single-class; **the published v2 head is saturated — see the warning below**) | No camera needed |
 | **Are they moving?** | Detects typing vs walking vs standing | No wearable needed |
 | **Breathing rate** | 6-30 BPM, contactless | No chest strap |
 | **Heart rate** | 40-120 BPM, through clothes | No smartwatch |
@@ -51,6 +58,36 @@ WiFi signals bounce off people. When someone breathes, their chest moves the air
 | **Through walls** | Works through drywall, wood, fabric | No line of sight |
 | **Sleep quality** | Deep/Light/REM/Awake classification | No mattress sensor |
 | **Fall detection** | <2 second alert | No pendant |
+
+## ⚠️ The published `presence-head.json` is saturated — absence detection does not work
+
+The presence head in the current release **cannot output "absent" for any input**, and this is
+arithmetic rather than a property of your data.
+
+The encoder L2-normalizes its output, so `‖e‖₂ = 1` for every input and `w·e ∈ [−‖w‖, +‖w‖]`.
+In the published head:
+
+| Quantity | Value |
+|----------|------:|
+| `‖w‖₂` | 3.667707 |
+| `bias` | 8.188348 |
+| minimum possible logit over **all** inputs | `8.188348 − 3.667707` = **+4.520641** |
+| minimum possible `p(present)` | **0.989235** |
+
+So `p(present) ≥ 0.989` for every conceivable 128-dim unit vector — the decision boundary is
+unreachable, and the head returns "present" even for an empty room. Reported in
+[issue #1521](https://github.com/ruvnet/RuView/issues/1521) and independently reproduced by the
+maintainer. It is a training-data problem, not an inference problem: the head was trained on a
+single continuous session with no empty-room negatives, so "always present" was the
+loss-minimizing solution.
+
+**Do not use this head for occupancy or safety decisions until it is replaced.** The encoder
+underneath it is unaffected — the 82.3% temporal-triplet figure below reproduces — but the final
+linear+sigmoid head has never learned the "absent" class.
+
+A release gate now refuses to publish a head in this state
+([ADR-298](https://github.com/ruvnet/RuView/blob/main/docs/adr/ADR-298-model-release-sanity-gates.md),
+`RuView#1521`); the replacement head, trained with empty-room negatives, is still outstanding.
 
 ## 🆕 v2 update — honest re-benchmark + properly-converged encoder (2026-05-31)
 
@@ -158,7 +195,7 @@ Validated on real hardware (Apple M4 Pro + 2x ESP32-S3):
 | `model-q4.bin` | 8 KB | **Recommended** — 4-bit quantized, 8x compression |
 | `model-q2.bin` | 4 KB | Ultra-compact for ESP32 edge inference |
 | `model-q8.bin` | 16 KB | High quality 8-bit |
-| `presence-head.json` | 2.6 KB | Presence detection head (v1 "100%" retracted — single-class; #882) |
+| `presence-head.json` | 2.6 KB | Presence detection head — **saturated, cannot output "absent"** (see the warning above; v1 "100%" retracted — single-class; #882) |
 | `node-1.json` | 21 KB | LoRA adapter for room/node 1 |
 | `node-2.json` | 21 KB | LoRA adapter for room/node 2 |
 | `config.json` | 586 B | Model configuration |

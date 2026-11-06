@@ -6,21 +6,17 @@ name: Model release gate (ADR-298)
 # surfaced under a task name it wasn't computed as) before it ships.
 #
 # Checker: v2/crates/wifi-densepose-train/src/model_gates.rs
+# Entry point: v2/crates/wifi-densepose-train/src/bin/model_release_gate.rs
+# Artifact reader: v2/crates/wifi-densepose-train/src/model_artifact.rs
 #
-# IMPORTANT — the honest scope of this job: it protects the *checker itself*
-# from regressing (the gate logic + its issue-1521 regression fixture are
-# exercised on every push/PR that touches this crate), and running it is
-# required before ADR-298 can be called "wired in" at all. It does NOT gate
-# an actual model publish — this repository does not automate uploading to
-# the HuggingFace model repo (`ruvnet/wifi-densepose-pretrained`); that
-# remains a manual, human-run step. Before publishing or replacing a model
-# artifact there, run this gate against the real head weights locally:
-#
-#   cargo test -p wifi-densepose-train model_gates
-#
-# and, until a CLI entry point exists to run `evaluate_linear_head` against an
-# arbitrary `.safetensors`/`.rvf` file, load the head's `weight`/`bias` in a
-# short script and call `wifi_densepose_train::evaluate_linear_head` directly.
+# IMPORTANT — the honest scope of this job: it runs the release gate against
+# real `.safetensors` artifacts that live in this repository, and it proves
+# the gate rejects the degenerate head of issue #1521 (bias 8.19 against
+# ‖w‖ 3.67). This repository does not automate uploading to the HuggingFace
+# model repo (`ruvnet/wifi-densepose-pretrained`); that upload remains a
+# manual, human-run step — but `scripts/publish-huggingface.py` now runs this
+# same gate against the artifact before it uploads anything, and refuses to
+# publish when the gate does not pass.
 
 on:
   push:
@@ -29,9 +25,21 @@ on:
       - master
     paths:
       - "v2/crates/wifi-densepose-train/**"
+      - "v2/crates/cog-person-count/cog/artifacts/**"
+      - "v2/crates/cog-pose-estimation/cog/artifacts/**"
+      - "v2/crates/cog-pose-estimation/tests/fixtures/**"
+      - "scripts/publish-huggingface.py"
+      - "scripts/tests/test_publish_huggingface_gate.py"
+      - ".github/workflows/model-release-gate.yml"
   pull_request:
     paths:
       - "v2/crates/wifi-densepose-train/**"
+      - "v2/crates/cog-person-count/cog/artifacts/**"
+      - "v2/crates/cog-pose-estimation/cog/artifacts/**"
+      - "v2/crates/cog-pose-estimation/tests/fixtures/**"
+      - "scripts/publish-huggingface.py"
+      - "scripts/tests/test_publish_huggingface_gate.py"
+      - ".github/workflows/model-release-gate.yml"
   workflow_dispatch:
 
 permissions:
@@ -50,9 +58,35 @@ jobs:
       - name: Install Rust toolchain
         run: rustup toolchain install stable --profile minimal
 
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+
       - name: Run the model-release gate's own test suite
         working-directory: v2
-        run: cargo test -p wifi-densepose-train --no-default-features model_gates -- --nocapture
+        run: cargo test -p wifi-densepose-train --no-default-features --lib -- --nocapture
+
+      - name: Run the release-gate CLI end-to-end tests
+        working-directory: v2
+        run: cargo test -p wifi-densepose-train --no-default-features --test test_model_release_gate -- --nocapture
+
+      - name: Check every in-tree .safetensors artifact against the format spec
+        working-directory: v2
+        run: |
+          set -euo pipefail
+          for artifact in \
+            crates/cog-person-count/cog/artifacts/count_v1.safetensors \
+            crates/cog-pose-estimation/cog/artifacts/pose_v1.safetensors \
+            crates/cog-pose-estimation/tests/fixtures/sample_room.adapter.safetensors
+          do
+            echo "::group::$artifact"
+            cargo run --quiet -p wifi-densepose-train --no-default-features \
+              --bin model_release_gate -- --artifact "$artifact" --format-only
+            echo "::endgroup::"
+          done
+
+      - name: Run the publish-path gate tests
+        run: python -m unittest scripts/tests/test_publish_huggingface_gate.py
 
       - name: Summarize result
         if: always()
@@ -60,8 +94,9 @@ jobs:
           {
             echo '### Model release gate (ADR-298)'
             echo ''
-            echo 'This job protects `model_gates.rs` from regressing. It does not itself'
-            echo 'gate a real HuggingFace model publish — that upload is a manual step'
-            echo 'outside this repository; run `cargo test -p wifi-densepose-train model_gates`'
-            echo 'against real head weights before publishing one.'
+            echo 'This job runs the ADR-298 release gate against real `.safetensors` artifacts'
+            echo 'in this repository and proves the gate rejects the degenerate head of'
+            echo 'issue #1521. It does not upload anything: the HuggingFace publish stays a'
+            echo 'manual step, and `scripts/publish-huggingface.py` runs this same gate'
+            echo 'before it uploads.'
           } >> "$GITHUB_STEP_SUMMARY"

@@ -22,6 +22,7 @@ import argparse
 import os
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 EXPECTED_FILES = [
@@ -33,6 +34,142 @@ EXPECTED_FILES = [
     "config.json",
     "README.md",
 ]
+
+# ADR-298 model release gate (issue #1521). The gate judges the classifier
+# artifact the publish actually uploads, in this order of preference: the
+# `presence-head.json` sidecar, then the `model.safetensors` container that
+# carries the same head.
+#
+# Fix marker: RuView#1521 — the gate runs before the upload and fails closed.
+GATE_ARTIFACTS = ("presence-head.json", "model.safetensors")
+
+# The gate binary and how to run it by hand. The workspace lives in `v2/`.
+GATE_PACKAGE = "wifi-densepose-train"
+GATE_BIN = "model_release_gate"
+
+
+@dataclass(frozen=True)
+class GateResult:
+    """The outcome of the ADR-298 release gate for one artifact set."""
+
+    passed: bool
+    status: str
+    report: str
+
+
+def repo_root() -> Path:
+    """The repository root (this script lives in `scripts/`)."""
+    return Path(__file__).resolve().parents[1]
+
+
+def gate_artifact(model_dir: Path) -> Path | None:
+    """The classifier artifact the release gate judges, or None if there is none."""
+    for name in GATE_ARTIFACTS:
+        candidate = model_dir / name
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def run_model_release_gate(
+    model_dir: Path,
+    runner=subprocess.run,
+) -> GateResult:
+    """Run the ADR-298 model release gate against the model's classifier artifact.
+
+    The gate is the Rust entry point `model_release_gate`
+    (`v2/crates/wifi-densepose-train/src/bin/model_release_gate.rs`), which reads
+    a real `.safetensors` container or `presence-head.json` sidecar and applies
+    the ADR-298 head gates to it.
+
+    The gate is applied to the published encoder's output, which is L2-normalized
+    (`docs/huggingface/MODEL_CARD.md`: "2-layer FC (BatchNorm + GELU) ->
+    L2-normalized 128-dim embedding"), which is the assumption issue #1521's
+    arithmetic rests on: with a unit-norm embedding the logit is confined to
+    `[bias - ||w||, bias + ||w||]`, so a head whose bias dominates its weight
+    norm can never output "absent".
+
+    Fails closed: anything that is not an explicit pass blocks the publish.
+    """
+    artifact = gate_artifact(model_dir)
+    if artifact is None:
+        return GateResult(
+            passed=True,
+            status="not_applicable",
+            report=(
+                "ADR-298 gate: NOT APPLICABLE — the model set carries no "
+                f"classifier artifact ({' or '.join(GATE_ARTIFACTS)}); "
+                "nothing for the head gates to judge."
+            ),
+        )
+
+    command = [
+        "cargo",
+        "run",
+        "--quiet",
+        "-p",
+        GATE_PACKAGE,
+        "--no-default-features",
+        "--bin",
+        GATE_BIN,
+        "--",
+        "--artifact",
+        str(artifact),
+        "--l2-normalized-input",
+    ]
+    workspace = repo_root() / "v2"
+
+    try:
+        completed = runner(
+            command,
+            cwd=str(workspace),
+            capture_output=True,
+            text=True,
+            timeout=1800,
+        )
+    except FileNotFoundError:
+        return GateResult(
+            passed=False,
+            status="not_evaluated",
+            report=(
+                "ADR-298 gate: NOT EVALUATED — `cargo` was not found on PATH, so the "
+                f"release gate could not run. Run it by hand:\n  {command}"
+            ),
+        )
+    except subprocess.TimeoutExpired:
+        return GateResult(
+            passed=False,
+            status="not_evaluated",
+            report=(
+                "ADR-298 gate: NOT EVALUATED — the gate did not finish within the "
+                f"timeout. Run it by hand:\n  {command}"
+            ),
+        )
+
+    output = (completed.stdout or "") + (completed.stderr or "")
+    output = output.strip()
+
+    if completed.returncode == 0:
+        return GateResult(passed=True, status="pass", report=output)
+    if completed.returncode == 1:
+        return GateResult(
+            passed=False,
+            status="fail",
+            report=(
+                "ADR-298 gate: FAIL — the release gate rejected this artifact.\n"
+                f"{output}\n"
+                "The artifact must not be published in this state (ADR-298)."
+            ),
+        )
+    return GateResult(
+        passed=False,
+        status="not_evaluated",
+        report=(
+            "ADR-298 gate: NOT EVALUATED — the gate could not reach a verdict "
+            f"(exit {completed.returncode}).\n{output}\n"
+            f"Run it by hand:\n  {command}"
+        ),
+    )
 
 
 def get_token_from_gcloud(
@@ -128,8 +265,22 @@ def publish(
     version: str,
     token: str,
     dry_run: bool = False,
+    gate: GateResult | None = None,
 ) -> None:
     """Upload model files to HuggingFace Hub."""
+    # ADR-298 (issue #1521): the artifact must pass the release gate before
+    # anything is uploaded. The gate runs first — before the Hub client is
+    # even imported — so a rejected artifact never reaches the Hub.
+    if gate is None:
+        gate = run_model_release_gate(model_dir)
+    print(gate.report)
+    if not gate.passed:
+        print(
+            "ERROR: the ADR-298 model release gate did not pass "
+            f"(status: {gate.status}). Nothing was published."
+        )
+        sys.exit(1)
+
     try:
         from huggingface_hub import HfApi, login
     except ImportError:
@@ -248,6 +399,19 @@ def main() -> None:
         print("Create it and populate with model files first.")
         sys.exit(1)
 
+    # ADR-298 release gate (issue #1521) — runs before the token lookup, so a
+    # rejected artifact never reaches the Hub and a rejected publish never
+    # needs a credential.
+    print("Running the ADR-298 model release gate (issue #1521)...")
+    gate = run_model_release_gate(model_dir)
+    print(gate.report)
+    if not gate.passed:
+        print(
+            "ERROR: the ADR-298 model release gate did not pass "
+            f"(status: {gate.status}). Nothing was published."
+        )
+        sys.exit(1)
+
     # Get token
     if args.dry_run:
         token = "dry-run-no-token-needed"
@@ -264,6 +428,7 @@ def main() -> None:
         version=version,
         token=token,
         dry_run=args.dry_run,
+        gate=gate,
     )
 
 
