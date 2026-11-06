@@ -32,7 +32,7 @@
     "flywheel/genome.json": "75db44a3cab70d9459fc8c07863f640ac1214bfaa243483939e1506d63f51214",
     "flywheel/replay.mjs": "0670ca0b03701f4afe0b4bca8a3d58d481676b61a94a5b98c6a425aefb1159ab",
     "flywheel/run.mjs": "6d4f97db16900c45367b6538848cbe1915af999e663720dfc51f2bb1698f1cd0",
-    "package.json": "630cff70b336b78f50b60aec30c91dde2b1ac80b2ccb40c073551a376e8492e2",
+    "package.json": "d6ba81ba3cad035c5ddd17d2d84d1f02a273c6ac588b77c1592497d720803f3c",
     "scripts/sync-skills.mjs": "43715dab61e204dc91bbd61755810e8fdb2f66e2b0c0bd791b4bf48a2e293565",
     "scripts/update-manifest.mjs": "8f56764b8f70aed55da0c7e2417ae875b0d58d781d839b6db7f115f08af61e6b",
     "scripts/verify-manifest.mjs": "6491a221762efcfeb3e749ecab243b204f17fd5bc871f3d4025597f31b8f0f10",
@@ -75,7 +75,7 @@
     "src/training.js": "bd8a6c12eba4f9d2f8990fa9692cd04c743ea247f9b13e10f8717ceefcbd09ac",
     "src/ui/console-widget.js": "0d2f707d57b5ec54968dee1dc80f31c7db9152dcadfc48700c18379dabb55462"
   },
-  "filesDigest": "1876f3c17e08626d4a93d01eaf3a95e63b2eb262572f2eaf58803c165cfc4f22",
+  "filesDigest": "c946d18daae8b4cf29a5d79a39d266e2c6b37754d262ba7584c2268f55e5c76f",
   "brainDigest": "c0fb7b079ded157059b91601361429944697dae3cc42abc00dfe1a680986b0f4",
   "gateFingerprint": "6e53c784eee38310188948fc75fb49e6b4ebc04e247d01b903fa8c8a92d67bdd",
   "developmentPins": {
