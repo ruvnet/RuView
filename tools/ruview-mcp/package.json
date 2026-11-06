@@ -1,6 +1,6 @@
 {
   "name": "@ruvnet/rvagent",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "SENSE-BRIDGE: dual-transport MCP server (stdio default; Streamable HTTP opt-in via RVAGENT_HTTP_PORT) exposing RuView WiFi-DensePose sensing primitives to AI agents",
   "type": "module",
   "main": "dist/index.js",
