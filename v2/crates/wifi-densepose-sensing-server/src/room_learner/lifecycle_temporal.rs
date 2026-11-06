@@ -188,16 +188,16 @@ impl RoomLearningRuntime {
         run: String,
         now: u64,
     ) -> Result<(), String> {
-        let store = self
-            .recovery_store
-            .clone()
-            .ok_or("temporal_recovery_unavailable")?;
         self.configure_temporal_capture_with(
             expected,
             context,
             run,
             now,
-            move |schedule, run, fit, now, _| {
+            |schedule, run, fit, now, _| {
+                // The existing-work guard runs before this off-lock producer.
+                // Unavailable recovery must never mask refusal to replace a
+                // selected Legacy capture/model/history.
+                let store=self.recovery_store.clone().ok_or("temporal_recovery_unavailable")?;
                 TemporalTrainCapture::prepare_async(schedule, run, fit, now, store)
             },
         )
