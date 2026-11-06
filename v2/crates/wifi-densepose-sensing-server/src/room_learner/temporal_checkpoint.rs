@@ -3,14 +3,14 @@
 use super::*;
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Prefix {
+pub(super) struct Prefix<R = CaptureCohort, E = WindowEvidence> {
     schema: String,
     binding: ManagedBinding,
     run: String,
     descriptor: RecoveryDescriptor,
     last_now_ns: u64,
-    rows: Vec<CaptureCohort>,
-    evidence: Vec<WindowEvidence>,
+    rows: Vec<R>,
+    evidence: Vec<E>,
     identities: Vec<ManagedWindowIdentity>,
     fences: AssemblerCheckpoint,
     source_high: Vec<(u8, u64, u64)>,
@@ -25,14 +25,56 @@ struct Prefix {
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Envelope {
+struct Envelope<P = Prefix> {
     schema: String,
     payload_sha256: String,
-    payload: Prefix,
+    payload: P,
 }
 const SCHEMA: &str = "ruview.room-learner.temporal-runtime-prefix.v1";
 const BRIDGE_SCHEMA: &str = "ruview.room-learner.temporal-runtime-prefix.v2";
-pub(super) fn encode(v: &TemporalWorkflow) -> Result<Vec<u8>, String> {
+pub(super) type Snapshot = Prefix<SharedRecord<CaptureCohort>, SharedRecord<WindowEvidence>>;
+#[derive(Clone)]
+pub(super) struct SharedRecords {
+    rows: Vec<SharedRecord<CaptureCohort>>,
+    evidence: Vec<SharedRecord<WindowEvidence>>,
+}
+pub(super) fn snapshot_records(snapshot:&Snapshot)->SharedRecords {
+    SharedRecords{rows:snapshot.rows.clone(),evidence:snapshot.evidence.clone()}
+}
+pub(super) fn workflow_records(w:&TemporalWorkflow)->SharedRecords {
+    SharedRecords{rows:w.session.rows.clone(),evidence:w.session.evidence.clone()}
+}
+pub(super) fn workflow_record_prefix(w:&TemporalWorkflow,count:usize)->Result<SharedRecords,String>{
+    if count>w.session.rows.len()||count>w.session.evidence.len(){return Err("temporal_record_prefix_missing".into());}
+    Ok(SharedRecords{rows:w.session.rows[..count].to_vec(),evidence:w.session.evidence[..count].to_vec()})
+}
+fn reuse_snapshot_records(w:&mut TemporalWorkflow,records:&SharedRecords)->Result<(),String>{
+    if w.session.rows.len()!=records.rows.len() || records.rows.len()!=records.evidence.len()
+        || hash(&w.session.evidence)?!=hash(&records.evidence)? {
+        return Err("temporal_writer_shared_records_changed".into());
+    }
+    // decode() already validates every decoded row's exact canonical SHA
+    // against its WindowEvidence. Validate the SAME expected immutable rows
+    // against those evidence hashes once, then reuse their cached canonical
+    // hashes on later prefixes. This is not a new hash formula or authority.
+    for (row,evidence) in records.rows.iter().zip(&records.evidence) {
+        if row.canonical_sha256()?!=evidence.cohort_sha256 {return Err("temporal_writer_shared_records_changed".into());}
+    }
+    // This call executes on the writer. Free validation's decoded raw copies
+    // here; the receiver completion contains only refs to its SAME immutable
+    // authoritative rows/evidence plus bounded reducer metadata.
+    w.session.rows=records.rows.clone();w.session.evidence=records.evidence.clone();Ok(())
+}
+pub(super) fn decode_shared(
+    bytes:&[u8], descriptor:&RecoveryDescriptor, now:u64, records:&SharedRecords,
+)->Result<TemporalWorkflow,String>{
+    // Keep validation and immutable-ref reuse one private admission boundary.
+    // No caller-provided/mutated workflow can substitute for this decode.
+    let mut validated=decode(bytes,descriptor,now)?;
+    reuse_snapshot_records(&mut validated,records)?;
+    Ok(validated)
+}
+pub(super) fn snapshot(v: &TemporalWorkflow) -> Result<Snapshot, String> {
     if v.session.fitted
         || v.session.failed
         || v.session.active
@@ -70,8 +112,11 @@ pub(super) fn encode(v: &TemporalWorkflow) -> Result<Vec<u8>, String> {
         confirmation_issued: false,
         bridge: v.bridge.clone(),
     };
+    Ok(payload)
+}
+pub(super) fn encode_snapshot(payload: Snapshot) -> Result<Vec<u8>, String> {
     let envelope = Envelope {
-        schema: schema.into(),
+        schema: payload.schema.clone(),
         payload_sha256: hash(&payload)?,
         payload,
     };
@@ -80,6 +125,9 @@ pub(super) fn encode(v: &TemporalWorkflow) -> Result<Vec<u8>, String> {
         return Err("temporal_checkpoint_budget".into());
     }
     Ok(bytes)
+}
+pub(super) fn encode(v: &TemporalWorkflow) -> Result<Vec<u8>, String> {
+    encode_snapshot(snapshot(v)?)
 }
 pub(super) fn decode(
     bytes: &[u8],
@@ -380,8 +428,8 @@ pub(super) fn decode(
     }
     let mut session =
         TemporalTrainingSession::managed(schedule.clone(), p.run, p.binding.fit.clone())?;
-    session.rows = p.rows;
-    session.evidence = p.evidence;
+    session.rows = p.rows.into_iter().map(SharedRecord::new).collect();
+    session.evidence = p.evidence.into_iter().map(SharedRecord::new).collect();
     session.managed.as_mut().unwrap().windows = p.identities;
     session
         .assembler
@@ -427,6 +475,7 @@ pub(super) fn decode(
         pending_intent: None,
         pending_prefix: None,
         bridge: p.bridge,
+        async_state: None,
     })
 }
 #[cfg(test)]
@@ -689,7 +738,7 @@ pub(crate) fn synthetic_segment_fork(initial: &ValidatedTemporalPrefix) -> Valid
     )
     .unwrap();
     w.stage = Stage::DurableReady;
-    w.durable = Some(initial.bytes().to_vec());
+    w.durable = Some(std::sync::Arc::new(initial.bytes().to_vec()));
     let p = w.synthetic_conditions();
     w.start_segment(&p, "different-segment", 2_000_000_000, 2_000_000_000)
         .unwrap();
@@ -735,7 +784,7 @@ pub(crate) fn synthetic_floor_regression(
     input: &ValidatedTemporalPrefix,
 ) -> ValidatedTemporalPrefix {
     let mut w = decode(input.bytes(), input.descriptor(), input.saved_receiver_ns()).unwrap();
-    w.durable = Some(input.bytes().to_vec());
+    w.durable = Some(std::sync::Arc::new(input.bytes().to_vec()));
     let permit = w.synthetic_conditions();
     let start = input.saved_receiver_ns() + 10_000_000_000;
     w.start_segment(&permit, "floor-regression", start, start)

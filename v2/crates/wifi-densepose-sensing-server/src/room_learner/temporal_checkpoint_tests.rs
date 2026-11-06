@@ -298,3 +298,21 @@ fn bridge_quality_observed_tail_must_remain_covered_by_durable_replay_floors() {
         "rehashed valid rows cannot hide replay-floor rollback below the observed quality tail"
     );
 }
+
+#[test]
+fn writer_readback_reuses_exact_authoritative_arc_records_and_rejects_changed_records(){
+    let(_dir,store,mut workflow)=setup();workflow.persist_initial(&store).unwrap();
+    start(&mut workflow,&store,2_000_000_000,"synthetic-shared-records");let mut seq=0;
+    commit_next(&mut workflow,&store,2_000_000_000,&mut seq);
+    let frozen=snapshot(&workflow).unwrap();let records=snapshot_records(&frozen);
+    let bytes=encode_snapshot(frozen).unwrap();let mut restored=decode(&bytes,&workflow.descriptor,workflow.last_now_ns).unwrap();
+    assert!(!restored.session.rows[0].same_record(&workflow.session.rows[0]));
+    reuse_snapshot_records(&mut restored,&records).unwrap();
+    assert!(restored.session.rows[0].same_record(&workflow.session.rows[0]));
+    assert!(restored.session.evidence[0].same_record(&workflow.session.evidence[0]));
+    assert_eq!(encode(&restored).unwrap(),bytes);
+    let mut changed=records.clone();let mut row=(*changed.rows[0]).clone();row.label=RoomLabel::Unknown;
+    changed.rows[0]=SharedRecord::new(row);
+    assert_eq!(reuse_snapshot_records(&mut restored,&changed).unwrap_err(),"temporal_writer_shared_records_changed");
+    assert!(restored.session.rows[0].same_record(&workflow.session.rows[0]));
+}

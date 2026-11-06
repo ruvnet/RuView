@@ -96,9 +96,15 @@ impl RoomLearningRuntime {
             self.record_native_rejection(packet.source_id,&packet.grid_id,"synthetic/replayed native provenance");
             return Err("live managed capture rejects synthetic/replayed native provenance".into());
         }
+        // Declared BEFORE the lock: every return/unwind releases inner before
+        // any accepted/rejected ACK payload or replaced raw state is reclaimed.
+        let mut retired=self.deferred_reclamation();
         let mut state = self.inner.lock().map_err(|_| "learner state unavailable")?;
+        let owner_generation=state.generation;
         if let Some(CaptureWorkflow::Temporal(capture)) = state.capture.as_mut() {
-            let result = capture.ingest(self.temporal_store()?, &self.runtime_epoch, packet, now_ns);
+            if capture.owner_generation()!=owner_generation {capture.invalidate_owner();return Err("temporal_owner_generation_changed".into());}
+            let result = capture.ingest(self.temporal_store()?, &self.runtime_epoch, packet, now_ns,&mut retired);
+            #[cfg(test)] if retired.has_ack() && self.panic_after_reclamation_ack.swap(false,Ordering::AcqRel){panic!("synthetic panic after actual ACK admission");}
             if let Err(error) = &result { state.input_error = Some(bounded(error.clone())); }
             return result;
         }

@@ -406,6 +406,7 @@ fn validate_parts(
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TemporalCaptureStage {
+    Preparing,
     Ready,
     Observing,
     NeedsConfirmation,
@@ -417,6 +418,7 @@ pub(crate) enum TemporalCaptureStage {
 impl TemporalCaptureStage {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
+            Self::Preparing => "preparing",
             Self::Ready => "ready",
             Self::Observing => "observing",
             Self::NeedsConfirmation => "needs_confirmation",
@@ -449,6 +451,43 @@ impl TemporalTrainCapture {
         } else {
             Ok(capture)
         }
+    }
+    pub(crate) fn prepare_async(
+        schedule: ManagedScheduleContract, run:String, config:FitConfig, now:u64,
+        store:std::sync::Arc<RecoveryStore>,
+    ) -> Result<(Self,Option<String>),String> {
+        let owned_store=store.clone();
+        Self::prepare_with(schedule,run,config,now,&store,move |w,store|{
+            let writer=std::sync::Arc::new(durability::Writer::new(owned_store,now)?);
+            w.async_state=Some(durability::AsyncState::new(writer));
+            w.persist_initial(store)
+        })
+    }
+    pub(crate) fn async_start(&mut self,now:u64)->Result<bool,String>{
+        self.ensure_live()?;
+        if self.workflow.async_state.is_none(){return Ok(false);}
+        self.workflow.request_async_start(now)?;Ok(true)
+    }
+    pub(crate) fn poll_async(&mut self,now:u64,retired:&mut DeferredReclamation)->Result<Option<(bool,u64)>,String>{
+        if self.failure.is_some(){return Err("temporal_capture_failed".into());}
+        let start=match self.workflow.poll_async(now,retired){
+            Ok(start)=>start,
+            Err(error)=>{
+                if matches!(error.as_str(),"temporal_writer_ack_clock_or_expiry"|"temporal_writer_ack_identity_changed"|"temporal_writer_ack_row_lineage_changed"|"temporal_writer_ack_binding_changed") {self.invalidate(&error);}
+                return Err(error);
+            }
+        };
+        if let Some(state)=&self.workflow.async_state{self.durable_seals=state.accepted_seals;}
+        Ok(start)
+    }
+    pub(crate) fn enable_async_restore(&mut self,store:std::sync::Arc<RecoveryStore>,now:u64)->Result<(),String>{
+        if self.workflow.async_state.is_some(){return Err("temporal_writer_already_present".into());}
+        let mut state=durability::AsyncState::new(std::sync::Arc::new(durability::Writer::new(store,now)?));
+        state.seed_restored(&self.workflow)?;
+        self.workflow.async_state=Some(state);Ok(())
+    }
+    pub(crate) fn writer(&self)->Option<std::sync::Arc<durability::Writer>>{
+        self.workflow.async_state.as_ref().map(|a|a.writer.clone())
     }
     pub(crate) fn prepare_retained(
         schedule: ManagedScheduleContract,
@@ -505,7 +544,7 @@ impl TemporalTrainCapture {
         self.workflow.context()
     }
     pub(crate) fn check_time(&mut self, now: u64) -> Result<(), String> {
-        self.ensure_live()?;
+        if self.workflow.async_state.is_none(){self.ensure_live()?;}else if self.failure.is_some(){return Err("temporal_capture_failed".into());}
         if now < self.workflow.last_now_ns
             || now / 1_000_000 >= self.workflow.descriptor.expires_at_ms
         {
@@ -515,11 +554,11 @@ impl TemporalTrainCapture {
         Ok(())
     }
     pub(crate) fn prime_fence(&mut self, p: &CanonicalPacket, now: u64) -> Result<(), String> {
-        self.ensure_live()?;
+        if self.workflow.async_state.is_none(){self.ensure_live()?;}else if self.failure.is_some(){return Err("temporal_capture_failed".into());}
         if !matches!(
             self.stage(),
-            TemporalCaptureStage::Ready | TemporalCaptureStage::Paused
-        ) {
+            TemporalCaptureStage::Ready | TemporalCaptureStage::Paused | TemporalCaptureStage::Preparing | TemporalCaptureStage::Blocked
+        ) && !(self.workflow.async_state.is_some() && self.logical_phase_complete()) {
             return Err("temporal_priming_state".into());
         }
         let result: Result<(), String> = (|| {
@@ -559,6 +598,9 @@ impl TemporalTrainCapture {
             return TemporalCaptureStage::Failed;
         }
         let w = &self.workflow;
+        if w.async_state.as_ref().is_some_and(|a| a.pending.as_ref().is_some_and(|p|p.start_ticket || !matches!(w.stage,Stage::Observing|Stage::BlockedDurability)) || w.durable.is_none()) {
+            return TemporalCaptureStage::Preparing;
+        }
         if w.stage == Stage::BlockedDurability {
             return TemporalCaptureStage::Blocked;
         }
@@ -597,6 +639,12 @@ impl TemporalTrainCapture {
             )
             .ok()?;
         Some((bound.trial_id().into(), bound.session_id().into()))
+    }
+    fn logical_phase_complete(&self)->bool {
+        let w=&self.workflow;
+        self.schedule.episodes().get(w.episode).is_some_and(|e|e.role==DataRole::Train
+            && w.pending_window.is_none()
+            && w.session.rows.len()==self.schedule.episodes().iter().take(w.episode+1).map(|e|e.slots.len()).sum::<usize>())
     }
     fn phase_ready(&self) -> bool {
         let w = &self.workflow;
@@ -658,7 +706,8 @@ impl TemporalTrainCapture {
         store: &RecoveryStore,
     ) -> Result<(), String> {
         self.ensure_live()?;
-        if self.phase_ready() {
+        if self.phase_ready() || (self.workflow.async_state.is_some() && self.logical_phase_complete()) {
+            if self.workflow.async_state.is_some(){return self.prime_fence(p,now);}
             return Ok(());
         }
         let result = (|| {
@@ -725,6 +774,18 @@ impl TemporalTrainCapture {
         let schedule = w.schedule()?;
         let deadline =
             schedule.episodes()[w.episode].slots[observed].deadline_offset_ms * 1_000_000;
+        if w.async_state.as_ref().is_some_and(|a|a.pending.is_some()) {
+            let next=schedule.episodes()[w.episode].slots.get(observed+1);
+            if let Some(next)=next {
+                let mapping=w.mapping.as_ref().ok_or("temporal_segment_missing")?;
+                let deadline=mapping.receiver_start_ns.checked_add(next.target_offset_ms*1_000_000-mapping.observed_start_ns).ok_or("temporal_time_overflow")?;
+                if w.last_now_ns>=deadline {
+                    let state=w.async_state.as_mut().unwrap();state.busy_pause=true;state.error=Some("temporal_storage_busy_pause".into());
+                    w.stage=Stage::BlockedDurability;return Err("temporal_storage_busy_pause".into());
+                }
+            }
+            return Ok(());
+        }
         let b = w.bridge.as_mut().ok_or("temporal_bridge_required")?;
         b.parts
             .last_mut()
@@ -734,14 +795,14 @@ impl TemporalTrainCapture {
             b.disposition = Disposition::NeedsConfirmation;
         }
         w.commit_slot(store, w.last_now_ns)?;
-        if !self.phase_ready() {
+        if !self.logical_phase_complete() {
             self.workflow.begin_slot()?;
         }
         Ok(())
     }
     pub(crate) fn confirmation_challenge(&self) -> Result<String, String> {
         self.ensure_live()?;
-        if !self.phase_ready() {
+        if !self.phase_ready() || self.workflow.async_state.as_ref().is_some_and(|a|a.pending.is_some()) {
             return Err("temporal_phase_not_complete".into());
         }
         let w = &self.workflow;
@@ -751,7 +812,7 @@ impl TemporalTrainCapture {
             &w.descriptor.id,
             &w.session.run_id,
             w.episode,
-            w.durable.as_ref().map(|v| bytes_hash(v)),
+            w.durable_digest(),
             &b.parts,
             &b.seals,
         ))
@@ -770,7 +831,10 @@ impl TemporalTrainCapture {
         w.check_clock(now)?;
         let schedule = w.schedule()?;
         let context_sha256 = w.context().digest();
-        let row_prefix_sha256 = hash(&(&w.session.rows, &w.session.evidence, &w.ledger.spans))?;
+        let row_prefix_sha256 = match &w.async_state {
+            Some(state)=>state.row_prefix_sha256.clone().ok_or("temporal_row_prefix_unconfirmed")?,
+            None=>hash(&(&w.session.rows, &w.session.evidence, &w.ledger.spans))?,
+        };
         let b = w.bridge.as_mut().ok_or("temporal_bridge_required")?;
         validate_parts(
             &b.parts,
@@ -807,11 +871,12 @@ impl TemporalTrainCapture {
         };
         w.stage = Stage::DurableReady;
         w.persist_with(store, false, |s, i, p, n| s.publish_temporal(i, Some(p), n))?;
-        self.durable_seals = w.bridge.as_ref().unwrap().seals.len();
+        if w.async_state.is_none(){self.durable_seals = w.bridge.as_ref().unwrap().seals.len();}
         Ok(())
     }
     pub(crate) fn pause(&mut self, now: u64, store: &RecoveryStore) -> Result<(), String> {
         self.ensure_live()?;
+        if self.workflow.async_state.is_some(){return self.workflow.request_async_pause(now);}
         self.workflow.check_clock(now)?;
         self.workflow.pause()?;
         self.workflow
@@ -844,6 +909,7 @@ impl TemporalTrainCapture {
         })
     }
     pub(crate) fn repair_pending(&mut self, store: &RecoveryStore, now: u64) -> Result<(), String> {
+        if self.workflow.async_state.is_some(){return self.workflow.request_async_repair(now);}
         self.workflow.repair_pending(store, now)?;
         if self.workflow.schedule()?.sha256() != self.schedule.sha256() {
             self.invalidate("temporal_repaired_schedule_changed");
@@ -859,6 +925,7 @@ impl TemporalTrainCapture {
         Ok(())
     }
     pub(crate) fn invalidate(&mut self, reason: &str) {
+        if let Some(state)=&self.workflow.async_state{state.writer.cancel();}
         self.failure = Some(
             reason
                 .chars()
@@ -879,6 +946,15 @@ impl TemporalTrainCapture {
     pub(crate) fn snapshot(&self) -> Value {
         let w = &self.workflow;
         let e = self.schedule.episodes().get(w.episode);
-        json!({"schema":"ruview.room-learner.private-temporal-capture.v1","stage":self.stage().as_str(),"episode_index":w.episode,"label":e.filter(|e|e.role==DataRole::Train).map(|e|e.condition),"role":"Train","sealed_train_episodes":self.durable_seals,"retained_rows":w.session.rows.len(),"durable_windows":w.durable_windows,"rows_sha256":hash(&w.session.rows).ok(),"observed_ns":w.live_observed_ns.to_string(),"durable_observed_ns":w.accepted().to_string(),"target_ms":e.filter(|e|e.role==DataRole::Train).map(|e|e.target_active_recording_ms),"descriptor":w.descriptor,"failure":self.failure,"fit_admission_available":false,"quality_is_engineering_only":true,"independence_verified":false,"source_clock_measured":false})
+        json!({"schema":"ruview.room-learner.private-temporal-capture.v1","stage":self.stage().as_str(),"episode_index":w.episode,"label":e.filter(|e|e.role==DataRole::Train).map(|e|e.condition),"role":"Train","sealed_train_episodes":self.durable_seals,"retained_rows":w.session.rows.len(),"durable_windows":w.durable_windows,"rows_sha256":w.async_state.as_ref().map(|a|if w.session.rows.len()==w.durable_windows{a.rows_sha256.clone()}else{None}).unwrap_or_else(||hash(&w.session.rows).ok()),"durability_pending":w.async_state.as_ref().is_some_and(|a|a.pending.is_some()),"durability_error":w.async_state.as_ref().and_then(|a|a.error.clone()),"observed_ns":w.live_observed_ns.to_string(),"durable_observed_ns":w.accepted().to_string(),"target_ms":e.filter(|e|e.role==DataRole::Train).map(|e|e.target_active_recording_ms),"descriptor":w.descriptor,"failure":self.failure,"fit_admission_available":false,"quality_is_engineering_only":true,"independence_verified":false,"source_clock_measured":false})
+    }
+}
+
+impl Drop for TemporalTrainCapture {
+    fn drop(&mut self) {
+        // Runtime drains installed captures before dropping its inner state.
+        // Constructor failures/obsolete unpublished cores must also retain the
+        // owner store until their one writer has actually stopped.
+        if let Some(state)=&self.workflow.async_state {let _=state.writer.drain();}
     }
 }
