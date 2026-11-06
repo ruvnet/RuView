@@ -433,3 +433,7 @@ impl RecoveryStore {
 #[cfg(test)]
 #[path = "recovery_store_tests.rs"]
 mod tests;
+
+// Typed temporal consistency uses the SAME profile directory/key, not V1 files.
+#[path = "temporal_recovery_commitment.rs"]
+pub(crate) mod temporal_commitment;

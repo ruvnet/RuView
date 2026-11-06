@@ -27,16 +27,19 @@ impl ArtifactStore {
         self.verify_owner()?;
         let mut contexts = Vec::new();
         let mut truncated = false;
-        for (index, entry) in std::fs::read_dir(&self.root)
+        let mut inspected = 0;
+        for entry in std::fs::read_dir(&self.root)
             .map_err(|e| e.to_string())?
-            .take(257)
-            .enumerate()
+            // One reserved non-v1 namespace cannot consume the v1 scan budget.
+            .take(258)
         {
-            if index == 256 {
+            let entry = entry.map_err(|e| e.to_string())?;
+            if entry.file_name() == temporal_artifacts::DIRECTORY { continue; }
+            if inspected == 256 {
                 truncated = true;
                 break;
             }
-            let entry = entry.map_err(|e| e.to_string())?;
+            inspected += 1;
             if contexts.len() >= 256 {
                 truncated = true;
                 break;
