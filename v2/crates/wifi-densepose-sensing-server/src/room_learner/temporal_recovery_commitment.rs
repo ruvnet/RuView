@@ -70,6 +70,16 @@ pub(crate) struct TemporalLoaded {
     pub(crate) token: TemporalToken,
     pub(crate) prefix: Option<ValidatedTemporalPrefix>,
 }
+// NEGATIVE shape only, not an authentication primitive. Caller must first
+// authenticate/canonical-validate metadata and enforce owner/clock/chain rules.
+// Never accepts a positive payload or a generic limit+1 terminal.
+fn legacy_saturated_terminal_shape(m:&Meta)->bool{
+    m.schema==KIND && m.transition_limit==329 && m.revision==329
+        && m.slot.is_none() && m.payload_sha256.is_none()
+        && m.previous_sha256.as_ref().is_some_and(|s|hex(s))
+        && m.window_count<=64
+        && m.retired_at_ms.is_some_and(|at|at>=m.descriptor.saved_at_ms && at==m.receiver_ns/1_000_000)
+}
 struct Components {
     head: Option<Meta>,
     latest: Option<Meta>,
@@ -211,7 +221,6 @@ impl RecoveryStore {
             || m.schema != KIND
             || m.transition_limit > MAX_TRANSITIONS
             || m.transition_limit < 2
-            || m.revision >= m.transition_limit
             || !id(&m.run)
             || !hex(&m.policy_sha256)
             || m.window_count > 64
@@ -234,6 +243,10 @@ impl RecoveryStore {
                 if t >= m.descriptor.saved_at_ms && t == m.receiver_ns / 1_000_000 => {}
             _ => return Err("temporal_metadata_state".into()),
         };
+        // Only after AEAD/canonical metadata, known-kind/descriptor/owner and
+        // state/clock validation may the old-family NEGATIVE terminal occupy
+        // its one reserved boundary. Positive payloads stay strictly <limit.
+        if m.revision>=m.transition_limit && !legacy_saturated_terminal_shape(&m){return Err("temporal_metadata_binding".into());}
         Ok(Some(m))
     }
     fn temporal_components(&self, dir: &Path) -> Result<Components, String> {
@@ -579,7 +592,7 @@ impl RecoveryStore {
             meta.payload_sha256 = None;
             meta.retired_at_ms = Some(now_ns / 1_000_000);
             meta.receiver_ns = now_ns;
-            if meta.revision >= meta.transition_limit {
+            if meta.revision >= meta.transition_limit && !legacy_saturated_terminal_shape(&meta) {
                 return Err("temporal_transition_budget".into());
             }
         }
@@ -1202,6 +1215,19 @@ impl RecoveryStore {
             return Err("recovery_receiver_clock_regression".into());
         }
         self.prepare_retire_temporal(&inspection.token, now_ns, expiry_only)
+    }
+    pub(crate) fn fresh_train_genesis_predecessor(&self,now_ns:u64)->Result<Option<TemporalToken>,String>{
+        let _serial=self.serial.lock().map_err(|_|"recovery_store_unavailable")?;
+        let locked=self.temporal_lock(false)?;
+        let c=self.temporal_components(&locked.directory)?;
+        match (c.head,c.latest){
+            (None,None)=>Ok(None),
+            (Some(head),Some(latest)) if head==latest=>{
+                if now_ns<head.receiver_ns || now_ns/1_000_000<head.descriptor.saved_at_ms || head.retired_at_ms.is_some_and(|t|now_ns/1_000_000<t){return Err("recovery_clock_regression".into());}
+                if head.retired_at_ms.is_none(){return Err("temporal_active_generation_requires_retirement".into());}
+                Ok(Some(head.token()?))
+            },_=>Err("temporal_head_witness_mismatch_or_pending".into()),
+        }
     }
     pub(crate) fn recertify_temporal(
         &self,
