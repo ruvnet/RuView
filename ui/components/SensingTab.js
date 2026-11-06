@@ -18,6 +18,7 @@ export class SensingTab {
     this._unsubState = null;
     this._resizeObserver = null;
     this._threeLoaded = false;
+    this._vitalTimer = null;
   }
 
   async init() {
@@ -26,6 +27,145 @@ export class SensingTab {
     this._initSplatRenderer();
     this._connectService();
     this._setupResize();
+    this._startVitalsPolling();
+  }
+
+  // ---- Vitals polling (numeric breathing / heart rate) --------------------
+  //
+  // The WebSocket broadcast omits `vital_signs` entirely whenever the server's
+  // publication gate abstains, and it never carries the abstention reason.
+  // `/api/v1/vital-signs` reports both, so poll it directly instead of trying
+  // to infer "why is this blank" from a missing WS field.
+
+  _startVitalsPolling() {
+    this._stopVitalsPolling();
+    this._updateVitals();                 // paint immediately, no first-tick gap
+    this._vitalTimer = setInterval(() => {
+      // Skip the request while the tab is hidden or removed from the DOM.
+      if (document.hidden || !this.container.isConnected) return;
+      this._updateVitals();
+    }, 3000);
+  }
+
+  _stopVitalsPolling() {
+    if (this._vitalTimer) {
+      clearInterval(this._vitalTimer);
+      this._vitalTimer = null;
+    }
+  }
+
+  async _updateVitals() {
+    let d;
+    try {
+      const res = await fetch('/api/v1/vital-signs', { cache: 'no-store' });
+      if (!res.ok) return;
+      d = await res.json();
+    } catch {
+      return; // transient network error — keep the previous reading on screen
+    }
+
+    const certVitals = d.vital_signs || {};
+    const raw = d.raw_vital_signs || {};
+    const g = d.gates || {};
+    // Ordered trace of the certification path (which precondition closed).
+    const certTrace = d.certification || {};
+    const b = d.buffer_status || {};
+    const set = (id, text) => {
+      const el = this.container.querySelector('#' + id);
+      if (el) el.textContent = text;
+    };
+    const num = (x) => (x == null ? '--' : Number(x).toFixed(2));
+    const bpm = (x) => (x == null ? '-- bpm' : Number(x).toFixed(1) + ' bpm');
+    const mark = (ok) => (ok ? '✓' : '✗');
+
+    // The per-node vitals buffers are cleared whenever the measured CSI frame
+    // rate shifts enough for `reconfigure_sample_rate` to fire. That blanks
+    // the estimator for a few seconds, which used to make the card blink to
+    // "-- bpm". Hold the last good raw reading across those gaps, but mark it
+    // (dimmed + `⏱Ns`) so a held value is never mistaken for a live one.
+    const HOLD_MS = 60000;
+    this._vitalHold = this._vitalHold || {};
+    const now = Date.now();
+    const hold = (key, value) => {
+      if (value !== null && value !== undefined) {
+        this._vitalHold[key] = { value, at: now };
+        return { value, held: false };
+      }
+      const kept = this._vitalHold[key];
+      if (kept && now - kept.at < HOLD_MS) {
+        return { value: kept.value, held: true, ageS: Math.round((now - kept.at) / 1000) };
+      }
+      return { value: null, held: false };
+    };
+    const heldBpm = (h) => (h.value == null
+      ? '-- bpm'
+      : Number(h.value).toFixed(1) + ' bpm' + (h.held ? ` ⏱${h.ageS}s` : ''));
+    const dim = (id, held) => {
+      const el = this.container.querySelector('#' + id);
+      if (el) el.style.opacity = held ? '0.55' : '1';
+    };
+
+    // Certified block — only populated when every gate is open at once.
+    set('valBreathBpm', bpm(certVitals.breathing_rate_bpm));
+    set('valHeartBpm', bpm(certVitals.heart_rate_bpm));
+
+    // Ungated block — the estimator's live output. Present as soon as the
+    // buffers fill, so the card keeps showing numbers between certified
+    // windows. Never claim this is certified: `gates` shows the distance.
+    const hBr = hold('br', raw.breathing_rate_bpm);
+    const hHr = hold('hr', raw.heart_rate_bpm);
+    set('valRawBreathBpm', heldBpm(hBr));
+    set('valRawHeartBpm', heldBpm(hHr));
+    dim('valRawBreathBpm', hBr.held);
+    dim('valRawHeartBpm', hHr.held);
+    set('valBreathConf', num(raw.breathing_confidence));
+    set('valHeartConf', num(raw.heartbeat_confidence));
+    set('valVitalQuality', num(raw.signal_quality));
+    // Buffer fill drives `signal_quality` (it is scaled by the fraction of the
+    // breathing window that is populated), so show the real per-node numbers.
+    set('valVitalBuffer',
+        `${b.breathing_samples ?? '--'}/${b.breathing_capacity ?? '--'} · ` +
+        `${b.heartbeat_samples ?? '--'}/${b.heartbeat_capacity ?? '--'}`);
+
+    const certified = d.authority === 'explicit_calibration';
+
+    const badge = this.container.querySelector('#vitalBadge');
+    if (badge) {
+      badge.textContent = certified ? '已认证' : '未认证';
+      badge.style.color = certified ? '#4ade80' : '#8899aa';
+    }
+
+    const authEl = this.container.querySelector('#vitalAuthority');
+    if (authEl) {
+      authEl.textContent = certified
+        ? 'authority: explicit_calibration'
+        : 'abstained: ' + (d.abstention_reason || 'no reason given');
+    }
+
+    const gateEl = this.container.querySelector('#vitalGates');
+    if (gateEl) {
+      gateEl.textContent =
+        `人数 ${g.person_count ?? '--'} ${mark(g.person_count_ok)} (需=1) · ` +
+        `质量 ${num(g.signal_quality)} ${mark(g.signal_quality_ok)} ` +
+        `(需≥${num(g.min_signal_quality)}) · ` +
+        `呼吸置信 ${num(raw.breathing_confidence)} ${mark(g.breathing_confidence_ok)} · ` +
+        `心跳置信 ${num(raw.heartbeat_confidence)} ${mark(g.heartbeat_confidence_ok)} ` +
+        `(置信需≥${num(g.min_confidence)})`;
+    }
+
+    const certEl = this.container.querySelector('#vitalCert');
+    if (certEl) {
+      certEl.textContent = certified ? '' : (
+        `认证缺: ${certTrace.reason || '--'}` +
+        ` · 标定新鲜=${certTrace.explicit_calibration_fresh ? '是' : '否'}` +
+        ` · 绑定=${certTrace.grid_binding_present ? '有' : '无'}` +
+        ` · holdout=${certTrace.holdout_ready ? '就绪' : '未就绪'}` +
+        (certTrace.runtime_window_size != null
+          ? `(${certTrace.holdout_frames ?? '--'}/${certTrace.runtime_window_size})`
+          : '') +
+        ` · 模型人数=${certTrace.calibrated_person_count ?? '--'}`
+      );
+    }
   }
 
   // ---- DOM construction --------------------------------------------------
@@ -102,6 +242,59 @@ export class SensingTab {
                 <div class="sensing-bar"><div class="sensing-bar-fill confidence" id="barConfidence"></div></div>
                 <span class="sensing-meter-val" id="valConfidence">0%</span>
               </div>
+            </div>
+          </div>
+
+          <!-- Vitals: certified (gated) + raw (ungated) breathing/heart rate -->
+          <div class="sensing-card">
+            <div class="sensing-card-title">
+              Vitals <span id="vitalBadge" style="float:right;font-size:11px;
+                    font-weight:600;color:#8899aa;">--</span>
+            </div>
+            <div class="sensing-details">
+              <div class="sensing-detail-row">
+                <span title="需最新显式标定 + 恰好一人 + 质量/置信度全部门限">认证 Breathing</span>
+                <span id="valBreathBpm">-- bpm</span>
+              </div>
+              <div class="sensing-detail-row">
+                <span title="依赖相位心搏证据，单链路通常过不了门">认证 Heart Rate</span>
+                <span id="valHeartBpm">-- bpm</span>
+              </div>
+            </div>
+            <div style="margin-top:8px;font-size:11px;color:var(--text-secondary,#8899aa);">
+              原始估算（未认证 · 持续更新）
+            </div>
+            <div class="sensing-details">
+              <div class="sensing-detail-row">
+                <span>Breathing</span><span id="valRawBreathBpm">-- bpm</span>
+              </div>
+              <div class="sensing-detail-row">
+                <span>Heart Rate</span><span id="valRawHeartBpm">-- bpm</span>
+              </div>
+              <div class="sensing-detail-row">
+                <span> Breath Conf</span><span id="valBreathConf">--</span>
+              </div>
+              <div class="sensing-detail-row">
+                <span> Heart Conf</span><span id="valHeartConf">--</span>
+              </div>
+              <div class="sensing-detail-row">
+                <span>Signal Quality</span><span id="valVitalQuality">--</span>
+              </div>
+              <div class="sensing-detail-row">
+                <span>Buffer (breath/heart)</span><span id="valVitalBuffer">--</span>
+              </div>
+            </div>
+            <div id="vitalAuthority" style="margin-top:8px;font-size:11px;line-height:1.5;
+                 color:var(--text-secondary,#8899aa);word-break:break-word;">
+              authority: --
+            </div>
+            <div id="vitalGates" style="margin-top:4px;font-size:11px;line-height:1.4;
+                 color:var(--text-secondary,#8899aa);word-break:break-word;"></div>
+            <div id="vitalCert" style="margin-top:4px;font-size:11px;line-height:1.4;
+                 color:var(--text-secondary,#8899aa);word-break:break-word;"></div>
+            <div style="margin-top:4px;font-size:10px;line-height:1.4;
+                 color:var(--text-secondary,#8899aa);">
+              ⏱n s = 缓冲区重置，显示 n 秒前的保持值
             </div>
           </div>
 
@@ -396,6 +589,7 @@ export class SensingTab {
   // ---- Cleanup -----------------------------------------------------------
 
   dispose() {
+    this._stopVitalsPolling();
     if (this._unsubData) this._unsubData();
     if (this._unsubState) this._unsubState();
     if (this._resizeObserver) this._resizeObserver.disconnect();

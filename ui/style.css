@@ -4187,3 +4187,86 @@ a:focus-visible,
   .uptime-clock { display: none; }
   .lang-selector-wrap { display: none; }
 }
+
+/* ── Debug Tab ─────────────────────────────────────────────────────────── */
+
+.dbg-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 10px;
+  letter-spacing: 0.5px;
+  vertical-align: middle;
+}
+.dbg-badge-ok    { background: #1b5e20; color: #69f0ae; }
+.dbg-badge-warn  { background: #e65100; color: #ffcc80; }
+.dbg-badge-info  { background: #263238; color: #90a4ae; }
+.dbg-badge-err   { background: #b71c1c; color: #ff8a80; }
+
+/* Which UDP magic a card's data is derived from. */
+.dbg-src {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 500;
+  color: #8fd6a8;
+  background: #10281a;
+  border: 1px solid #1f4d31;
+  border-radius: 8px;
+  letter-spacing: 0;
+  vertical-align: middle;
+}
+
+.dbg-ok   { color: #4ade80; }
+.dbg-bad  { color: #f87171; }
+.dbg-unknown { color: #888; }
+
+.dbg-cert-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 12px;
+  border-bottom: 1px solid #1a1a2e;
+}
+.dbg-cert-icon  { width: 14px; text-align: center; flex-shrink: 0; }
+.dbg-cert-label { flex: 1; color: #aaa; }
+.dbg-cert-val   { color: #ccc; font-family: monospace; font-size: 11px; }
+
+.dbg-cert-reason {
+  margin-top: 6px;
+  padding: 4px 0;
+  font-size: 12px;
+  color: #8899aa;
+}
+.dbg-cert-reason strong { color: #eee; }
+
+.dbg-bar-track {
+  display: inline-block;
+  width: 80px; height: 8px;
+  background: #1a1a2e;
+  border-radius: 4px;
+  overflow: hidden;
+  vertical-align: middle;
+  margin-left: 6px;
+}
+.dbg-bar-fill {
+  height: 100%;
+  background: #4ade80;
+  border-radius: 4px;
+  transition: width 0.4s ease;
+}
+
+.dbg-reason {
+  font-size: 10px;
+  color: #667;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#dbgHistoryBody tr:nth-child(even) { background: #0d0d1a; }
+#dbgHistoryBody tr:nth-child(odd)  { background: transparent; }

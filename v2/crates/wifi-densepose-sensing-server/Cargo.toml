@@ -139,6 +139,15 @@ mqtt = ["dep:rumqttc"]
 # surface small until the SDK choice is validated.
 matter = []
 
+# Forward the `wifi-densepose-signal` `eigenvalue` feature (BLAS-backed
+# eigendecomposition) into this crate so the published Dockerfile's
+# `SENSING_FEATURES` build arg can switch it on without forking Cargo.toml.
+# The server depares the signal crate with `default-features = false`, so
+# without this the eigenvalue path — `estimate_occupancy`, the runtime
+# residual window, and therefore the numeric-vitals publication gate — is
+# compiled out and `estimate_occupancy` stays a `NotCalibrated` stub.
+eigenvalue = ["wifi-densepose-signal/eigenvalue"]
+
 [dev-dependencies]
 tempfile = "3.10"
 # `tower::ServiceExt::oneshot` for in-process Router tests (bearer_auth).
