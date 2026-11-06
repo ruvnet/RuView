@@ -60,9 +60,11 @@ export default defineConfig({
     sourcemap: true,
     rollupOptions: {
       output: {
-        manualChunks: {
-          lit: ['lit'],
-          signals: ['@preact/signals-core'],
+        // Function form: Vite 8 (Rolldown) no longer accepts the object form.
+        manualChunks(id: string) {
+          if (/[\\/]node_modules[\\/](lit|lit-html|lit-element|@lit)[\\/]/.test(id)) return 'lit';
+          if (/[\\/]node_modules[\\/]@preact[\\/]signals-core[\\/]/.test(id)) return 'signals';
+          return undefined;
         },
       },
     },
