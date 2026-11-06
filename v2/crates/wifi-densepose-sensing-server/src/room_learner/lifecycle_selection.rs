@@ -14,6 +14,12 @@ pub(super) struct SelectionState {
     error: Option<String>,
     assessment: Option<crate::room_learner::assessment::AssessmentEnvelope>,
 }
+impl SelectionState {
+    pub(super) fn has_history(&self) -> bool {
+        self.envelope.is_some() || self.model.is_some() || self.qualification.is_some()
+            || self.assessment.is_some() || self.error.is_some()
+    }
+}
 impl RoomLearningRuntime {
     pub(super) fn restore_selection(&self, state: &mut Inner) {
         let restored = (|| -> Result<(), String> {
@@ -24,10 +30,10 @@ impl RoomLearningRuntime {
             if let Some(target) = &envelope.receipt.selected {
                 let (model, q) = self.store.resolve_selection_target(target)?;
                 let model = Arc::new(model);
-                state.capture = Some(if let Some(proof)=self.store.load_managed_training_proof(&model)? {
+                state.capture = Some(CaptureWorkflow::Legacy(if let Some(proof)=self.store.load_managed_training_proof(&model)? {
                     let fence=self.store.load_managed_capture_fence(&model,&proof)?;
                     CaptureSession::resume_managed_fence(&proof,&fence)?
-                } else {CaptureSession::new(target.context.clone(),format!("selected-{}",envelope.receipt.revision))?});
+                } else {CaptureSession::new(target.context.clone(),format!("selected-{}",envelope.receipt.revision))?}));
                 state.model = Some(model.clone());
                 state.frozen_training = true;
                 state.job.phase = JobPhase::Ready;
@@ -44,12 +50,13 @@ impl RoomLearningRuntime {
     }
     pub fn qualify(&self, expected: &MutationGuard) -> Result<QualificationEnvelope, String> {
         let mut state = self.command_state(expected)?;
+        state.require_legacy_kind()?;
         let result = (|| -> Result<QualificationEnvelope, String> {
             if busy(&state.job) || !state.frozen_training {
                 return Err("wait for the frozen candidate".into());
             }
             let model = state.model.as_ref().ok_or("no candidate")?.clone();
-            let capture = state.capture.as_ref().ok_or("no capture context")?;
+            let capture = state.legacy_capture().ok_or("no capture context")?;
             if capture.phase_active() {
                 return Err("finish the current capture phase first".into());
             }
@@ -183,7 +190,8 @@ impl RoomLearningRuntime {
         qualification_sha256: &str,
     ) -> Result<SelectionEnvelope, String> {
         let mut state = self.command_state(expected)?;
-        if busy(&state.job) || state.capture.as_ref().is_some_and(|c| c.phase_active()) {
+        state.require_legacy_kind()?;
+        if busy(&state.job) || state.legacy_capture().is_some_and(|c| c.phase_active()) {
             return Err("finish active capture/training before selecting".into());
         }
         let model = state
@@ -228,7 +236,8 @@ impl RoomLearningRuntime {
     }
     pub fn deselect_model(&self, expected: &MutationGuard) -> Result<SelectionEnvelope, String> {
         let mut state = self.command_state(expected)?;
-        if busy(&state.job) || state.capture.as_ref().is_some_and(|c| c.phase_active()) {
+        state.require_legacy_kind()?;
+        if busy(&state.job) || state.legacy_capture().is_some_and(|c| c.phase_active()) {
             return Err("finish active capture/training before changing selection".into());
         }
         if let Some(e) = &state.selection.envelope {
@@ -248,7 +257,8 @@ impl RoomLearningRuntime {
     }
     pub fn rollback_model(&self, expected: &MutationGuard) -> Result<SelectionEnvelope, String> {
         let mut state = self.command_state(expected)?;
-        if busy(&state.job) || state.capture.as_ref().is_some_and(|c| c.phase_active()) {
+        state.require_legacy_kind()?;
+        if busy(&state.job) || state.legacy_capture().is_some_and(|c| c.phase_active()) {
             return Err("finish active capture/training before rollback".into());
         }
         let previous = state
@@ -257,9 +267,7 @@ impl RoomLearningRuntime {
             .as_ref()
             .and_then(|e| e.receipt.previous.clone())
             .ok_or("no prior selection")?;
-        let context = state
-            .capture
-            .as_ref()
+        let context = state.legacy_capture()
             .map(|c| c.context())
             .ok_or("no current context")?;
         if *context != previous.context {
@@ -350,9 +358,7 @@ impl RoomLearningRuntime {
             if let Some(error) = &state.input_error {
                 return Err(format!("selected input is unverified: {error}"));
             }
-            let capture = state
-                .capture
-                .as_ref()
+            let capture = state.legacy_capture()
                 .ok_or("awaiting current selected sources")?;
             if capture.context() != &target.context {
                 return Err("selected context differs from current RF source contract".into());
@@ -408,6 +414,7 @@ impl RoomLearningRuntime {
         expected_room_binding: Option<&str>,
     ) -> SelectedBinaryEvidence {
         match self.inner.lock() {
+            Ok(state) if state.require_legacy_kind().is_err() => SelectedBinaryEvidence::Unavailable { identity: None, reason: "learner_temporal_capture_private_unsupported_command".into() },
             Ok(state) => self.selected_evidence_locked(&state, now_ns, expected_room_binding),
             Err(_) => SelectedBinaryEvidence::Unavailable {
                 identity: None,
@@ -449,6 +456,11 @@ impl RoomLearningRuntime {
             Ok(state) => {
                 let mut snapshot =
                     self.selection_status_locked(&state, now_ns, expected_room_binding);
+                if let Err(reason) = state.require_legacy_kind() {
+                    snapshot.integrity_error = Some(reason.clone());
+                    snapshot.current = SelectedBinaryEvidence::Unavailable { identity: None, reason };
+                    return snapshot;
+                }
                 let verified = (|| -> Result<(), String> {
                     if self.store.load_selection()?.as_ref() != state.selection.envelope.as_ref() {
                         return Err("saved selection differs from current runtime".into());

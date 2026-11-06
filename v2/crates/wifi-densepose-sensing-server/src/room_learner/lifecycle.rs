@@ -43,10 +43,15 @@ impl Default for Job {
         }
     }
 }
+/// Exactly one capture implementation. No public configure path constructs Temporal.
+enum CaptureWorkflow {
+    Legacy(CaptureSession),
+    Temporal(Box<temporal_control::RuntimeTemporalCapture>),
+}
 struct Inner {
     generation: u64,
     workflow_revision: u64,
-    capture: Option<CaptureSession>,
+    capture: Option<CaptureWorkflow>,
     model: Option<Arc<RoomModel>>,
     receipt: Option<CandidateReceipt>,
     frozen_training: bool,
@@ -59,6 +64,25 @@ struct Inner {
     selection: selection_control::SelectionState,
     qualification: Option<super::qualification::QualificationEnvelope>,
     qualification_error: Option<String>,
+}
+impl Inner {
+    fn legacy_capture(&self) -> Option<&CaptureSession> {
+        match self.capture.as_ref() { Some(CaptureWorkflow::Legacy(c)) => Some(c), _ => None }
+    }
+    fn legacy_capture_mut(&mut self) -> Option<&mut CaptureSession> {
+        match self.capture.as_mut() { Some(CaptureWorkflow::Legacy(c)) => Some(c), _ => None }
+    }
+    fn capture_context(&self) -> Option<&CaptureContext> {
+        self.capture.as_ref().map(|capture| match capture {
+            CaptureWorkflow::Legacy(c) => c.context(),
+            CaptureWorkflow::Temporal(c) => c.context(),
+        })
+    }
+    fn require_legacy_kind(&self) -> Result<(), String> {
+        if matches!(self.capture, Some(CaptureWorkflow::Temporal(_))) {
+            Err("learner_temporal_capture_private_unsupported_command".into())
+        } else { Ok(()) }
+    }
 }
 pub struct RoomLearningRuntime {
     runtime_epoch: String,
@@ -192,6 +216,7 @@ impl RoomLearningRuntime {
         &self,
         room_digest: &str,
     ) -> Result<super::artifact::CandidateCatalog, String> {
+        self.inner.lock().map_err(|_| "learner state unavailable")?.require_legacy_kind()?;
         self.store.catalog_for_room(room_digest)
     }
     /// Explicit new capture versus resuming an exact persisted candidate. Neither
@@ -228,7 +253,8 @@ impl RoomLearningRuntime {
         FitConfig::for_source_count(context.sources.len()).validate_context(&context)?;
         let mut session = CaptureSession::new(context.clone(), run_id)?;
         let mut state = self.command_state(expected)?;
-        if busy(&state.job) || state.capture.as_ref().is_some_and(|c| c.phase_active()) {
+        state.require_legacy_kind()?;
+        if busy(&state.job) || state.legacy_capture().is_some_and(|c| c.phase_active()) {
             return Err(
                 "finish/cancel the active capture or training job before changing context".into(),
             );
@@ -268,7 +294,7 @@ impl RoomLearningRuntime {
         state.recovery_enable = if new_training && !recovery_consent {
             recovery_enable::CurrentNewRun::new(&session, now_ns)
         } else { None };
-        state.capture = Some(session);
+        state.capture = Some(CaptureWorkflow::Legacy(session));
         state.model = if new_training {
             None
         } else {
@@ -310,6 +336,7 @@ impl RoomLearningRuntime {
         config.validate()?;
         let (generation, dataset, proof_seed, cancel) = {
             let mut state = self.command_state(expected)?;
+        state.require_legacy_kind()?;
             self.require_recovery_ready(&state)?;
             if busy(&state.job)
                 || (state.frozen_training
@@ -317,9 +344,7 @@ impl RoomLearningRuntime {
             {
                 return Err("this run is already training or frozen".into());
             }
-            let capture = state
-                .capture
-                .as_ref()
+            let capture = state.legacy_capture()
                 .ok_or("no learner capture configured")?;
             config.validate_context(capture.context())?;
             if capture.phase_active() {
@@ -399,13 +424,12 @@ impl RoomLearningRuntime {
     }
     pub fn prediction(&self, now_ns: u64) -> Result<(MutationGuard, RoomPrediction), String> {
         let state = self.inner.lock().map_err(|_| "learner state unavailable")?;
+        state.require_legacy_kind()?;
         let model = state
             .model
             .as_ref()
             .ok_or("no trained/restored candidate for this context")?;
-        let cohort = state
-            .capture
-            .as_ref()
+        let cohort = state.legacy_capture()
             .ok_or("no current capture context")?
             .live_cohort(now_ns)?;
         Ok((self.guard_for(&state), model.infer(&cohort)))
@@ -414,10 +438,11 @@ impl RoomLearningRuntime {
         let Ok(mut state) = self.inner.lock() else {
             return json!({"enabled":true,"state":"unavailable"});
         };
+        if state.require_legacy_kind().is_err() {
+            return json!({"schema":"ruview.room-learner.status.v1","enabled":true,"success":false,"error_code":"learner_temporal_capture_private_unsupported_command"});
+        }
         let _ = self.checkpoint_recovery(&mut state, now_ns, false);
-        let required_ids: Vec<_> = state
-            .capture
-            .as_ref()
+        let required_ids: Vec<_> = state.legacy_capture()
             .map(|c| c.context().sources.iter().map(|s| s.source_id).collect())
             .unwrap_or_default();
         let trained_ids: Vec<_> = state
@@ -426,9 +451,7 @@ impl RoomLearningRuntime {
             .map(|m| m.context().sources.iter().map(|s| s.source_id).collect())
             .unwrap_or_default();
         let prediction = state.model.as_ref().and_then(|m| {
-            state
-                .capture
-                .as_ref()
+            state.legacy_capture()
                 .and_then(|c| c.live_cohort(now_ns).ok())
                 .map(|c| m.infer(&c))
         });
@@ -443,17 +466,17 @@ impl RoomLearningRuntime {
         json!({"schema":"ruview.room-learner.status.v1","enabled":true,"mutation_guard":self.guard_for(&state),
             "required_source_ids":required_ids,"trained_source_ids":trained_ids,"scored_source_ids":scored_ids,
             "candidate_prediction":prediction,"training_manifest":state.model.as_ref().map(|m|m.training_manifest()),
-            "phase_history":state.capture.as_ref().map(|c|c.history()),
+            "phase_history":state.legacy_capture().map(|c|c.history()),
             "phase_duration_defaults":{"Empty":600000,"OccupiedStatic":12000,"OccupiedMoving":12000,"AdjacentOnly":12000},
             "held_out_phase_duration_defaults":{"Empty":12000,"OccupiedStatic":12000,"OccupiedMoving":12000,"AdjacentOnly":12000},
             "phase_lead_in_defaults":{"Empty":15000,"OccupiedStatic":5000,"OccupiedMoving":5000,"AdjacentOnly":15000},
             "untrained_capture_progress_is_volatile":!state.recovery.enabled || state.recovery.error.is_some(),"recovery":self.recovery_status(&state, now_ns),
-            "generation":state.generation,"state":state.job.phase,"context_digest":state.capture.as_ref().map(|c|c.context().digest()),
-            "room_digest":state.capture.as_ref().map(|c| &c.context().room_digest),
-            "revision":state.capture.as_ref().map(|c|c.context().revision),
-            "sources":state.capture.as_ref().map(|c| &c.context().sources),
-            "capture":state.capture.as_ref().map(|c|c.progress(now_ns)),
-            "training_frozen":state.frozen_training,"training_defaults":FitConfig::for_source_count(state.capture.as_ref().map_or(0, |c| c.context().sources.len())),"training_report":state.job.report,
+            "generation":state.generation,"state":state.job.phase,"context_digest":state.legacy_capture().map(|c|c.context().digest()),
+            "room_digest":state.legacy_capture().map(|c| &c.context().room_digest),
+            "revision":state.legacy_capture().map(|c|c.context().revision),
+            "sources":state.legacy_capture().map(|c| &c.context().sources),
+            "capture":state.legacy_capture().map(|c|c.progress(now_ns)),
+            "training_frozen":state.frozen_training,"training_defaults":FitConfig::for_source_count(state.legacy_capture().map_or(0, |c| c.context().sources.len())),"training_report":state.job.report,
             "error":state.job.error,"input_error":state.input_error,
             "candidate":state.receipt,"candidate_loaded":state.model.is_some(),"candidate_identity":self.candidate_identity(&state),
             "qualification_readiness":self.qualification_readiness_locked(&state,now_ns),
@@ -515,3 +538,10 @@ pub use paired_progress::{PairedCalibrationProgress, PublishedProgressRoom, PAIR
 
 #[path = "lifecycle_recovery_enable.rs"]
 mod recovery_enable;
+
+#[path = "lifecycle_temporal.rs"]
+mod temporal_control;
+
+#[cfg(test)]
+#[path="lifecycle_legacy_byte_probe.rs"]
+mod legacy_byte_probe;

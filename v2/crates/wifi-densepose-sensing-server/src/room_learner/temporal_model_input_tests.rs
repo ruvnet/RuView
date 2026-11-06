@@ -108,6 +108,19 @@ fn fitted_bytes() -> Vec<u8> {
             assert_eq!(report.training_cohorts, 16);
             assert!(report.backbone_delta_l2 > 0.);
             assert!(report.parameter_delta_l2 > 0.);
+            assert_eq!(report.completed_epochs, config().epochs);
+            assert!(report.objective_evaluations > 0);
+            assert!(report.initial.total.is_finite());
+            assert!(report.final_objective.total.is_finite());
+            assert_eq!(model.model.training_manifest().training_cohorts, 16);
+            assert_eq!(model.evidence.len(), 16);
+            for (index, evidence) in model.evidence.iter().enumerate() {
+                assert_eq!(evidence.role, DataRole::Train);
+                assert_eq!(evidence.label, s.plan.schedule()[index / 2].label);
+                assert_eq!(evidence.target_ns,
+                    (10_000_000_000u64 + index as u64 * 3_000_000_000).to_string());
+                assert_eq!(evidence.sources.len(), 2);
+            }
             assert_eq!(model.model.encoder_config(), s.plan.encoder_config());
             // Frozen fit precedes new HeldOut windows. A later fit cannot consume them.
             for index in 16..32 {
@@ -436,4 +449,38 @@ fn post_assembler_evidence_failure_is_terminal_and_preserves_previous_valid_wind
         .is_err());
     assert!(session.finish_window(now).is_err());
     assert!(session.fit().is_err());
+}
+
+// Frozen SYNTHETIC pre-C1 artifact produced by the actual native-horizon fitter
+// on base #2465. Compatibility means preserving its serialized bytes, not
+// requiring newly trained floating-point weights to match across platforms.
+const PUBLIC_SEED_V2_GOLDEN: &[u8] =
+    include_bytes!("../../tests/fixtures/temporal-seed-v2-synthetic-golden.json");
+
+#[test]
+fn public_seed_v2_frozen_artifact_import_reexports_exact_bytes() {
+    assert_eq!(PUBLIC_SEED_V2_GOLDEN.len(), 113_803);
+    assert_eq!(
+        bytes_hash(PUBLIC_SEED_V2_GOLDEN),
+        "e46e9aff391b0e41a8fe26cc46789ee65d130f109df444726893303960b5735f"
+    );
+    let frozen = TemporalModel::import(PUBLIC_SEED_V2_GOLDEN).unwrap();
+    assert_eq!(frozen.context(), &context(2));
+    assert_eq!(frozen.model.training_manifest().training_cohorts, 16);
+    assert_eq!(frozen.model.training_manifest().training_provenance,
+        vec![CaptureProvenance::Synthetic]);
+    assert_eq!(frozen.evidence.len(), 16);
+    assert!(frozen.evidence.iter().all(|e| e.role == DataRole::Train));
+    assert_eq!(frozen.export().unwrap(), PUBLIC_SEED_V2_GOLDEN);
+}
+
+#[test]
+fn public_seed_v2_frozen_artifact_rehashed_role_tamper_is_rejected() {
+    let mut envelope: Envelope = serde_json::from_slice(PUBLIC_SEED_V2_GOLDEN).unwrap();
+    envelope.payload.evidence[0].role = DataRole::HeldOut;
+    // Recompute the generic checksums: the real policy must still reject an
+    // artifact whose historical Train evidence was relabelled as HeldOut.
+    envelope.payload.input_evidence_sha256 = hash(&envelope.payload.evidence).unwrap();
+    let altered = recode(envelope);
+    assert!(TemporalModel::import(&altered).is_err());
 }

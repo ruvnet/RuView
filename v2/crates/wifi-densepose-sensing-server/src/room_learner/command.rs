@@ -22,15 +22,12 @@ impl RoomLearningRuntime {
             runtime_epoch: self.runtime_epoch.clone(),
             generation: state.generation,
             workflow_revision: state.workflow_revision,
-            context_digest: state.capture.as_ref().map(|c| c.context().digest()),
-            phase: state
-                .capture
-                .as_ref()
-                .and_then(|c| c.progress(0).phase)
-                .map(|p| PhaseIdentity {
-                    trial_id: p.trial_id,
-                    session_id: p.session_id,
-                }),
+            context_digest: state.capture_context().map(CaptureContext::digest),
+            phase: match state.capture.as_ref() {
+                Some(CaptureWorkflow::Legacy(c)) => c.progress(0).phase.map(|p| PhaseIdentity { trial_id: p.trial_id, session_id: p.session_id }),
+                Some(CaptureWorkflow::Temporal(c)) => c.phase_identity(),
+                None => None,
+            },
         }
     }
     pub fn mutation_guard(&self) -> Result<MutationGuard, String> {

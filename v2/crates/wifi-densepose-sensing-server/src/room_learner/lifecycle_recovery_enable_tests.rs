@@ -45,8 +45,7 @@ fn current_new_run_enable_preserves_exact_rows_history_watermarks_and_cold_resto
         .inner
         .lock()
         .unwrap()
-        .capture
-        .as_ref()
+        .legacy_capture()
         .unwrap()
         .checkpoint(at)
         .unwrap();
@@ -56,8 +55,7 @@ fn current_new_run_enable_preserves_exact_rows_history_watermarks_and_cold_resto
         .inner
         .lock()
         .unwrap()
-        .capture
-        .as_ref()
+        .legacy_capture()
         .unwrap()
         .checkpoint(at)
         .unwrap();
@@ -106,8 +104,7 @@ fn wrong_ticket_consent_stale_guard_and_active_phase_do_not_enable_or_change_cap
         .inner
         .lock()
         .unwrap()
-        .capture
-        .as_ref()
+        .legacy_capture()
         .unwrap()
         .checkpoint(BASE)
         .unwrap();
@@ -120,8 +117,7 @@ fn wrong_ticket_consent_stale_guard_and_active_phase_do_not_enable_or_change_cap
             &rt.inner
                 .lock()
                 .unwrap()
-                .capture
-                .as_ref()
+                .legacy_capture()
                 .unwrap()
                 .checkpoint(BASE)
                 .unwrap()
@@ -246,8 +242,7 @@ fn write_failure_keeps_ram_and_ticket_then_explicit_retry_can_succeed_without_re
         &rt.inner
             .lock()
             .unwrap()
-            .capture
-            .as_ref()
+            .legacy_capture()
             .unwrap()
             .checkpoint(at)
             .unwrap(),
@@ -263,8 +258,7 @@ fn write_failure_keeps_ram_and_ticket_then_explicit_retry_can_succeed_without_re
             &rt.inner
                 .lock()
                 .unwrap()
-                .capture
-                .as_ref()
+                .legacy_capture()
                 .unwrap()
                 .checkpoint(at)
                 .unwrap()
@@ -330,8 +324,7 @@ fn partial_committed_same_ticket_is_retried_with_unchanged_original_deadline() {
             .inner
             .lock()
             .unwrap()
-            .capture
-            .as_ref()
+            .legacy_capture()
             .unwrap()
             .checkpoint(at)
             .unwrap(),
