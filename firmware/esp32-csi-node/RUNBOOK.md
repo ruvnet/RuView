@@ -384,3 +384,19 @@ A gate comparison needs a fixed environment, repeated blocks, and every arm run
 on every node -- otherwise node placement is confounded with the setting. The
 harness used for the published comparison is in the repository; use it rather
 than eyeballing a frame rate, which moves for reasons unrelated to the setting.
+
+---
+
+## 8. Releasing
+
+A firmware release is published on one of two channels, and they make
+different claims. A **prerelease** is built and host-tested by CI. A
+**stable** release has been qualified on real boards and is published by a
+person. The procedure for both, the acceptance criteria, and the readiness
+gate that checks them are in `docs/firmware-release.md`.
+
+The part that catches people out: the acceptance thresholds were measured on
+one board, one access point, and one room. The yield a node sustains depends
+on the network around it, not only on the firmware, so a qualification run has
+to name its environment and declare the threshold that applies to it. The
+harness refuses to produce a verdict without both.

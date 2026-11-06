@@ -1,0 +1,72 @@
+name: ESP32 firmware release qualification contract
+
+on:
+  pull_request:
+    paths:
+      - 'firmware/esp32-csi-node/version.txt'
+      - 'docs/firmware-release.md'
+      - 'docs/releases/v*-esp32.md'
+      - 'docs/validation/*.md'
+      - 'scripts/esp32_firmware_qualification.py'
+      - 'scripts/esp32_firmware_release_readiness.py'
+      - 'scripts/qualify-esp32-firmware.py'
+      - 'scripts/check-firmware-release-readiness.py'
+      - 'scripts/tests/test_esp32_firmware_*.py'
+      - '.github/workflows/esp32-release-qualification-verify.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'firmware/esp32-csi-node/version.txt'
+      - 'docs/firmware-release.md'
+      - 'docs/releases/v*-esp32.md'
+      - 'docs/validation/*.md'
+      - 'scripts/esp32_firmware_qualification.py'
+      - 'scripts/esp32_firmware_release_readiness.py'
+      - 'scripts/qualify-esp32-firmware.py'
+      - 'scripts/check-firmware-release-readiness.py'
+      - 'scripts/tests/test_esp32_firmware_*.py'
+      - '.github/workflows/esp32-release-qualification-verify.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: The ESP32 stable-release qualification is runnable and self-consistent
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          submodules: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - name: Test the qualification and readiness contracts
+        run: python -m unittest discover -s scripts/tests -p 'test_esp32_firmware_*.py'
+      - name: The declared qualification records agree with their verdicts
+        run: python scripts/check-firmware-release-readiness.py --verify-records
+      - name: The qualification harness refuses a verdict without an environment
+        run: |
+          set -uo pipefail
+          if python scripts/qualify-esp32-firmware.py --node 1 --seconds 1 \
+               --firmware-version 0.0.0 2>/tmp/qualify.err; then
+            echo "::error::the harness accepted a run without an environment note"
+            exit 1
+          fi
+          if ! grep -q 'environment-note is required' /tmp/qualify.err; then
+            echo "::error::the harness did not report the missing environment note"
+            cat /tmp/qualify.err
+            exit 1
+          fi
+      - name: The readiness gate refuses a version that is not ready
+        run: |
+          set -uo pipefail
+          version="$(tr -d '[:space:]' < firmware/esp32-csi-node/version.txt)"
+          if python scripts/check-firmware-release-readiness.py --version "$version" \
+               >/tmp/readiness.txt 2>&1; then
+            echo "::notice::firmware $version is ready for a stable release"
+          else
+            echo "::notice::firmware $version is not ready for a stable release:"
+            sed 's/^/    /' /tmp/readiness.txt
+          fi
