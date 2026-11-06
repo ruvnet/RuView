@@ -1,5 +1,17 @@
 menu "CSI Node Configuration"
 
+    config RUVIEW_ONBOARDING_NATIVE_USB
+        bool "Additional native USB Serial/JTAG onboarding endpoint"
+        depends on (IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32C5) && ESP_CONSOLE_UART
+        default n
+        help
+            Keep the primary UART console and also accept bounded onboarding
+            commands through the chip's native USB Serial/JTAG driver. Each
+            endpoint has its own line buffer and nonce. Enable only on boards
+            where native USB Serial/JTAG owns the USB PHY (not USB-OTG/CDC).
+            Does not expose a shell or change the network configuration.
+
+
     config C5_STATUS_LED_GPIO
         int "ESP32-C5 addressable status LED GPIO (-1 disables)"
         depends on IDF_TARGET_ESP32C5

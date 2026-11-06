@@ -10,6 +10,8 @@ class OnboardingConsoleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             (root / "driver").mkdir()
+            (root / "freertos").mkdir()
+            (root / "freertos/FreeRTOS.h").write_text("#pragma once\n#define pdMS_TO_TICKS(ms) (ms)\n")
             (root / "esp_err.h").write_text(
                 "#pragma once\ntypedef int esp_err_t;\n#define ESP_OK 0\n")
             (root / "esp_idf_version.h").write_text(
@@ -21,7 +23,9 @@ class OnboardingConsoleTests(unittest.TestCase):
                 "typedef struct { uint32_t tx_buffer_size, rx_buffer_size; } usb_serial_jtag_driver_config_t;\n"
                 "#define USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT() (usb_serial_jtag_driver_config_t){256,256}\n"
                 "bool usb_serial_jtag_is_driver_installed(void);\n"
-                "esp_err_t usb_serial_jtag_driver_install(usb_serial_jtag_driver_config_t *config);\n")
+                "esp_err_t usb_serial_jtag_driver_install(usb_serial_jtag_driver_config_t *config);\n"
+                "int usb_serial_jtag_read_bytes(void *, uint32_t, uint32_t);\n"
+                "int usb_serial_jtag_write_bytes(const void *, size_t, uint32_t);\n")
             (root / "driver/usb_serial_jtag_vfs.h").write_text(
                 "#pragma once\nvoid usb_serial_jtag_vfs_use_driver(void);\n")
             (root / "probe.c").write_text(r'''
@@ -40,7 +44,7 @@ esp_err_t usb_serial_jtag_driver_install(usb_serial_jtag_driver_config_t *config
 }
 void usb_serial_jtag_vfs_use_driver(void) { assert(installed); switches++; }
 int main(void) {
-#if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG) && ESP_IDF_VERSION_MAJOR >= 6
+#ifdef RUVIEW_ONBOARDING_NEEDS_USB_DRIVER
     assert(ruview_onboarding_console_prepare() == 0);
     assert(installs == 1 && switches == 1);
     assert(ruview_onboarding_console_prepare() == 0);
@@ -58,7 +62,8 @@ int main(void) {
 ''')
             production = pathlib.Path(__file__).resolve().parents[1] / "main"
             for defines in [[], ["-DCONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=1"],
-                            ["-DCONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=1", "-DESP_IDF_VERSION_MAJOR=5"]]:
+                            ["-DCONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=1", "-DESP_IDF_VERSION_MAJOR=5"],
+                            ["-DCONFIG_RUVIEW_ONBOARDING_NATIVE_USB=1", "-DCONFIG_ESP_CONSOLE_UART=1"]]:
                 binary = root / "probe"
                 subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
                                 *defines, "-I", str(root), "-I", str(production),

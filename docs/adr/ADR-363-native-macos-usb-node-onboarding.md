@@ -91,3 +91,41 @@ The 2026-09-11 physical run passed on an ESP32 C6 over
 hello receipt, preserved node identity 3, committed the server route, and
 verified fresh server evidence at minus 34 dBm. The run also exposed and fixed
 the GPIO 17 console RX conflict described above.
+
+
+## November 4, 2026 amendment: bounded native USB input alongside UART
+
+Updated: 2026-11-04. Accepted protocol unchanged; this additional transport is
+implemented and host-tested, but **physical native-USB qualification is pending**.
+The historical S3/C6 acceptance above does not qualify these new firmware bytes.
+
+ESP-IDF routes stdin only to the primary console. Its secondary USB Serial/JTAG
+console mirrors output but does not supply stdin. Thus an S3/C5 can log bounded
+onboarding readiness on its native USB connector yet never consume the Mac's
+HELLO. A missing receipt must not be described as proof of old firmware.
+
+`RUVIEW_ONBOARDING_NATIVE_USB` adds an explicitly enabled native USB Serial/JTAG
+endpoint while retaining the primary UART. The headless S3 4 MB and C5 UART
+profiles enable it; the S3 display/default profile stays unchanged to avoid
+claiming its USB PHY when used by USB-OTG/CDC. Kconfig permits only S3/C5 with a
+UART primary. C6 retains its existing primary native-USB path with no second
+reader. This amendment builds on current main's conservative C5 support; it does
+not transplant or supersede PR #2161's separate RF/dual-band work.
+
+The additional endpoint installs the public USB driver once, uses nonblocking
+reads and a bounded 20 ms reply write, and shares its TX queue with any existing
+mirrored console output. It does not change the global stdin/console choice.
+Each endpoint has its own bounded line buffer and fresh, single-use 60-second
+nonce; bytes or challenges from one endpoint cannot authorize the other.
+Overflowed lines are discarded and buffers cleared. A failed optional USB
+initialization retains UART onboarding; a failed HELLO response does not leave
+an accepted claim. No shell, extra network listener or Wi-Fi credential output
+is added. Boards with another native-USB owner must leave the option disabled.
+
+Release packaging uses the existing headless4MB and C5 artifact names and chip/
+partition geometry. It requires a new firmware build and release; updating the
+Mac app cannot retrofit this endpoint into existing v0.8.17 devices. UART setups
+continue to work. Physical acceptance must exercise UART and native USB on the
+actual S3/C5 boards, including discovery, same-device challenge, provisioning,
+reboot and fresh expected-node CSI. The three active sensing nodes were not
+flashed for source verification.
