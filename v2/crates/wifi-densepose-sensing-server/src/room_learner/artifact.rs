@@ -317,6 +317,7 @@ pub use temporal_artifacts::TemporalCandidateReceipt;
 #[path="temporal_fit_summary.rs"]
 mod temporal_fit_summary;
 pub(crate) use temporal_fit_summary::{TemporalFitDiagnostics,TemporalFitSaveResult};
+pub(crate) use temporal_fit_summary::FitDiagnosticState;
 
 #[cfg(test)]
 pub(crate) use temporal_fit_summary::rehash_fixture as rehash_temporal_fit_fixture;

@@ -122,6 +122,8 @@ struct Shared {
     corrupt_ack_id: AtomicBool,
     #[cfg(test)]
     hold: Mutex<Option<(mpsc::SyncSender<()>, mpsc::Receiver<()>)>>,
+    #[cfg(test)]
+    hold_after_prepare: Mutex<Option<(mpsc::SyncSender<()>, mpsc::Receiver<()>)>>,
 }
 impl Shared {
     fn now(&self) -> Result<u64, String> {
@@ -172,6 +174,8 @@ impl Writer {
             corrupt_ack_id: AtomicBool::new(false),
             #[cfg(test)]
             hold: Mutex::new(None),
+            #[cfg(test)]
+            hold_after_prepare: Mutex::new(None),
         });
         let state = shared.clone();
         let thread = std::thread::Builder::new()
@@ -181,7 +185,7 @@ impl Writer {
                 while let Ok(work) = requests.recv() {
                     let (id, slot, rows, seals, start_ticket, result) = match work {
                         Work::Stop => break,
-                        Work::Commit(request) => {
+                        Work::Commit(mut request) => {
                             let meta = (request.id, request.slot, request.rows, request.seals);
                             let result = (|| {
                                 state.allowed(&request.descriptor)?;
@@ -200,10 +204,13 @@ impl Writer {
                                     return Err("temporal_writer_exact_repair_required".into());
                                 }
                                 let records = checkpoint::snapshot_records(&request.snapshot);
+                                let full_permit=checkpoint::snapshot_full_permit(&mut request.snapshot);
                                 let bytes = checkpoint::encode_snapshot(request.snapshot)?;
                                 let at = request.saved_receiver_ns;
-                                let prefix =
+                                let mut prefix =
                                     checkpoint::validated_prefix(&bytes, &request.descriptor, at)?;
+                                if let Some(permit)=full_permit{prefix.attach_full_grant(permit.encoded(&bytes))?;}
+                                prefix.verify_full_artifact()?;
                                 let intent = store.prepare_temporal(
                                     request.expected.as_ref(),
                                     &prefix,
@@ -218,6 +225,11 @@ impl Writer {
                                     seals: meta.3,
                                     records,
                                 });
+                                #[cfg(test)]
+                                if let Some((entered, release)) = state.hold_after_prepare.lock().map_err(|_|"temporal_writer_test_lock")?.take() {
+                                    let _ = entered.send(());
+                                    let _ = release.recv();
+                                }
                                 let p = pending.as_ref().unwrap();
                                 let token = store.publish_temporal(
                                     &p.intent,
@@ -489,6 +501,10 @@ impl Writer {
         self.shared.lose_next_ack.store(true, Ordering::Release);
     }
     #[cfg(test)]
+    pub fn hold_next_after_prepare(&self, entered:mpsc::SyncSender<()>, release:mpsc::Receiver<()>) {
+        *self.shared.hold_after_prepare.lock().unwrap()=Some((entered,release));
+    }
+    #[cfg(test)]
     pub fn hold_next(&self, entered: mpsc::SyncSender<()>, release: mpsc::Receiver<()>) {
         *self.shared.hold.lock().unwrap() = Some((entered, release));
     }
@@ -515,6 +531,7 @@ fn readback(
     }
     let restored =
         checkpoint::decode_shared(p.prefix.bytes(), p.prefix.descriptor(), now, &p.records)?;
+    p.prefix.verify_full_artifact()?;
     let rows_sha256 = hash(&restored.session.rows)?;
     let row_prefix_sha256 = hash(&(
         &restored.session.rows,
@@ -554,6 +571,9 @@ pub(super) struct AsyncState {
     pub row_prefix_sha256: Option<String>,
     pub error: Option<String>,
     pub accepted_seals: usize,
+    // At most the same ONE completion, awaiting an actually fresh receiver
+    // timestamp for new full-run authority. Never a packet or work queue.
+    deferred_ack:Option<CommitAck>,
 }
 impl AsyncState {
     pub fn new(writer: Arc<Writer>) -> Self {
@@ -568,6 +588,7 @@ impl AsyncState {
             row_prefix_sha256: None,
             error: None,
             accepted_seals: 0,
+            deferred_ack:None,
         }
     }
     pub fn seed_restored(&mut self, w: &TemporalWorkflow) -> Result<(), String> {
@@ -724,6 +745,7 @@ impl TemporalWorkflow {
         now: u64,
         retired: &mut DeferredReclamation,
     ) -> Result<Option<(bool, u64)>, String> {
+        let full_run=self.full_run.is_some();
         let Some(state) = self.async_state.as_mut() else {
             return Ok(None);
         };
@@ -731,14 +753,18 @@ impl TemporalWorkflow {
             return Err("temporal_reclamation_already_occupied".into());
         }
         state.writer.observe_now(now);
-        let Some(ack) = state.writer.poll()? else {
+        let next=if state.deferred_ack.is_some(){state.deferred_ack.take()}else{state.writer.poll()?};
+        let Some(ack) = next else {
             return Ok(None);
         };
+        if full_run && now<ack.completed_at_ns{
+            state.deferred_ack=Some(ack);return Ok(None);
+        }
         // Own the WHOLE response before any fallible validation. Rejected or
         // stale successful responses also contain a large plaintext buffer.
         retired.ack = Some(ack);
         let ack = retired.ack.as_mut().unwrap();
-        let now = now.max(ack.completed_at_ns);
+        let now = if full_run{now}else{now.max(ack.completed_at_ns)};
         retired.pending = Some(
             state
                 .pending
@@ -800,10 +826,16 @@ impl TemporalWorkflow {
         {
             return Err("temporal_writer_ack_binding_changed".into());
         }
+        if match (&self.full_run,&candidate.full_run) {
+            (None,None)=>false,
+            (Some(a),Some(b))=>a.policy.sha256()!=b.policy.sha256(),
+            _=>true,
+        } {return Err("temporal_writer_ack_continuation_changed".into());}
+        let frozen_transition=self.prepare_frozen_ack(candidate,now)?;
         let must_restore = self
             .async_state
             .as_ref()
-            .is_some_and(|s| s.busy_pause || s.repairing);
+            .is_some_and(|s| s.busy_pause || s.repairing) && frozen_transition.is_none();
         if must_restore {
             retired.fences = Some(self.session.assembler.fence_checkpoint()?);
             let restored = committed.restored.as_mut().unwrap();
@@ -836,6 +868,7 @@ impl TemporalWorkflow {
         state.accepted_seals = pending.seals;
         state.rows_sha256 = Some(committed.rows_sha256.clone());
         state.row_prefix_sha256 = Some(committed.row_prefix_sha256.clone());
+        if frozen_transition.is_some(){state.busy_pause=false;state.repairing=false;}
         retired.previous_bytes = self.durable.take();
         self.commit_token = Some(committed.token.clone());
         self.durable = Some(committed.bytes.clone());
@@ -848,6 +881,13 @@ impl TemporalWorkflow {
             state.busy_pause = false;
             state.repairing = false;
             restored.async_state = Some(state);
+            if let Some(old)=self.full_run.as_mut(){
+                // Exact continuation presence was already validated above;
+                // all fallible checks finished before moving live custody.
+                let recovered=restored.full_run.as_mut().unwrap();
+                recovered.owner=old.owner.take();
+                recovered.local_start_not_before_ns=old.local_start_not_before_ns;
+            }
             let replacement = *committed.restored.take().unwrap();
             retired.previous_workflow = Some(Box::new(std::mem::replace(self, replacement)));
             if persist_pause {
@@ -857,6 +897,7 @@ impl TemporalWorkflow {
         } else {
             self.async_state = Some(state);
         }
+        if let Some(transition)=frozen_transition{self.apply_frozen_ack(transition);}
         self.last_now_ns = self.last_now_ns.max(now);
         Ok(Some((pending.start_ticket, now)))
     }

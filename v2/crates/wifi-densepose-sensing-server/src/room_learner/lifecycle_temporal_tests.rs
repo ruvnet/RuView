@@ -63,7 +63,7 @@ fn configured(root: &Path) -> RoomLearningRuntime {
     .unwrap();
     rt
 }
-fn packet(source: u8, seq: u32, at: u64) -> CanonicalPacket {
+pub(super) fn packet(source: u8, seq: u32, at: u64) -> CanonicalPacket {
     let iq = vec![8; 128];
     canonicalize_esp32(NativePacketInput {
         node_id: source,

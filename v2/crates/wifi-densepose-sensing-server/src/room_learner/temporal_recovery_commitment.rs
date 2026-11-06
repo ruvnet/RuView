@@ -6,7 +6,10 @@ use crate::room_learner::temporal_model_input::managed::execution::checkpoint::{
     is_new_empty_run, validate_extension, validated_prefix, ValidatedTemporalPrefix,
 };
 use sha2::{Digest, Sha256};
+// Storage directory/AAD framing stay unchanged. The schema field below is
+// authenticated version DATA; new kind2 never creates a parallel namespace.
 const KIND: &str = "temporal-prefix-commitment-v1";
+const FULL_KIND: &str = "temporal-prefix-commitment-v2";
 const LOCK: &str = "temporal-prefix.lock";
 const HEAD: &str = "temporal-head.bin";
 const MAGIC: &[u8; 8] = b"RVTCPR01";
@@ -59,6 +62,18 @@ pub(crate) struct TemporalToken {
     run: String,
     id: String,
     commitment: String,
+}
+/// Read-only commitment DATA. Deserializing this is never a TemporalToken or
+/// store/producer permission.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TemporalCommitmentData {
+    pub generation:u64,pub revision:usize,pub run:String,pub id:String,pub commitment:String,
+}
+impl TemporalToken {
+    pub(crate) fn data(&self)->TemporalCommitmentData{
+        TemporalCommitmentData{generation:self.generation,revision:self.revision,run:self.run.clone(),id:self.id.clone(),commitment:self.commitment.clone()}
+    }
 }
 #[derive(Clone)]
 pub(crate) struct TemporalIntent {
@@ -208,13 +223,13 @@ impl RecoveryStore {
         let p = self.temporal_open(domain, &bytes, SMALL)?;
         let m: Meta = serde_json::from_slice(&p).map_err(|_| "temporal_metadata_schema")?;
         if serde_json::to_vec(&m).map_err(|_| "temporal_metadata_encoding")? != p
-            || m.schema != KIND
+            || !matches!(m.schema.as_str(),KIND|FULL_KIND)
             || m.transition_limit > MAX_TRANSITIONS
             || m.transition_limit < 2
             || m.revision >= m.transition_limit
             || !id(&m.run)
             || !hex(&m.policy_sha256)
-            || m.window_count > 64
+            || m.window_count > if m.schema==FULL_KIND{128}else{64}
         {
             return Err("temporal_metadata_binding".into());
         }
@@ -398,7 +413,7 @@ impl RecoveryStore {
         let m: Meta =
             serde_json::from_slice(&bytes[12..12 + n]).map_err(|_| "temporal_payload_metadata")?;
         if serde_json::to_vec(&m).map_err(|_| "temporal_metadata_encoding")? != bytes[12..12 + n]
-            || m.schema != KIND
+            || !matches!(m.schema.as_str(),KIND|FULL_KIND)
             || m.retired_at_ms.is_some()
         {
             return Err("temporal_payload_metadata".into());
@@ -413,6 +428,7 @@ impl RecoveryStore {
         }
         let p = validated_prefix(&plain, &m.descriptor, now_ns)?;
         if p.run() != m.run
+            ||p.metadata_kind()!=m.schema
             || p.policy_sha256() != m.policy_sha256
             || p.window_count() != m.window_count
             || p.transition_limit() != m.transition_limit
@@ -454,6 +470,7 @@ impl RecoveryStore {
         prefix: &ValidatedTemporalPrefix,
         now_ns: u64,
     ) -> Result<TemporalIntent, String> {
+        if !prefix.authorizes_write(expected){return Err("temporal_full_run_producer_write_grant_required".into());}
         let _serial = self
             .serial
             .lock()
@@ -529,7 +546,7 @@ impl RecoveryStore {
         Ok(TemporalIntent {
             expected: expected.cloned(),
             meta: Meta {
-                schema: KIND.into(),
+                schema: prefix.metadata_kind().into(),
                 generation,
                 revision,
                 descriptor: prefix.descriptor().clone(),
@@ -731,6 +748,7 @@ impl RecoveryStore {
             if meta.retired_at_ms.is_some()
                 || p.descriptor() != &meta.descriptor
                 || p.run() != meta.run
+                ||p.metadata_kind()!=meta.schema
                 || p.policy_sha256() != meta.policy_sha256
                 || Some(hash(p.bytes())).as_ref() != meta.payload_sha256.as_ref()
             {
