@@ -7,11 +7,13 @@
 //! by Home Assistant — `discovery.rs::DiscoveryBuilder::enabled_entities`
 //! returns the filtered set.
 //!
-//! Semantic primitives (someone-sleeping, possible-distress, etc) stay
-//! enabled in privacy mode because they're inferred *states*, not raw
-//! biometric values. The inference runs server-side and only the boolean
-//! / numeric state crosses the wire. This is the key design choice that
-//! makes ADR-115 §3.12 enterprise- and healthcare-deployable.
+//! Which entities are biometric is decided by
+//! [`EntityKind::privacy_class`], an exhaustive match: a new entity has no
+//! default class. Semantic primitives whose inputs include vital signs
+//! (someone-sleeping reads breathing rate, possible-distress reads heart
+//! rate) are biometric and suppressed too (#2165); the inferred state still
+//! says something about the occupant's vitals. Primitives built only on
+//! presence, motion, zones and falls stay published.
 
 use super::discovery::EntityKind;
 
@@ -66,6 +68,14 @@ mod tests {
     }
 
     #[test]
+    fn privacy_on_suppresses_vitals_derived_states() {
+        // #2165: sleeping is inferred from breathing rate, distress from
+        // heart rate, so they are biometric.
+        assert_eq!(decide(EntityKind::SomeoneSleeping, true), PublishDecision::Suppress);
+        assert_eq!(decide(EntityKind::PossibleDistress, true), PublishDecision::Suppress);
+    }
+
+    #[test]
     fn privacy_on_keeps_non_biometric_signals() {
         for e in [
             EntityKind::Presence,
@@ -81,13 +91,10 @@ mod tests {
     }
 
     #[test]
-    fn privacy_on_keeps_semantic_primitives() {
-        // Per ADR-115 §3.12.3 — semantic primitives are *inferred* states,
-        // not raw biometrics, so they remain available in privacy mode.
-        // This is the core privacy win of HA-MIND.
+    fn privacy_on_keeps_semantic_primitives_not_built_on_vitals() {
+        // Per ADR-115 §3.12.3 — semantic primitives whose inputs are
+        // presence, motion, zones and falls remain available in privacy mode.
         for e in [
-            EntityKind::SomeoneSleeping,
-            EntityKind::PossibleDistress,
             EntityKind::RoomActive,
             EntityKind::ElderlyInactivityAnomaly,
             EntityKind::MeetingInProgress,

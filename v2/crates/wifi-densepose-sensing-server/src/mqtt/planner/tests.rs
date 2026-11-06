@@ -316,12 +316,17 @@ fn privacy_mode_never_announces_or_publishes_biometrics() {
             }
         }
     }
-    // Inferred states stay (ADR-115 §3.12.3): their inputs are used
-    // server-side, only the state crosses the wire.
+    // Inferred states built on presence and motion stay (ADR-115 §3.12.3);
+    // states inferred from vitals are suppressed like the vitals (#2165).
     let msgs = p.on_snapshot(&b, &full(true), WARM + Duration::from_secs(1));
     let all: Vec<_> = p.availability(&b, NODE, true, WARM, true);
-    assert_eq!(avail(&all)["someone_sleeping"], "online");
+    assert_eq!(avail(&all)["room_active"], "online");
+    assert!(!avail(&all).contains_key("someone_sleeping"));
+    assert!(!avail(&all).contains_key("possible_distress"));
     assert!(msgs.iter().all(|m| !m.payload.contains("bpm")));
+    assert!(msgs
+        .iter()
+        .all(|m| !m.topic.contains("/someone_sleeping/") && !m.topic.contains("/possible_distress/")));
 }
 
 // ─── Semantic wiring ────────────────────────────────────────────────

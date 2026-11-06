@@ -200,13 +200,17 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn root() -> PathBuf {
+        // Tests run in parallel threads of one process, and two calls can read
+        // the same clock value, so a counter keeps each directory unique.
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let path = std::env::temp_dir().join(format!(
-            "homecore-plugin-discovery-{}-{}",
+            "homecore-plugin-discovery-{}-{}-{}",
             std::process::id(),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
-                .as_nanos()
+                .as_nanos(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         fs::create_dir(&path).unwrap();
         path
