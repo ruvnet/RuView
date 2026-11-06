@@ -309,3 +309,14 @@ mod managed_training_store;
 
 #[path="managed_capture_fence_store.rs"]
 mod managed_capture_fence_store;
+
+#[path = "temporal_artifact_store.rs"]
+mod temporal_artifacts;
+pub use temporal_artifacts::TemporalCandidateReceipt;
+
+#[path="temporal_fit_summary.rs"]
+mod temporal_fit_summary;
+pub(crate) use temporal_fit_summary::{TemporalFitDiagnostics,TemporalFitSaveResult};
+
+#[cfg(test)]
+pub(crate) use temporal_fit_summary::rehash_fixture as rehash_temporal_fit_fixture;
