@@ -7,9 +7,9 @@ use crate::room_learner::{
     recovery_store::RecoveryStore,
 };
 use wifi_densepose_hardware::{Adr018Flags, PpduType};
-const START: u64 = 1_000_000_000_000;
-const PERIOD: u64 = 1_000_000_000u64.div_ceil(33);
-fn context() -> CaptureContext {
+pub(super) const START: u64 = 1_000_000_000_000;
+pub(super) const PERIOD: u64 = 1_000_000_000u64.div_ceil(33);
+pub(super) fn context() -> CaptureContext {
     CaptureContext {
         owner_scope: "a".repeat(64),
         installation_id: "synthetic-runtime-temporal".into(),
@@ -31,7 +31,7 @@ fn context() -> CaptureContext {
             .collect(),
     }
 }
-fn runtime(root: &Path, now: u64) -> RoomLearningRuntime {
+pub(super) fn runtime(root: &Path, now: u64) -> RoomLearningRuntime {
     let c = context();
     let directory = root.join(&c.owner_scope).join("SensingServer");
     let store = RecoveryStore::new(
@@ -77,7 +77,7 @@ fn packet(source: u8, seq: u32, at: u64) -> CanonicalPacket {
     })
     .unwrap()
 }
-fn snapshot(rt: &RoomLearningRuntime, now: u64) -> Value {
+pub(super) fn snapshot(rt: &RoomLearningRuntime, now: u64) -> Value {
     rt.temporal_capture_snapshot(now).unwrap()["capture"].clone()
 }
 fn start(rt: &RoomLearningRuntime, at: u64) -> u64 {
@@ -557,7 +557,7 @@ fn temporal_storage_barrier_must_not_block_real_runtime_native_ingress() {
         "real native ingress waited for a storage barrier held by Runtime.inner");
 }
 
-fn settle_async_boundary(rt: &RoomLearningRuntime, after: u64) -> u64 {
+pub(super) fn settle_async_boundary(rt: &RoomLearningRuntime, after: u64) -> u64 {
     let started=std::time::Instant::now();
     loop {
         let at=after+started.elapsed().as_nanos() as u64;
@@ -645,7 +645,7 @@ fn c2_real_native_ingress_and_source_floors_progress_while_segment_writer_is_blo
     rt.cancel_temporal_durability(&rt.mutation_guard().unwrap()).unwrap();
 }
 
-fn async_lead_end(rt:&RoomLearningRuntime,at:u64)->u64{
+pub(super) fn async_lead_end(rt:&RoomLearningRuntime,at:u64)->u64{
     rt.start_temporal_phase(&rt.mutation_guard().unwrap(),at).unwrap();
     let started=std::time::Instant::now();
     loop{

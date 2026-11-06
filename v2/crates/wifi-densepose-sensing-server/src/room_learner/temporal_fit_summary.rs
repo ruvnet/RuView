@@ -291,7 +291,23 @@ impl ArtifactStore {
         report: &TrainingReport,
         configured: &FitConfig,
     ) -> Result<TemporalFitSaveResult, String> {
+        self.save_temporal_candidate_with_fit_summary_using(model,report,configured, |_|{})
+    }
+    #[cfg(test)]
+    pub(crate) fn save_temporal_candidate_with_fit_summary_probe(
+        &self,model:&TemporalModel,report:&TrainingReport,configured:&FitConfig,
+        model_saved:impl FnOnce(&TemporalCandidateReceipt),
+    )->Result<TemporalFitSaveResult,String>{
+        self.save_temporal_candidate_with_fit_summary_using(model,report,configured,model_saved)
+    }
+    /// One shared real store body. The production wrapper supplies a no-op;
+    /// the test seam can hold the genuine model-save/report-save boundary.
+    fn save_temporal_candidate_with_fit_summary_using(
+        &self,model:&TemporalModel,report:&TrainingReport,configured:&FitConfig,
+        model_saved:impl FnOnce(&TemporalCandidateReceipt),
+    )->Result<TemporalFitSaveResult,String>{
         let candidate = self.save_temporal_candidate(model)?;
+        model_saved(&candidate);
         let fit_diagnostics=match self.save_actual_temporal_fit_summary(model,report,configured){Ok(summary)=>TemporalFitDiagnostics::state(FitDiagnosticState::Recorded,Some(summary),None),Err(_)=>TemporalFitDiagnostics::state(FitDiagnosticState::NotRecorded,None,Some("The model was saved, but actual aggregate fit diagnostics were not recorded; existing files were retained."))};
         Ok(TemporalFitSaveResult {
             candidate,

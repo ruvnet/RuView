@@ -1,5 +1,6 @@
 //! Whole temporal-input diagnostics in the EXISTING owner-bound ArtifactStore.
-//! No runtime caller, managed proof, qualification, selection or inner-v1 access.
+//! Private diagnostic Runtime callers only; no managed proof, qualification,
+//! selection or inner-v1 access.
 use super::*;
 use crate::room_learner::temporal_model_input::TemporalModel;
 use std::{fs, io::Read};
