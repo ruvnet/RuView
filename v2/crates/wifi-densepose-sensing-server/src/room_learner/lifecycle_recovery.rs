@@ -99,6 +99,7 @@ impl RoomLearningRuntime {
         state: &mut Inner,
         now_ns: u64,
     ) -> Result<(), String> {
+        state.require_legacy_kind()?;
         state.recovery.last_now_ns = state.recovery.last_now_ns.max(now_ns);
         let now_ns = state.recovery.last_now_ns;
         if !state.recovery.enabled || state.capture.is_none() {
@@ -114,7 +115,7 @@ impl RoomLearningRuntime {
             return Err(error.clone());
         }
         let verified = (|| -> Result<(), String> {
-            if state.capture.as_ref().map(|capture| capture.context().digest())
+            if state.legacy_capture().map(|capture| capture.context().digest())
                 .as_deref() != Some(descriptor.context_digest.as_str())
             {
                 return Err("recovery_context_mismatch".into());
@@ -222,13 +223,19 @@ impl RoomLearningRuntime {
         now_ns: u64,
         force: bool,
     ) -> Result<(), String> {
+        state.require_legacy_kind()?;
         state.recovery.last_now_ns = state.recovery.last_now_ns.max(now_ns);
         self.expire_loaded_recovery(state, now_ns)?;
         if !state.recovery.enabled {
             return Ok(());
         }
         let result: Result<bool, String> = (|| {
-            let capture = state.capture.as_ref().ok_or("recovery_capture_missing")?;
+            // Borrow the capture field alone so recording an attempt still
+            // precedes checkpoint construction, exactly as on the legacy path.
+            let capture = match state.capture.as_ref() {
+                Some(CaptureWorkflow::Legacy(capture)) => capture,
+                _ => return Err("recovery_capture_missing".into()),
+            };
             let marker = format!(
                 "{}:{:?}:{}",
                 capture.recovery_marker(now_ns),
@@ -359,6 +366,7 @@ impl RoomLearningRuntime {
         now_ns: u64,
     ) -> Result<CaptureContext, String> {
         let mut state = self.inner.lock().map_err(|_| "learner state unavailable")?;
+        state.require_legacy_kind()?;
         state.recovery.last_now_ns = state.recovery.last_now_ns.max(now_ns);
         let now_ns = state.recovery.last_now_ns;
         let loaded = self
@@ -387,9 +395,10 @@ impl RoomLearningRuntime {
         now_ns: u64,
     ) -> Result<(), String> {
         let mut state = self.command_state(expected)?;
+        state.require_legacy_kind()?;
         state.recovery.last_now_ns = state.recovery.last_now_ns.max(now_ns);
         let now_ns = state.recovery.last_now_ns;
-        if busy(&state.job) || state.capture.as_ref().is_some_and(|c| c.phase_active()) {
+        if busy(&state.job) || state.legacy_capture().is_some_and(|c| c.phase_active()) {
             return Err("finish or cancel the active operation first".into());
         }
         let loaded = self
@@ -429,7 +438,7 @@ impl RoomLearningRuntime {
             .checked_add(1)
             .ok_or("learner generation exhausted")?;
         state.recovery_enable = None;
-        state.capture = Some(restored.session);
+        state.capture = Some(CaptureWorkflow::Legacy(restored.session));
         state.model = model.map(Arc::new);
         state.receipt = None;
         state.frozen_training = payload.frozen_training;
@@ -465,6 +474,7 @@ impl RoomLearningRuntime {
         recovery_id: &str,
     ) -> Result<(), String> {
         let mut state = self.command_state(expected)?;
+        state.require_legacy_kind()?;
         // Fence every later ingest/status/worker save before touching the file.
         state.recovery.enabled = false;
         state.recovery.marker = None;

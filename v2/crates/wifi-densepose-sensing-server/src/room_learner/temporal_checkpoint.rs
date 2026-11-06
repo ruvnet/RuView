@@ -20,6 +20,8 @@ struct Prefix {
     frozen_model: Option<String>,
     quality_issued: bool,
     confirmation_issued: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    bridge: Option<BridgeState>,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -29,6 +31,7 @@ struct Envelope {
     payload: Prefix,
 }
 const SCHEMA: &str = "ruview.room-learner.temporal-runtime-prefix.v1";
+const BRIDGE_SCHEMA: &str = "ruview.room-learner.temporal-runtime-prefix.v2";
 pub(super) fn encode(v: &TemporalWorkflow) -> Result<Vec<u8>, String> {
     if v.session.fitted
         || v.session.failed
@@ -43,8 +46,13 @@ pub(super) fn encode(v: &TemporalWorkflow) -> Result<Vec<u8>, String> {
         .managed
         .as_ref()
         .ok_or("managed_session_required")?;
+    let schema = if v.bridge.is_some() {
+        BRIDGE_SCHEMA
+    } else {
+        SCHEMA
+    };
     let payload = Prefix {
-        schema: SCHEMA.into(),
+        schema: schema.into(),
         binding: m.binding.clone(),
         run: v.session.run_id.clone(),
         descriptor: v.descriptor.clone(),
@@ -60,9 +68,10 @@ pub(super) fn encode(v: &TemporalWorkflow) -> Result<Vec<u8>, String> {
         frozen_model: None,
         quality_issued: false,
         confirmation_issued: false,
+        bridge: v.bridge.clone(),
     };
     let envelope = Envelope {
-        schema: SCHEMA.into(),
+        schema: schema.into(),
         payload_sha256: hash(&payload)?,
         payload,
     };
@@ -81,8 +90,9 @@ pub(super) fn decode(
         return Err("temporal_checkpoint_budget".into());
     }
     let e: Envelope = serde_json::from_slice(bytes).map_err(|_| "temporal_checkpoint_schema")?;
-    if e.schema != SCHEMA
-        || e.payload.schema != SCHEMA
+    if !matches!(e.schema.as_str(), SCHEMA | BRIDGE_SCHEMA)
+        || e.payload.schema != e.schema
+        || (e.schema == SCHEMA) != e.payload.bridge.is_none()
         || e.payload_sha256 != hash(&e.payload)?
         || serde_json::to_vec(&e).map_err(|_| "temporal_checkpoint_encoding")? != bytes
     {
@@ -142,7 +152,7 @@ pub(super) fn decode(
         if mapping.observed_start_ns != expected_start {
             return Err("temporal_checkpoint_mapping_start".into());
         }
-    } else if !p.rows.is_empty() {
+    } else if !p.rows.is_empty() && p.bridge.as_ref().is_none_or(|b| b.seals.len() != p.episode) {
         return Err("temporal_checkpoint_mapping_missing".into());
     }
     validate_records(
@@ -336,6 +346,38 @@ pub(super) fn decode(
             return Err("temporal_gap_mapping_changed".into());
         }
     }
+    if let Some(bridge) = &p.bridge {
+        bridge.validate(
+            &schedule,
+            &p.run,
+            &p.rows,
+            &p.evidence,
+            &p.ledger,
+            p.episode,
+            p.mapping.as_ref(),
+            p.last_now_ns,
+        )?;
+        // Whole-period quality also observes the reservation tail and packets
+        // between retained strata. Those durably acknowledged observations
+        // must not disappear from the replay floors merely because they are
+        // not samples in a retained native window.
+        for part in bridge
+            .seals
+            .iter()
+            .flat_map(|seal| &seal.parts)
+            .chain(&bridge.parts)
+        {
+            for observed in &part.sources {
+                if !p.source_high.iter().any(|(id, sequence, time)| {
+                    *id == observed.source_id
+                        && *sequence >= observed.last_sequence
+                        && *time >= observed.last_ns
+                }) {
+                    return Err("temporal_quality_floors_regressed".into());
+                }
+            }
+        }
+    }
     let mut session =
         TemporalTrainingSession::managed(schedule.clone(), p.run, p.binding.fit.clone())?;
     session.rows = p.rows;
@@ -384,6 +426,7 @@ pub(super) fn decode(
         commit_token: None,
         pending_intent: None,
         pending_prefix: None,
+        bridge: p.bridge,
     })
 }
 #[cfg(test)]
@@ -429,7 +472,11 @@ pub(crate) fn validated_prefix(
         bytes: bytes.to_vec(),
         descriptor: descriptor.clone(),
         run: v.session.run_id.clone(),
-        policy_sha256: v.session.plan_sha256().into(),
+        policy_sha256: if v.bridge.is_some() {
+            hash(&(v.session.plan_sha256(), bridge::BRIDGE_POLICY))?
+        } else {
+            v.session.plan_sha256().into()
+        },
         window_count: v.session.rows.len(),
         transition_limit,
         saved_receiver_ns: v.last_now_ns,
@@ -494,8 +541,76 @@ pub(crate) fn validate_extension(
             && b.mapping.is_some()
             && b.ledger.gaps.len() == a.ledger.gaps.len())
             || (b.ledger.gaps.len() == a.ledger.gaps.len() + 1));
-    if !window && !segment {
-        return Err("temporal_transition_without_window_or_segment".into());
+    match (&a.bridge, &b.bridge) {
+        (None, None) => {
+            if !window && !segment {
+                return Err("temporal_transition_without_window_or_segment".into());
+            }
+        }
+        (Some(old), Some(new)) => {
+            prefix!(old.seals, new.seals);
+            let seal = b.rows.len() == a.rows.len()
+                && b.episode == a.episode + 1
+                && b.ledger.gaps == a.ledger.gaps
+                && b.mapping.is_none()
+                && new.seals.len() == old.seals.len() + 1
+                && new.parts.is_empty()
+                && new
+                    .seals
+                    .last()
+                    .is_some_and(|s| s.parts == old.parts && s.confirmed_at_ns >= a.last_now_ns);
+            let pause = b.rows.len() == a.rows.len()
+                && b.episode == a.episode
+                && b.mapping == a.mapping
+                && b.ledger.gaps == a.ledger.gaps
+                && new.seals == old.seals
+                && new.parts == old.parts
+                && new.disposition == bridge::Disposition::Paused;
+            if seal {
+                return Ok(());
+            }
+            if new.seals != old.seals || b.episode != a.episode {
+                return Err("temporal_bridge_seal_transition".into());
+            }
+            if window {
+                if new.parts.len() != old.parts.len() || old.parts.is_empty() {
+                    return Err("temporal_quality_part_transition".into());
+                }
+                let n = old.parts.len() - 1;
+                if old.parts[..n] != new.parts[..n]
+                    || old.parts[n].mapping != new.parts[n].mapping
+                    || new.parts[n].observed_end_ns < old.parts[n].observed_end_ns
+                {
+                    return Err("temporal_quality_prefix_changed".into());
+                }
+                for source in &old.parts[n].sources {
+                    if !new.parts[n].sources.iter().any(|s| {
+                        s.source_id == source.source_id
+                            && s.first_ns == source.first_ns
+                            && s.first_sequence == source.first_sequence
+                            && s.packets >= source.packets
+                            && s.last_ns >= source.last_ns
+                            && s.last_sequence >= source.last_sequence
+                            && s.maximum_gap_ns >= source.maximum_gap_ns
+                            && s.minimum_interval_ns <= source.minimum_interval_ns
+                    }) {
+                        return Err("temporal_quality_counts_regressed".into());
+                    }
+                }
+            } else if segment {
+                if new.parts.len() != old.parts.len() + 1
+                    || new.parts[..old.parts.len()] != old.parts
+                    || new.parts.last().is_none_or(|p| {
+                        !p.sources.is_empty() || p.observed_end_ns != p.mapping.observed_start_ns
+                    })
+                {
+                    return Err("temporal_quality_segment_changed".into());
+                }
+            } else if !pause {
+                return Err("temporal_bridge_transition_invalid".into());
+            }
+        }
+        _ => return Err("temporal_bridge_kind_changed".into()),
     }
     Ok(())
 }
@@ -538,6 +653,9 @@ pub(crate) fn is_new_empty_run(p: &ValidatedTemporalPrefix) -> Result<bool, Stri
         && q.source_high.is_empty()
         && q.mapping.is_none()
         && q.episode == 0
+        && q.bridge.as_ref().is_none_or(|b| {
+            b.seals.is_empty() && b.parts.is_empty() && b.disposition == bridge::Disposition::Ready
+        })
         && serde_json::to_vec(&q.fences).map_err(|_| "temporal_encoding")?
             == serde_json::to_vec(&fresh.assembler.fence_checkpoint()?)
                 .map_err(|_| "temporal_encoding")?)

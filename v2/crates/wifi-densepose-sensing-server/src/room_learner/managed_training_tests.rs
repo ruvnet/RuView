@@ -297,8 +297,7 @@ async fn corrupt_foreign_and_torn_metadata_never_replace_exact_train_checks() {
             &rt.inner
                 .lock()
                 .unwrap()
-                .capture
-                .as_ref()
+                .legacy_capture()
                 .unwrap()
                 .validated_dataset()
                 .unwrap(),
@@ -306,7 +305,7 @@ async fn corrupt_foreign_and_torn_metadata_never_replace_exact_train_checks() {
         )
         .unwrap();
     let state = rt.inner.lock().unwrap();
-    let capture = state.capture.as_ref().unwrap();
+    let capture = state.legacy_capture().unwrap();
     let mut rows = capture.cohorts().to_vec();
     rows.iter_mut()
         .find(|c| c.role == DataRole::Train)
@@ -443,7 +442,7 @@ async fn failed_assessment_cold_resume_keeps_all_sealed_phase_fences_not_only_tr
         .as_str()
         .is_some());
     let state = cold.inner.lock().unwrap();
-    let capture = state.capture.as_ref().unwrap();
+    let capture = state.legacy_capture().unwrap();
     assert_eq!(capture.metadata_lineage(), Some(&fence.seed));
     let last = &fence.seed.sources[0];
     drop(state);
@@ -747,15 +746,14 @@ async fn phase_seal_waits_for_durable_fence_and_pending_retry_keeps_original_met
         rt.inner
             .lock()
             .unwrap()
-            .capture
-            .as_ref()
+            .legacy_capture()
             .unwrap()
             .history()
             .len(),
         8
     );
     crate::companion::atomic_private_write(&head, &old_head).unwrap();
-    let mut completed = rt.inner.lock().unwrap().capture.as_ref().unwrap().clone();
+    let mut completed = rt.inner.lock().unwrap().legacy_capture().unwrap().clone();
     completed.finish_phase(end).unwrap();
     let pending = crate::room_learner::managed_capture_fences::ManagedCaptureFence::issue(
         &proof,

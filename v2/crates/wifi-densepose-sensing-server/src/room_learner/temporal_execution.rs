@@ -10,6 +10,11 @@ use crate::room_learner::{
     temporal_acquisition::{AssemblerCheckpoint, ManagedWindowTarget},
 };
 use serde::{Deserialize, Serialize};
+#[path = "temporal_capture_quality.rs"]
+mod bridge;
+use bridge::BridgeState;
+pub(crate) use bridge::{TemporalCaptureStage, TemporalTrainCapture};
+
 pub(crate) const EXECUTION_POLICY:&str="observed-complete-reservation-prefix-v1;paused-time;immutable-spans;partial-tail-drop;max128segments;persegment-native-firstarrival-skew-gaps;explicit-genesis-gap-anchor;quality-unimplemented;independence-false";
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -182,6 +187,7 @@ struct TemporalWorkflow {
     commit_token: Option<TemporalToken>,
     pending_intent: Option<TemporalIntent>,
     pending_prefix: Option<checkpoint::ValidatedTemporalPrefix>,
+    bridge: Option<BridgeState>,
 }
 impl TemporalWorkflow {
     fn context(&self) -> &CaptureContext {
@@ -214,7 +220,6 @@ impl TemporalWorkflow {
         self.last_now_ns = now;
         Ok(())
     }
-    #[cfg(test)]
     fn prepare(
         schedule: ManagedScheduleContract,
         run: String,
@@ -253,6 +258,7 @@ impl TemporalWorkflow {
             commit_token: None,
             pending_intent: None,
             pending_prefix: None,
+            bridge: None,
         })
     }
     #[cfg(test)]
@@ -299,7 +305,13 @@ impl TemporalWorkflow {
             observed_start_ns: self.accepted(),
         };
         if let Some(old) = &self.mapping {
-            let parent = self.prefix_hash()?;
+            let parent = self
+                .ledger
+                .spans
+                .last()
+                .filter(|s| s.episode == self.episode)
+                .map(hash)
+                .transpose()?;
             let genesis = if parent.is_none() {
                 Some(GenesisGap::new(
                     &self.descriptor,
@@ -316,6 +328,7 @@ impl TemporalWorkflow {
                 .ledger
                 .spans
                 .last()
+                .filter(|s| s.episode == self.episode)
                 .map_or(paused_receiver_ns, |s| s.receiver_end_ns);
             self.ledger.gaps.push(Gap {
                 episode: self.episode,

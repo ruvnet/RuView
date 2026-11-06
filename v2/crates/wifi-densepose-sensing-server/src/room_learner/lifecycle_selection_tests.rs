@@ -221,7 +221,7 @@ async fn qualification_requires_real_lineage_all_conditions_and_matching_sealed_
     let rt = fitted(dir.path()).await;
     let state = rt.inner.lock().unwrap();
     let model = state.model.as_ref().unwrap();
-    let capture = state.capture.as_ref().unwrap();
+    let capture = state.legacy_capture().unwrap();
     let dataset = capture.validated_dataset().unwrap();
     let evaluation = rt
         .store

@@ -207,3 +207,94 @@ fn zero_prefix_anchor_binds_original_run_clock_and_source_floor_history() {
         );
     }
 }
+
+#[test]
+fn bridge_prefix_version_is_strict_and_rehashed_quality_tampering_is_rejected() {
+    let (_dir, store, mut capture) = super::super::tests::bridge_setup();
+    capture
+        .start_segment("bridge-checkpoint", 2_000_000_000, &store)
+        .unwrap();
+    let mut sequence = 0;
+    let now = super::super::tests::drive_bridge(
+        &mut capture,
+        &store,
+        2_000_000_000,
+        5_000_000_000,
+        &mut sequence,
+    );
+    let loaded = store.load_temporal(now).unwrap().unwrap();
+    let prefix = loaded.prefix.unwrap();
+    let mut envelope: Envelope = serde_json::from_slice(prefix.bytes()).unwrap();
+    assert_eq!(envelope.schema, BRIDGE_SCHEMA);
+    assert!(!envelope.payload.quality_issued && !envelope.payload.confirmation_issued);
+    envelope.payload.bridge.as_mut().unwrap().parts[0].sources[0].packets = 1;
+    envelope.payload_sha256 = hash(&envelope.payload).unwrap();
+    let bytes = serde_json::to_vec(&envelope).unwrap();
+    assert!(validated_prefix(&bytes, prefix.descriptor(), now).is_err());
+}
+#[test]
+fn a_rehashed_prefix_cannot_claim_an_unearned_next_train_phase() {
+    let (_dir, store, capture) = super::super::tests::bridge_setup();
+    let now = 1_000_000_000;
+    let loaded = store.load_temporal(now).unwrap().unwrap();
+    let prefix = loaded.prefix.unwrap();
+    let mut envelope: Envelope = serde_json::from_slice(prefix.bytes()).unwrap();
+    envelope.payload.episode = 1;
+    envelope.payload_sha256 = hash(&envelope.payload).unwrap();
+    assert!(validated_prefix(
+        &serde_json::to_vec(&envelope).unwrap(),
+        prefix.descriptor(),
+        now
+    )
+    .is_err());
+    assert_eq!(capture.snapshot()["sealed_train_episodes"], 0);
+}
+
+#[test]
+fn bridge_quality_observed_tail_must_remain_covered_by_durable_replay_floors() {
+    let (_dir, store, mut capture) = super::super::tests::bridge_setup();
+    capture
+        .start_segment("quality-floor", 2_000_000_000, &store)
+        .unwrap();
+    let mut sequence = 0;
+    let now = super::super::tests::drive_bridge(
+        &mut capture,
+        &store,
+        2_000_000_000,
+        5_000_000_000,
+        &mut sequence,
+    );
+    let prefix = store.load_temporal(now).unwrap().unwrap().prefix.unwrap();
+    let mut envelope: Envelope = serde_json::from_slice(prefix.bytes()).unwrap();
+    let view = &envelope.payload.rows.last().unwrap().views[0];
+    let observed = envelope
+        .payload
+        .bridge
+        .as_ref()
+        .unwrap()
+        .parts
+        .last()
+        .unwrap()
+        .sources
+        .iter()
+        .find(|s| s.source_id == view.source_id)
+        .unwrap();
+    assert!(
+        observed.last_sequence > *view.sequence_ids.last().unwrap(),
+        "the actual reservation tail must include packets after the retained native horizon"
+    );
+    let floor = envelope
+        .payload
+        .source_high
+        .iter_mut()
+        .find(|s| s.0 == view.source_id)
+        .unwrap();
+    floor.1 = *view.sequence_ids.last().unwrap();
+    floor.2 = view.last_time_ns;
+    envelope.payload_sha256 = hash(&envelope.payload).unwrap();
+    let bytes = serde_json::to_vec(&envelope).unwrap();
+    assert!(
+        validated_prefix(&bytes, prefix.descriptor(), now).is_err(),
+        "rehashed valid rows cannot hide replay-floor rollback below the observed quality tail"
+    );
+}

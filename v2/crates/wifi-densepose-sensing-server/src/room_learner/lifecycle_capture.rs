@@ -18,30 +18,18 @@ impl RoomLearningRuntime {
         Ok(context)
     }
     pub fn selects_grid(&self, source_id: u8, grid_id: &str) -> bool {
-        self.inner
-            .lock()
-            .ok()
-            .and_then(|s| {
-                s.capture.as_ref().map(|c| {
-                    c.context()
-                        .sources
-                        .iter()
-                        .any(|v| v.source_id == source_id && v.grid_id == grid_id)
-                })
-            })
-            .unwrap_or(false)
+        self.inner.lock().ok().and_then(|state| state.capture_context().map(|c| c.sources.iter().any(|s| s.source_id == source_id && s.grid_id == grid_id))).unwrap_or(false)
     }
     pub fn capture_active(&self) -> Result<bool, String> {
         let state = self.inner.lock().map_err(|_| "learner state unavailable")?;
-        Ok(state.capture.as_ref().is_some_and(|c| c.phase_active()))
+        Ok(match state.capture.as_ref() {
+            Some(CaptureWorkflow::Legacy(c)) => c.phase_active(),
+            Some(CaptureWorkflow::Temporal(c)) => c.active(),
+            None => false,
+        })
     }
     pub fn context(&self) -> Option<CaptureContext> {
-        self.inner
-            .lock()
-            .ok()?
-            .capture
-            .as_ref()
-            .map(|c| c.context().clone())
+        self.inner.lock().ok()?.capture_context().cloned()
     }
     pub fn begin_phase(
         &self,
@@ -50,6 +38,7 @@ impl RoomLearningRuntime {
         now_ns: u64,
     ) -> Result<(), String> {
         let mut state = self.command_state(expected)?;
+        state.require_legacy_kind()?;
         self.expire_loaded_recovery(&mut state, now_ns)?;
         self.require_recovery_ready(&state)?;
         if busy(&state.job) {
@@ -71,9 +60,7 @@ impl RoomLearningRuntime {
                 return Err(readiness["detail"].as_str().unwrap_or("managed training lineage unavailable before held-out capture").into());
             }
         }
-        state
-            .capture
-            .as_mut()
+        state.legacy_capture_mut()
             .ok_or("configure the current room and source set first")?
             .begin_phase(request, now_ns)?;
         state.input_error = None;
@@ -82,7 +69,8 @@ impl RoomLearningRuntime {
     }
     pub fn ingest(&self, frame: RawSourceFrame<'_>, now_ns: u64) -> Result<(), String> {
         let mut state = self.inner.lock().map_err(|_| "learner state unavailable")?;
-        let Some(capture) = state.capture.as_mut() else {
+        state.require_legacy_kind()?;
+        let Some(capture) = state.legacy_capture_mut() else {
             return Ok(());
         };
         let result = capture.ingest(frame, now_ns);
@@ -109,7 +97,12 @@ impl RoomLearningRuntime {
             return Err("live managed capture rejects synthetic/replayed native provenance".into());
         }
         let mut state = self.inner.lock().map_err(|_| "learner state unavailable")?;
-        let Some(capture) = state.capture.as_mut() else {
+        if let Some(CaptureWorkflow::Temporal(capture)) = state.capture.as_mut() {
+            let result = capture.ingest(self.temporal_store()?, &self.runtime_epoch, packet, now_ns);
+            if let Err(error) = &result { state.input_error = Some(bounded(error.clone())); }
+            return result;
+        }
+        let Some(capture) = state.legacy_capture_mut() else {
             return Ok(());
         };
         let source = capture
@@ -158,13 +151,18 @@ impl RoomLearningRuntime {
     /// workflow revision. Ignore sources/grids outside the current context.
     pub fn record_native_rejection(&self, source_id: u8, grid_id: &str, reason: &str) {
         if let Ok(mut state) = self.inner.lock() {
-            if state.capture.as_ref().is_some_and(|c| {
+            if let Some(CaptureWorkflow::Temporal(capture)) = state.capture.as_mut() {
+                capture.reject(source_id, grid_id, reason);
+                return;
+            }
+
+            if state.legacy_capture().is_some_and(|c| {
                 c.context()
                     .sources
                     .iter()
                     .any(|s| s.source_id == source_id && s.grid_id == grid_id)
             }) {
-                if let Some(capture)=state.capture.as_mut() {capture.clear_live_windows();}
+                if let Some(capture)=state.legacy_capture_mut() {capture.clear_live_windows();}
                 state.input_error = Some(bounded(format!(
                     "Node {source_id} native input rejected: {reason}"
                 )));
@@ -178,14 +176,13 @@ impl RoomLearningRuntime {
         conditions_held: bool,
     ) -> Result<PhaseReceipt, String> {
         let mut state = self.command_state(expected)?;
+        state.require_legacy_kind()?;
         self.expire_loaded_recovery(&mut state, now_ns)?;
         let recovered_complete = state.recovery.disposition
             == Some(
                 crate::room_learner::capture::RecoveryPhaseDisposition::CompletedNeedsConfirmation,
             );
-        let capture = state
-            .capture
-            .as_mut()
+        let capture = state.legacy_capture_mut()
             .ok_or("no learner capture configured")?;
         if !conditions_held {
             capture.cancel_phase();
@@ -208,16 +205,15 @@ impl RoomLearningRuntime {
                 self.store.save_managed_capture_fence(model,&proof,seed)?;
             }
         }
-        state.capture=Some(completed);
+        state.capture=Some(CaptureWorkflow::Legacy(completed));
         state.recovery.disposition = None;
         self.checkpoint_recovery(&mut state, now_ns, true)?;
         Ok(receipt)
     }
     pub fn cancel_phase(&self, expected: &MutationGuard) -> Result<(), String> {
         let mut state = self.command_state(expected)?;
-        state
-            .capture
-            .as_mut()
+        state.require_legacy_kind()?;
+        state.legacy_capture_mut()
             .ok_or("no learner capture configured")?
             .cancel_phase();
         let now = self.checkpoint_now(&state);
@@ -226,6 +222,7 @@ impl RoomLearningRuntime {
     }
     pub fn cancel_training(&self, expected: &MutationGuard) -> Result<JobPhase, String> {
         let mut state = self.command_state(expected)?;
+        state.require_legacy_kind()?;
         if busy(&state.job) {
             state.job.cancel.store(true, Ordering::Release);
             state.job.phase = JobPhase::Cancelling;

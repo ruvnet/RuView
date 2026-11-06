@@ -51,11 +51,12 @@ impl RoomLearningRuntime {
             return Err("evaluate only validation or held-out data".into());
         }
         let mut state = self.command_state(expected)?;
+        state.require_legacy_kind()?;
         if busy(&state.job) || !state.frozen_training {
             return Err("wait for the frozen candidate".into());
         }
         let model = state.model.as_ref().ok_or("no frozen candidate")?.clone();
-        let capture = state.capture.as_ref().ok_or("no capture context")?;
+        let capture = state.legacy_capture().ok_or("no capture context")?;
         if capture.phase_active() {
             return Err("finish the current phase before evaluation".into());
         }

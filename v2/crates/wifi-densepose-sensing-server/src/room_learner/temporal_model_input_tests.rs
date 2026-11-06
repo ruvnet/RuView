@@ -437,3 +437,10 @@ fn post_assembler_evidence_failure_is_terminal_and_preserves_previous_valid_wind
     assert!(session.finish_window(now).is_err());
     assert!(session.fit().is_err());
 }
+
+#[test]
+fn public_seed_v2_export_byte_probe(){
+ let bytes=fitted_bytes();let digest=bytes_hash(&bytes);
+ assert_eq!(digest,"e46e9aff391b0e41a8fe26cc46789ee65d130f109df444726893303960b5735f");
+ println!("PUBLIC_SEED_V2_SHA256={digest} BYTES={}",bytes.len());
+}

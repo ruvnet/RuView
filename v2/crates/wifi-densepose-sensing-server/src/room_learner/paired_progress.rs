@@ -46,6 +46,7 @@ impl RoomLearningRuntime {
             || room.as_ref().is_some_and(|r| !digest(&r.binding_digest) || r.revision==0 || r.revision>MAX_SAFE)
         { return Err("progress identity/time unavailable".into()); }
         let state=self.inner.lock().map_err(|_| "learner state unavailable")?;
+        state.require_legacy_kind()?;
         let mut result=PairedCalibrationProgress {
             schema:"ruview.room-learner.progress.v1",success:true,installation_id:installation_id.into(),runtime_epoch:runtime_epoch.into(),
             observed_at_unix_ms:observed,expires_at_unix_ms:observed+PAIRED_PROGRESS_TTL_MS,room,
@@ -55,7 +56,7 @@ impl RoomLearningRuntime {
             save_status:"not_reported",blocker:Some("room_not_published"),
         };
         let Some(published)=result.room.as_ref() else { return Ok(result); };
-        let Some(capture)=state.capture.as_ref() else { result.blocker=Some("learner_not_configured");return Ok(result); };
+        let Some(capture)=state.legacy_capture() else { result.blocker=Some("learner_not_configured");return Ok(result); };
         let context=capture.context();
         if context.installation_id!=installation_id || context.room_digest!=published.binding_digest {
             result.stage="blocked";result.blocker=Some("context_mismatch");return Ok(result);

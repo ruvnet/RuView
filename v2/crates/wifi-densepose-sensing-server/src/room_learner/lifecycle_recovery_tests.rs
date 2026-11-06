@@ -332,8 +332,7 @@ async fn trained_checkpoint_cold_restores_exact_candidate_without_live_buffers_o
         .inner
         .lock()
         .unwrap()
-        .capture
-        .as_ref()
+        .legacy_capture()
         .unwrap()
         .validated_dataset()
         .unwrap();
@@ -670,7 +669,7 @@ fn loaded_recovery_expires_to_ram_at_exact_deadline_without_erasing_or_rebasing(
     assert_eq!(before["recovery"]["enabled"], true);
     assert_eq!(before["capture"]["sealed_cohorts"], 28);
     let (rows, history) = {
-        let state = recovered.inner.lock().unwrap();let capture = state.capture.as_ref().unwrap();
+        let state = recovered.inner.lock().unwrap();let capture = state.legacy_capture().unwrap();
         (serde_json::to_vec(capture.cohorts()).unwrap(), serde_json::to_vec(capture.history()).unwrap())
     };
     let at = recovered.status(expires);
@@ -689,7 +688,7 @@ fn loaded_recovery_expires_to_ram_at_exact_deadline_without_erasing_or_rebasing(
     assert_eq!(after["capture"]["sealed_cohorts"],32);assert!(after["capture"]["phase"].is_null());
     assert_eq!(after["capture"]["sources"][0]["last_accepted_sequence"],256);
     {
-        let state=recovered.inner.lock().unwrap();let capture=state.capture.as_ref().unwrap();
+        let state=recovered.inner.lock().unwrap();let capture=state.legacy_capture().unwrap();
         assert_eq!(serde_json::to_vec(&capture.cohorts()[..28]).unwrap(),rows);
         assert_eq!(serde_json::to_vec(&capture.history()[..7]).unwrap(),history);
         assert_eq!(capture.cohorts()[28].views[0].sequence_ids[0],225);
@@ -774,7 +773,7 @@ async fn recovered_28_cohorts_can_finish_heldout_after_expiry_under_the_same_qua
     recovered.restore_capture_recovery(&recovered.mutation_guard().unwrap(),&descriptor.id,&context(),BASE+100_000_000_000).unwrap();
     let expires=descriptor.expires_at_ms*1_000_000;let bytes=std::fs::read(recovery_file(temp.path())).unwrap();
     assert_eq!(recovered.status(expires)["capture"]["sealed_cohorts"],28);
-    let before={let state=recovered.inner.lock().unwrap();serde_json::to_vec(state.capture.as_ref().unwrap().cohorts()).unwrap()};
+    let before={let state=recovered.inner.lock().unwrap();serde_json::to_vec(state.legacy_capture().unwrap().cohorts()).unwrap()};
     assert!(recovered.qualify(&recovered.mutation_guard().unwrap()).is_err(),"expiry does not waive missing HeldOut Empty");
     assert!(recovered.status(expires+1)["model_selection"]["selected"].is_null());
     expiry_phase(&recovered,expires+1_000_000,DataRole::HeldOut,RoomLabel::Empty,7);
@@ -785,7 +784,7 @@ async fn recovered_28_cohorts_can_finish_heldout_after_expiry_under_the_same_qua
     let status=recovered.status(expires+13_000_000_000);
     assert!(status["model_selection"]["selected"].is_null(),"qualification must not auto-select");
     assert_eq!(status["control_detector_changed"],false);assert_eq!(status["recovery"]["enabled"],false);
-    {let state=recovered.inner.lock().unwrap();assert_eq!(serde_json::to_vec(&state.capture.as_ref().unwrap().cohorts()[..28]).unwrap(),before);}
+    {let state=recovered.inner.lock().unwrap();assert_eq!(serde_json::to_vec(&state.legacy_capture().unwrap().cohorts()[..28]).unwrap(),before);}
     assert_eq!(std::fs::read(recovery_file(temp.path())).unwrap(),bytes);
     assert_eq!(original_descriptor(temp.path()).expires_at_ms,descriptor.expires_at_ms);
 }
@@ -813,7 +812,7 @@ fn known_expiry_cannot_be_reenabled_by_a_queued_restore_with_an_earlier_timestam
         expiry_phase(&rt,BASE,DataRole::Train,RoomLabel::Empty,0);
         let descriptor=original_descriptor(temp.path());let expires=descriptor.expires_at_ms*1_000_000;
         let bytes=std::fs::read(recovery_file(temp.path())).unwrap();
-        let rows={let state=rt.inner.lock().unwrap();serde_json::to_vec(state.capture.as_ref().unwrap().cohorts()).unwrap()};
+        let rows={let state=rt.inner.lock().unwrap();serde_json::to_vec(state.legacy_capture().unwrap().cohorts()).unwrap()};
         if observe_by_status {
             rt.status(expires);
         } else {
@@ -826,7 +825,7 @@ fn known_expiry_cannot_be_reenabled_by_a_queued_restore_with_an_earlier_timestam
         assert_eq!(status["recovery"]["state"],"expired");assert_eq!(status["recovery"]["enabled"],false);
         assert!(status["recovery"]["saved"].is_null());assert_eq!(status["capture"]["sealed_cohorts"],4);
         assert_eq!(original_descriptor(temp.path()),descriptor);assert_eq!(std::fs::read(recovery_file(temp.path())).unwrap(),bytes);
-        let state=rt.inner.lock().unwrap();assert_eq!(serde_json::to_vec(state.capture.as_ref().unwrap().cohorts()).unwrap(),rows);
+        let state=rt.inner.lock().unwrap();assert_eq!(serde_json::to_vec(state.legacy_capture().unwrap().cohorts()).unwrap(),rows);
     }
 }
 

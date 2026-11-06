@@ -38,7 +38,7 @@ impl RoomLearningRuntime {
             Some("new_run_recovery_deadline_expired")
         } else if state.recovery.enabled {
             Some("recovery_already_enabled")
-        } else if busy(&state.job) || state.capture.as_ref().is_some_and(|c| c.phase_active()) {
+        } else if busy(&state.job) || state.legacy_capture().is_some_and(|c| c.phase_active()) {
             Some("finish_active_operation")
         } else if self.recovery_store.as_ref().is_none_or(|s| !s.available()) {
             Some("recovery_unavailable")
@@ -70,6 +70,7 @@ impl RoomLearningRuntime {
             return Err("recovery_consent_required".into());
         }
         let mut state = self.command_state(expected)?;
+        state.require_legacy_kind()?;
         let now_ns = state.recovery.observe_clock(now_ns);
         let run = state.recovery_enable.clone().ok_or("not_a_new_ram_run")?;
         if run.id != run_id {
@@ -81,10 +82,10 @@ impl RoomLearningRuntime {
         if state.recovery.enabled {
             return Err("recovery_already_enabled".into());
         }
-        if busy(&state.job) || state.capture.as_ref().is_some_and(|c| c.phase_active()) {
+        if busy(&state.job) || state.legacy_capture().is_some_and(|c| c.phase_active()) {
             return Err("finish_active_operation".into());
         }
-        let capture = state.capture.as_ref().ok_or("recovery_capture_missing")?;
+        let capture = state.legacy_capture().ok_or("recovery_capture_missing")?;
         if capture.context().digest() != run.context_digest {
             return Err("recovery_context_mismatch".into());
         }

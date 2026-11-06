@@ -705,3 +705,253 @@ fn cold_restore_cannot_ack_visible_saved_rows_when_recertification_fails() {
         original
     );
 }
+
+pub(super) fn bridge_packet(source: u8, sequence: u32, time: u64) -> CanonicalPacket {
+    // Synthetic bytes go through the actual receiver canonicalizer. The live
+    // provenance arm is exercised as it would be by the real UDP dispatcher;
+    // this is not a physical observation or user-owned capture.
+    use crate::room_learner::native::{canonicalize_esp32, NativePacketInput};
+    use wifi_densepose_hardware::{Adr018Flags, PpduType};
+    canonicalize_esp32(NativePacketInput {
+        node_id: source,
+        n_antennas: 1,
+        raw_bins: 64,
+        frequency_hz: 2_437_000_000,
+        ppdu_type: PpduType::HtLegacy,
+        sequence,
+        received_at_ns: time,
+        receiver_sample_rate_hz: 33.,
+        iq_bytes: &[7; 128],
+        flags: Adr018Flags::default(),
+        provenance: CaptureProvenance::LiveReceiverObserved,
+    })
+    .unwrap()
+}
+pub(super) fn bridge_setup() -> (tempfile::TempDir, RecoveryStore, TemporalTrainCapture) {
+    let d = tempfile::tempdir().unwrap();
+    let c = context();
+    let store = RecoveryStore::new(
+        &d.path().join(&c.owner_scope).join("SensingServer"),
+        &c.owner_scope,
+        &c.installation_id,
+        Some(&[7; 32]),
+    )
+    .unwrap();
+    let schedule =
+        ManagedScheduleContract::build(c, LeadInPolicy::Train5HeldOut15EngineeringV1).unwrap();
+    let capture = TemporalTrainCapture::prepare(
+        schedule,
+        "synthetic-runtime-bridge".into(),
+        FitConfig {
+            epochs: 2,
+            ..Default::default()
+        },
+        1_000_000_000,
+        &store,
+    )
+    .unwrap();
+    (d, store, capture)
+}
+pub(super) fn drive_bridge(
+    c: &mut TemporalTrainCapture,
+    store: &RecoveryStore,
+    from: u64,
+    to: u64,
+    sequence: &mut u32,
+) -> u64 {
+    let period = 1_000_000_000u64.div_ceil(33);
+    let mut at = from;
+    while at <= to + period && c.stage() == TemporalCaptureStage::Observing {
+        *sequence += 1;
+        for source in 1..=3 {
+            let t = at + u64::from(source) * 1000;
+            c.ingest(&bridge_packet(source, *sequence, t), t, store)
+                .unwrap();
+        }
+        at += period;
+    }
+    at
+}
+#[test]
+fn private_bridge_priming_preserves_replay_floors_without_observed_credit() {
+    let (_d, store, mut capture) = bridge_setup();
+    capture
+        .prime_fence(&bridge_packet(1, 100, 2_000_000_000), 2_000_000_000)
+        .unwrap();
+    assert_eq!(capture.snapshot()["durable_windows"], 0);
+    assert_eq!(capture.snapshot()["durable_observed_ns"], "0");
+    capture
+        .start_segment("receiver-one", 7_000_000_000, &store)
+        .unwrap();
+    let error = capture
+        .ingest(&bridge_packet(1, 99, 7_000_001_000), 7_000_001_000, &store)
+        .unwrap_err();
+    assert!(error.contains("fence"));
+    assert_eq!(capture.stage(), TemporalCaptureStage::Failed);
+    assert!(capture.confirmation_challenge().is_err());
+}
+#[test]
+fn private_bridge_clock_validation_does_not_retime_exact_lead_in_start() {
+    let (_d, store, mut capture) = bridge_setup();
+    capture.check_time(7_000_001_000).unwrap();
+    capture
+        .start_segment("receiver-one", 7_000_000_000, &store)
+        .unwrap();
+    assert!(capture.check_time(6_999_999_999).is_err());
+    assert_eq!(capture.stage(), TemporalCaptureStage::Failed);
+}
+#[test]
+fn private_bridge_detects_missing_source_between_sparse_slots_terminally() {
+    let (_d, store, mut capture) = bridge_setup();
+    capture
+        .start_segment("receiver-one", 2_000_000_000, &store)
+        .unwrap();
+    let mut sequence = 0;
+    let next = drive_bridge(
+        &mut capture,
+        &store,
+        2_000_000_000,
+        5_000_000_000,
+        &mut sequence,
+    );
+    assert_eq!(capture.snapshot()["durable_windows"], 1);
+    assert!(capture.tick(next + 100_000_000, &store).is_err());
+    assert_eq!(capture.stage(), TemporalCaptureStage::Failed);
+    assert!(capture.confirmation_challenge().is_err());
+}
+#[test]
+fn private_bridge_observation_reuses_native_validation_outside_retained_slots() {
+    let (_d, store, mut capture) = bridge_setup();
+    capture
+        .start_segment("receiver-one", 2_000_000_000, &store)
+        .unwrap();
+    let mut sequence = 0;
+    let next = drive_bridge(
+        &mut capture,
+        &store,
+        2_000_000_000,
+        5_000_000_000,
+        &mut sequence,
+    );
+    let mut changed = bridge_packet(1, sequence + 1, next + 1000);
+    changed.native_frame.centre_frequency_hz += 1.;
+    assert!(capture.ingest(&changed, next + 1000, &store).is_err());
+    assert_eq!(capture.stage(), TemporalCaptureStage::Failed);
+}
+#[test]
+fn private_bridge_full_train_schedule_requires_fresh_seal_each_episode() {
+    let (_d, store, mut capture) = bridge_setup();
+    let mut at = 2_000_000_000;
+    let mut sequence = 0;
+    let created = capture.snapshot()["descriptor"]["created_at_ms"].clone();
+    let expires = capture.snapshot()["descriptor"]["expires_at_ms"].clone();
+    let mut previous_challenge: Option<String> = None;
+    for episode in 0..7 {
+        assert!(matches!(
+            capture.stage(),
+            TemporalCaptureStage::Ready | TemporalCaptureStage::Paused
+        ));
+        assert!(capture.confirmation_challenge().is_err());
+        capture
+            .start_segment(&format!("receiver-{episode}"), at, &store)
+            .unwrap();
+        let duration = if episode == 0 {
+            600_000_000_000
+        } else {
+            30_000_000_000
+        };
+        at = drive_bridge(&mut capture, &store, at, at + duration, &mut sequence);
+        assert_eq!(capture.stage(), TemporalCaptureStage::NeedsConfirmation);
+        if episode == 0 {
+            let before = capture.snapshot();
+            drop(capture);
+            capture =
+                TemporalTrainCapture::cold_restore(&store, &context(), at, "fresh-runtime", at)
+                    .unwrap();
+            assert_eq!(capture.stage(), TemporalCaptureStage::Paused);
+            assert_eq!(capture.snapshot()["rows_sha256"], before["rows_sha256"]);
+            assert_eq!(capture.snapshot()["sealed_train_episodes"], 0);
+            assert!(capture.start_segment("not-a-new-slot", at, &store).is_err());
+            assert!(capture.confirmation_challenge().is_ok(), "full saved but unconfirmed phase needs a fresh owner confirmation, not recollection");
+        }
+        if let Some(old) = previous_challenge.as_ref() {
+            assert!(capture.confirm(old, &store, at).is_err());
+        }
+        let challenge = capture.confirmation_challenge().unwrap();
+        capture.confirm(&challenge, &store, at).unwrap();
+        previous_challenge = Some(challenge);
+        assert_eq!(capture.snapshot()["sealed_train_episodes"], episode + 1);
+        assert_eq!(capture.snapshot()["descriptor"]["created_at_ms"], created);
+        assert_eq!(capture.snapshot()["descriptor"]["expires_at_ms"], expires);
+        at += 5_000_000_000;
+    }
+    assert_eq!(capture.stage(), TemporalCaptureStage::Complete);
+    assert_eq!(capture.snapshot()["durable_windows"], 64);
+    assert_eq!(capture.snapshot()["fit_admission_available"], false);
+    assert!(capture.start_segment("no-held-out", at, &store).is_err());
+}
+
+#[test]
+fn private_bridge_retains_initial_intent_until_exact_repair_after_real_lost_ack() {
+    let dir = tempfile::tempdir().unwrap();
+    let c = context();
+    let store = RecoveryStore::new(
+        &dir.path().join(&c.owner_scope).join("SensingServer"),
+        &c.owner_scope,
+        &c.installation_id,
+        Some(&[7; 32]),
+    )
+    .unwrap();
+    let schedule =
+        ManagedScheduleContract::build(c, LeadInPolicy::Train5HeldOut15EngineeringV1).unwrap();
+    let (mut capture, error) = TemporalTrainCapture::synthetic_prepare_lost_initial_ack(
+        schedule,
+        "synthetic-retained-initial".into(),
+        FitConfig {
+            epochs: 2,
+            ..Default::default()
+        },
+        1_000_000_000,
+        &store,
+    )
+    .unwrap();
+    assert!(error.is_some());
+    assert_eq!(capture.stage(), TemporalCaptureStage::Blocked);
+    assert!(capture.confirmation_challenge().is_err());
+    assert!(capture
+        .start_segment("never", 2_000_000_000, &store)
+        .is_err());
+    capture.repair_pending(&store, 2_000_000_000).unwrap();
+    assert_eq!(capture.stage(), TemporalCaptureStage::Paused);
+    assert_eq!(capture.snapshot()["durable_windows"], 0);
+    assert_eq!(capture.snapshot()["sealed_train_episodes"], 0);
+    capture
+        .start_segment("explicit-after-repair", 3_000_000_000, &store)
+        .unwrap();
+    assert_eq!(capture.stage(), TemporalCaptureStage::Observing);
+}
+
+#[test]
+fn private_bridge_preserves_native_first_sequence_zero_semantics() {
+    let (_dir, store, mut capture) = bridge_setup();
+    let start = 2_000_000_000;
+    capture
+        .start_segment("zero-sequence", start, &store)
+        .unwrap();
+    for source in 1..=3 {
+        let at = start + u64::from(source) * 1000;
+        capture
+            .ingest(&bridge_packet(source, 0, at), at, &store)
+            .unwrap();
+    }
+    let mut sequence = 0;
+    drive_bridge(
+        &mut capture,
+        &store,
+        start + 1_000_000_000u64.div_ceil(33),
+        start + 3_000_000_000,
+        &mut sequence,
+    );
+    assert_eq!(capture.snapshot()["durable_windows"], 1);
+    assert_eq!(capture.stage(), TemporalCaptureStage::Observing);
+}

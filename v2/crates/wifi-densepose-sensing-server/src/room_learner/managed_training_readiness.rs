@@ -6,9 +6,10 @@ use crate::room_learner::{
 };
 impl RoomLearningRuntime {
     pub(super) fn qualification_readiness_locked(&self, state: &Inner, now_ns: u64) -> Value {
-        let retained = state
-            .capture
-            .as_ref()
+        if state.require_legacy_kind().is_err() {
+            return json!({"schema":"ruview.qualification-readiness.v1","eligible_for_held_out":false,"training_lineage_basis":"unavailable","managed_training_proof_sha256":null,"raw_train_rows_retained":false,"train_cohorts_per_condition":[0,0,0,0],"reason":"unsupported_capture_kind","detail":"Private temporal capture has no fitting or qualification authority."});
+        }
+        let retained = state.legacy_capture()
             .is_some_and(|c| c.cohorts().iter().any(|r| r.role == DataRole::Train));
         let result = (|| -> Result<(&str, [usize; 4], Option<String>), (&str, String)> {
             let model = state.model.as_ref().ok_or((
@@ -28,7 +29,7 @@ impl RoomLearningRuntime {
                         format!("Frozen candidate artifact could not be verified: {e}"),
                     )
                 })?;
-            let capture = state.capture.as_ref().ok_or((
+            let capture = state.legacy_capture().ok_or((
                 "context_mismatch",
                 "No current managed capture context.".into(),
             ))?;

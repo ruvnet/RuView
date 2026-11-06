@@ -422,6 +422,58 @@ impl WindowInputPolicy {
             max_pairwise_receiver_skew_ms: skew,
         }
     }
+    /// Same stateless native-source checks for retained windows and whole-period
+    /// observation. This does not admit a window, establish replay freshness or
+    /// create a measured clock/teacher claim.
+    pub(crate) fn validate_packet_source(
+        &self,
+        p: &CanonicalPacket,
+    ) -> Result<(&SourceSpec, &SourceWindowPolicy), String> {
+        let spec = self
+            .context
+            .sources
+            .iter()
+            .find(|s| s.source_id == p.source_id)
+            .ok_or("acquisition_unbound_source")?;
+        let policy = self
+            .sources
+            .iter()
+            .find(|s| s.source_id == p.source_id)
+            .ok_or("acquisition_unbound_source")?;
+        if p.grid_id != spec.grid_id
+            || p.frequency_hz != spec.center_frequency_hz
+            || p.bandwidth_hz != spec.bandwidth_hz
+            || p.native_frame.modality != spec.signal_kind
+            || p.native_frame.provenance.device_id != spec.device_id
+            || p.native_frame.centre_frequency_hz != spec.center_frequency_hz as f64
+            || p.native_frame.bandwidth_hz != spec.bandwidth_hz as f64
+            || p.amplitudes.len() != spec.feature_count
+            || p.amplitudes
+                .iter()
+                .any(|x| !x.is_finite() || *x < 0. || *x > f32::MAX as f64)
+            || p.native_frame.frame_id == 0
+            || p.clock.kind != ClockKind::ReceiverOnly
+            || p.clock.uncertainty_ns != u64::MAX
+            || p.phase_consumed
+        {
+            return Err("acquisition_native_source_changed".into());
+        }
+        if let Some(g) = spec.geometry {
+            if p.native_frame.transmitter_pose.map(|p| p.position_m) != Some(g.tx_pos)
+                || p.native_frame.receiver_pose.map(|p| p.position_m) != Some(g.rx_pos)
+            {
+                return Err("acquisition_native_geometry_changed".into());
+            }
+        }
+        let (lo, hi, _) = policy.receiver_cadence.range();
+        if !p.receiver_sample_rate_hz.is_finite()
+            || p.receiver_sample_rate_hz < lo as f64 / 1000.
+            || p.receiver_sample_rate_hz > hi as f64 / 1000.
+        {
+            return Err("acquisition_cadence_changed".into());
+        }
+        Ok((spec, policy))
+    }
     pub fn context(&self) -> &CaptureContext {
         &self.context
     }
@@ -734,52 +786,8 @@ impl NativeWindowAssembler {
             .as_mut()
             .filter(|a| !a.failed && !a.ready)
             .ok_or("acquisition_window_not_collecting")?;
-        let spec = self
-            .policy
-            .context
-            .sources
-            .iter()
-            .find(|s| s.source_id == p.source_id)
-            .ok_or("acquisition_unbound_source")?;
-        let policy = self
-            .policy
-            .sources
-            .iter()
-            .find(|s| s.source_id == p.source_id)
-            .ok_or("acquisition_unbound_source")?;
+        let (_spec, policy) = self.policy.validate_packet_source(p)?;
         let t = p.native_frame.timestamp_ns;
-        if p.grid_id != spec.grid_id
-            || p.frequency_hz != spec.center_frequency_hz
-            || p.bandwidth_hz != spec.bandwidth_hz
-            || p.native_frame.modality != spec.signal_kind
-            || p.native_frame.provenance.device_id != spec.device_id
-            || p.native_frame.centre_frequency_hz != spec.center_frequency_hz as f64
-            || p.native_frame.bandwidth_hz != spec.bandwidth_hz as f64
-            || p.amplitudes.len() != spec.feature_count
-            || p.amplitudes
-                .iter()
-                .any(|x| !x.is_finite() || *x < 0. || *x > f32::MAX as f64)
-            || p.native_frame.frame_id == 0
-            || p.clock.kind != ClockKind::ReceiverOnly
-            || p.clock.uncertainty_ns != u64::MAX
-            || p.phase_consumed
-        {
-            return Err("acquisition_native_source_changed".into());
-        }
-        if let Some(g) = spec.geometry {
-            if p.native_frame.transmitter_pose.map(|p| p.position_m) != Some(g.tx_pos)
-                || p.native_frame.receiver_pose.map(|p| p.position_m) != Some(g.rx_pos)
-            {
-                return Err("acquisition_native_geometry_changed".into());
-            }
-        }
-        let (lo, hi, _) = policy.receiver_cadence.range();
-        if !p.receiver_sample_rate_hz.is_finite()
-            || p.receiver_sample_rate_hz < lo as f64 / 1000.
-            || p.receiver_sample_rate_hz > hi as f64 / 1000.
-        {
-            return Err("acquisition_cadence_changed".into());
-        }
         if t < a.target_ns || t >= a.end_ns {
             return Err("acquisition_packet_outside_slot".into());
         }
