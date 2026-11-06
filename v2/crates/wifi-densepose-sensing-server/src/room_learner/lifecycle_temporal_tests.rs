@@ -9,6 +9,9 @@ use crate::room_learner::{
 use wifi_densepose_hardware::{Adr018Flags, PpduType};
 const START: u64 = 1_000_000_000_000;
 const PERIOD: u64 = 1_000_000_000u64.div_ceil(33);
+// Test-only supervision for asynchronous storage/authorization ACKs, including
+// final-row waits while ingress continues; not observation or shipping budgets.
+const QUIESCENT_ACK_TEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 fn context() -> CaptureContext {
     CaptureContext {
         owner_scope: "a".repeat(64),
@@ -325,14 +328,16 @@ fn preparation_replay_phy_and_receiver_clock_cannot_rescue_or_relabel_a_capture(
 #[test]
 fn actual_runtime_two_cold_resumes_keep_original_rows_trial_and_expiry_without_downtime_credit() {
     let dir = tempfile::tempdir().unwrap();
-    let mut rt = configured(dir.path());
-    let original = snapshot(&rt, START)["descriptor"].clone();
+    let (mut rt,mut now) = configured_async(dir.path());
+    let original = snapshot(&rt, now)["descriptor"].clone();
     let mut seq = 0;
-    let mut now = START + 1;
     let mut trial = None;
     for _ in 0..2 {
-        let first = start(&rt, now);
-        now = feed(&rt, first, first + 100_000_000_000, &mut seq);
+        // Cold restore installs the actual asynchronous writer. Await the
+        // real start authorization before choosing any observation times.
+        let first = async_lead_end(&rt, now);
+        rt.tick_temporal_capture(&rt.mutation_guard().unwrap(),first).unwrap();
+        now = feed_async_paced(&rt, first, first + 100_000_000_000, &mut seq);
         let phase = rt.mutation_guard().unwrap().phase.unwrap();
         if let Some(prior) = &trial {
             assert_eq!(prior, &phase.trial_id);
@@ -341,6 +346,7 @@ fn actual_runtime_two_cold_resumes_keep_original_rows_trial_and_expiry_without_d
         }
         rt.pause_temporal_capture(&rt.mutation_guard().unwrap(), now)
             .unwrap();
+        now=settle_async_boundary(&rt,now);
         let paused = snapshot(&rt, now);
         let accepted = paused["durable_observed_ns"]
             .as_str()
@@ -379,17 +385,26 @@ fn actual_runtime_two_cold_resumes_keep_original_rows_trial_and_expiry_without_d
         .unwrap()
         .parse::<u64>()
         .unwrap();
-    let first = start(&rt, now);
-    now = feed(
+    let first = async_lead_end(&rt, now);
+    rt.tick_temporal_capture(&rt.mutation_guard().unwrap(),first).unwrap();
+    now = feed_async_paced(
         &rt,
         first,
         first + 600_000_000_000 - accepted + PERIOD,
         &mut seq,
     );
+    // Keep the declared receiver stream alive while the final complete
+    // reservation awaits its actual ACK. Do not treat submission as confirmed.
+    let waiting=std::time::Instant::now();
+    while snapshot(&rt,now)["stage"]!="needs_confirmation" {
+        now=feed_async_paced(&rt,now,now,&mut seq);
+        assert!(waiting.elapsed()<QUIESCENT_ACK_TEST_TIMEOUT,"final row ACK did not settle");
+    }
     assert_eq!(snapshot(&rt, now)["stage"], "needs_confirmation");
     let guard = rt.mutation_guard().unwrap();
     let challenge = rt.temporal_confirmation_challenge(&guard).unwrap();
     rt.confirm_temporal_phase(&guard, &challenge, now).unwrap();
+    now=settle_async_boundary(&rt,now);
     assert_eq!(snapshot(&rt, now)["sealed_train_episodes"], 1);
     assert_eq!(snapshot(&rt, now)["durable_windows"], 16);
 }
@@ -557,6 +572,19 @@ fn temporal_storage_barrier_must_not_block_real_runtime_native_ingress() {
         "real native ingress waited for a storage barrier held by Runtime.inner");
 }
 
+fn feed_async_paced(rt:&RoomLearningRuntime,mut at:u64,to:u64,seq:&mut u32)->u64{
+    // Same accelerated receiver cadence as the existing synthetic journey;
+    // give actual asynchronous transactions time while pending. No source
+    // timestamp backdating or production quality limits are changed.
+    while at<=to {
+        let pending=snapshot(rt,at)["durability_pending"]==true;
+        *seq+=1;
+        for source in 1..=3{rt.ingest_native(&packet(source,*seq,at),at).unwrap();}
+        at+=PERIOD;
+        if pending{std::thread::sleep(std::time::Duration::from_nanos(PERIOD));}
+    }
+    at
+}
 fn settle_async_boundary(rt: &RoomLearningRuntime, after: u64) -> u64 {
     let started=std::time::Instant::now();
     loop {
@@ -567,7 +595,7 @@ fn settle_async_boundary(rt: &RoomLearningRuntime, after: u64) -> u64 {
             if started.elapsed()>std::time::Duration::from_secs(1){println!("SYNTHETIC_DURABLE_ACK_WAIT_NS={} ROWS={} SEALED={}",started.elapsed().as_nanos(),snapshot(rt,admitted)["durable_windows"],snapshot(rt,admitted)["sealed_train_episodes"]);}
             return admitted;
         }
-        assert!(started.elapsed()<std::time::Duration::from_secs(30),"async boundary did not settle: stage={} rows={} seals={}",snapshot(rt,at)["stage"],snapshot(rt,at)["retained_rows"],snapshot(rt,at)["sealed_train_episodes"]);
+        assert!(started.elapsed()<QUIESCENT_ACK_TEST_TIMEOUT,"async boundary did not settle: stage={} rows={} seals={}",snapshot(rt,at)["stage"],snapshot(rt,at)["retained_rows"],snapshot(rt,at)["sealed_train_episodes"]);
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
 }
@@ -653,7 +681,7 @@ fn async_lead_end(rt:&RoomLearningRuntime,at:u64)->u64{
         rt.tick_temporal_capture(&rt.mutation_guard().unwrap(),now).unwrap();
         let state=rt.inner.lock().unwrap();let Some(CaptureWorkflow::Temporal(c))=&state.capture else{panic!()};
         if let Some(end)=c.lead_in_until{return end;}
-        drop(state);assert!(started.elapsed()<std::time::Duration::from_secs(5));std::thread::sleep(std::time::Duration::from_millis(1));
+        drop(state);assert!(started.elapsed()<QUIESCENT_ACK_TEST_TIMEOUT);std::thread::sleep(std::time::Duration::from_millis(1));
     }
 }
 #[test]
@@ -1125,4 +1153,19 @@ fn c2_real_growing_prefix_three_source_absolute_pacer_with_actual_input_precondi
         "source_min_rows":policy.source_policies()[0].min_rows,"source_max_gap_ns":policy.source_policies()[0].max_gap_ns,
         "rate_band_millihz":policy.source_policies()[0].receiver_cadence.rate_bounds_millihz()}));
     assert!(result.is_ok(),"growing-prefix performance is UNQUALIFIED; no public activation: {:?}",result.err());
+}
+
+#[test]
+fn c2_quiescent_start_waiter_handles_slow_recertification_without_observation_credit(){
+    use std::{sync::mpsc,time::{Duration,Instant}};
+    let dir=tempfile::tempdir().unwrap();let(rt,at)=configured_async(dir.path());
+    let writer={let state=rt.inner.lock().unwrap();let Some(CaptureWorkflow::Temporal(c))=&state.capture else{panic!()};c.core.as_ref().unwrap().writer().unwrap()};
+    let(entered_tx,entered_rx)=mpsc::sync_channel(1);let(release_tx,release_rx)=mpsc::sync_channel(1);writer.hold_next(entered_tx,release_rx);
+    let release=std::thread::spawn(move||{entered_rx.recv().unwrap();std::thread::sleep(Duration::from_secs(6));release_tx.send(()).unwrap();});
+    let started=Instant::now();let lead_end=async_lead_end(&rt,at);release.join().unwrap();
+    assert!(started.elapsed()>=Duration::from_secs(6));
+    let admitted=lead_end-TRAIN_LEAD_IN_NS;let status=snapshot(&rt,admitted);
+    assert_eq!(status["retained_rows"],0);assert_eq!(status["durable_windows"],0);assert_eq!(status["observed_ns"],"0");
+    assert_eq!(status["lead_in_remaining_ms"],5000,"lead-in must start only at actual authorization ACK");
+    rt.cancel_temporal_durability(&rt.mutation_guard().unwrap()).unwrap();
 }
