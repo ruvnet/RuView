@@ -453,7 +453,7 @@ pub fn routes() -> Router<AppState> {
         .route("/api/v1/models/unload", post(unload_model))
         .route("/api/v1/models/lora/activate", post(activate_lora))
         .route("/api/v1/models/lora/profiles", get(list_lora_profiles))
-        .route("/api/v1/models/{id}", get(get_model))
+        .route("/api/v1/models/:id", get(get_model))
 }
 
 #[cfg(test)]
