@@ -304,6 +304,20 @@
       ],
       "rationale": "The [aether]/[meridian]/[mat]/[sota] extras map to Cargo features that link heavy crates (mat -> ort/ONNX Runtime, train -> tokio+ruvector, etc.). The DEFAULT wheel must link none of them to stay under the ADR-117 §5.4 5 MB budget, which requires: (1) `default = []` in python/Cargo.toml [features], (2) every SOTA dep declared `optional = true` so it is pulled only by its own feature, and (3) `strip = true` in pyproject [tool.maturin] to drop debug symbols. Flipping default to include a SOTA feature, or making a SOTA dep non-optional, silently balloons the default wheel. NOTE: a fix-marker is a string guard and cannot measure bytes — it protects the CONFIG that keeps the wheel small. The actual numeric 5 MB ceiling is enforced by the `wheel-size-budget` job in .github/workflows/python-ci.yml, which builds the default (no-features) wheel and fails if it exceeds the budget.",
       "ref": "https://github.com/ruvnet/RuView/pull/1387"
+    },
+    {
+      "id": "RuView#2058",
+      "title": "Sensing server: the published person count only changes after the new value has held",
+      "files": [
+        "v2/crates/wifi-densepose-sensing-server/src/main.rs"
+      ],
+      "require": [
+        "PERSON_COUNT_DWELL_DURATION_SECS",
+        "dwell_person_count",
+        "RuView#2058"
+      ],
+      "rationale": "The count's hysteresis holds the output steady while the activity score sits inside a band, but it cannot hold it when the score crosses the whole band on its own, so every threshold crossing moved the published number. Measured live on one ESP32-S3 node against an empty room (2026-10-23, identical procedure before and after): 142 published changes in a 200 s window before, 1 after. The published count must keep going through dwell_person_count, and the drop to zero must stay immediate so an empty room is still reported as empty.",
+      "ref": "https://github.com/ruvnet/RuView/issues/2058"
     }
   ]
 }

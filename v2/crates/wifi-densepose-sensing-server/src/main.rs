@@ -729,6 +729,23 @@ fn classification_from_room(room: &RoomInference) -> ClassificationInfo {
 /// room-level hysteresis, same idea as the per-node debounce, one layer up.
 const ROOM_DEBOUNCE_DURATION_SECS: f64 = 1.5;
 
+/// Minimum time a candidate person count must hold *consistently* before the
+/// published count changes to it.
+///
+/// The count's own hysteresis ([`score_to_person_count`]) holds the *output*
+/// steady while the score sits inside a band, but it cannot hold it when the
+/// score crosses the whole band on its own: measured live on 2026-10-22, one
+/// empty room produced counts of 1, 2, 3 and 4 within 150 s because the input
+/// swung across every threshold (RuView#2058). The controlled before/after
+/// measurement is recorded in `docs/validation/2026-10-23-person-count-dwell.md`.
+///
+/// This is the count-level counterpart of [`ROOM_DEBOUNCE_DURATION_SECS`]: the
+/// count describes the same debounced room state as the classification it is
+/// derived from, so it moves on the same timescale. A drop to zero is *not*
+/// dwelled — an empty room has to be reported as empty as soon as the room
+/// vote says so.
+const PERSON_COUNT_DWELL_DURATION_SECS: f64 = 1.5;
+
 /// Debounced counterpart to [`classification_from_room`] — apply this at
 /// live call sites instead, so the room's `presence`/`motion_level` only
 /// flips after `raw`'s new candidate class has been observed continuously
@@ -2169,6 +2186,10 @@ struct AppStateInner {
     room_debounced_level: String,
     room_debounce_candidate: String,
     room_debounce_since: Option<std::time::Instant>,
+    /// The candidate count the dwell timer is currently tracking.
+    person_count_dwell_candidate: usize,
+    /// When the tracked candidate count was first observed.
+    person_count_dwell_since: Option<std::time::Instant>,
     // ── Accuracy sprint: Kalman tracker, multistatic fusion, eigenvalue counting ──
     /// Global Kalman-based pose tracker for stable person IDs and smoothed keypoints.
     pose_tracker: PoseTracker,
@@ -3062,6 +3083,8 @@ impl AppStateInner {
             room_debounced_level: "absent".to_string(),
             room_debounce_candidate: "absent".to_string(),
             room_debounce_since: None,
+            person_count_dwell_candidate: 0,
+            person_count_dwell_since: None,
             pose_tracker: PoseTracker::new(),
             last_tracker_instant: None,
             multistatic_fuser: MultistaticFuser::new(),
@@ -5064,12 +5087,10 @@ async fn wifi_task(state: SharedState, tick_ms: u64) {
         let raw_score = compute_person_score(&s, &features);
         s.smoothed_person_score = s.smoothed_person_score * 0.90 + raw_score * 0.10;
         let est_persons = if classification.presence {
-            let count = s.person_count();
-            s.prev_person_count = count;
-            count
+            let candidate = s.person_count();
+            s.dwell_person_count(candidate, std::time::Instant::now())
         } else {
-            s.prev_person_count = 0;
-            0
+            s.dwell_person_count(0, std::time::Instant::now())
         };
 
         let mut update = SensingUpdate {
@@ -5234,12 +5255,10 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
     let raw_score = compute_person_score(&s, &features);
     s.smoothed_person_score = s.smoothed_person_score * 0.90 + raw_score * 0.10;
     let est_persons = if classification.presence {
-        let count = s.person_count();
-        s.prev_person_count = count;
-        count
+        let candidate = s.person_count();
+        s.dwell_person_count(candidate, std::time::Instant::now())
     } else {
-        s.prev_person_count = 0;
-        0
+        s.dwell_person_count(0, std::time::Instant::now())
     };
 
     let mut update = SensingUpdate {
@@ -6802,6 +6821,57 @@ fn aggregate_person_count(
     activity_count.max(node_max)
 }
 
+impl AppStateInner {
+    /// Hold the published person count until a candidate has held for
+    /// [`PERSON_COUNT_DWELL_DURATION_SECS`].
+    ///
+    /// The count's own hysteresis holds the *output* steady while the score
+    /// stays inside a band; this holds it when the score crosses the whole
+    /// band, by requiring the new value to be observed continuously first.
+    ///
+    /// Transitions to and from zero are not dwelled: the room vote that gates
+    /// them is already debounced by [`ROOM_DEBOUNCE_DURATION_SECS`], and an
+    /// empty room has to be reported as empty as soon as that vote says so.
+    fn dwell_person_count(&mut self, candidate: usize, now: std::time::Instant) -> usize {
+        if candidate == 0 {
+            // Nobody. Report it now — the room vote is already debounced.
+            self.person_count_dwell_candidate = 0;
+            self.person_count_dwell_since = None;
+            self.prev_person_count = 0;
+            return 0;
+        }
+        if self.prev_person_count == 0 {
+            // The first positive count: there is no published value to protect
+            // yet, so it is published as soon as the room vote allows it.
+            self.person_count_dwell_candidate = candidate;
+            self.person_count_dwell_since = None;
+            self.prev_person_count = candidate;
+            return candidate;
+        }
+        if candidate == self.prev_person_count {
+            // The published value still holds — drop any in-flight candidate.
+            self.person_count_dwell_candidate = candidate;
+            self.person_count_dwell_since = None;
+            return candidate;
+        }
+        if self.person_count_dwell_candidate != candidate {
+            // A new candidate — restart the hold timer.
+            self.person_count_dwell_candidate = candidate;
+            self.person_count_dwell_since = Some(now);
+            return self.prev_person_count;
+        }
+        let since = self.person_count_dwell_since.unwrap_or(now);
+        if now.duration_since(since).as_secs_f64() >= PERSON_COUNT_DWELL_DURATION_SECS {
+            self.person_count_dwell_candidate = candidate;
+            self.person_count_dwell_since = None;
+            self.prev_person_count = candidate;
+            return candidate;
+        }
+        // Still inside the hold window — keep publishing the old value.
+        self.prev_person_count
+    }
+}
+
 /// Count and classification describe the same debounced room state, independent
 /// of which node supplied the latest packet. Bootstrap suppression is already
 /// reflected in `classification` before this function is called.
@@ -6812,8 +6882,7 @@ fn update_room_person_count(
     observed_at_unix_ms: u64,
 ) -> usize {
     if !classification.presence || !state.node_states.values().any(|n| node_is_fresh(n, now)) {
-        state.prev_person_count = 0;
-        return 0;
+        return state.dwell_person_count(0, now);
     }
     let (fused, fallback_count) = multistatic_bridge::fuse_or_fallback(
         &state.multistatic_fuser,
@@ -6830,9 +6899,8 @@ fn update_room_person_count(
         }
         None => fallback_count.unwrap_or(0),
     };
-    let count = aggregate_person_count(activity_count, &state.node_states, now).max(1);
-    state.prev_person_count = count;
-    count
+    let candidate = aggregate_person_count(activity_count, &state.node_states, now).max(1);
+    state.dwell_person_count(candidate, now)
 }
 
 #[cfg(test)]
@@ -7067,6 +7135,123 @@ mod room_person_count_tests {
         let expired = now + Duration::from_millis(NODE_STALE_AFTER_MS);
         assert_eq!(update_room_person_count(&mut state, &held_present, expired, 0), 0);
         assert_eq!(room(&state, expired), RoomInference::unavailable());
+    }
+
+    // ── RuView#2058 — the published count must hold still ────────────────
+    //
+    // The count's hysteresis holds the *output* steady while the score stays
+    // inside a band; it cannot hold it when the score crosses the whole band.
+    // Measured live on 2026-10-22, one empty room produced counts of 1, 2, 3
+    // and 4 within 150 s because the input crossed every threshold on its
+    // own. The dwell makes the published count change only after the new
+    // value has been observed continuously.
+
+    #[test]
+    fn the_first_positive_count_is_published_immediately() {
+        let now = Instant::now();
+        let mut state = AppStateInner::minimal();
+        assert_eq!(
+            state.dwell_person_count(2, now),
+            2,
+            "there is no published value to protect yet"
+        );
+    }
+
+    #[test]
+    fn a_candidate_that_does_not_hold_does_not_change_the_count() {
+        let now = Instant::now();
+        let mut state = AppStateInner::minimal();
+        state.dwell_person_count(1, now);
+        assert_eq!(state.dwell_person_count(2, now), 1);
+        assert_eq!(
+            state.dwell_person_count(2, now + Duration::from_millis(1000)),
+            1,
+            "a candidate that has not held for the dwell window must not be published"
+        );
+    }
+
+    #[test]
+    fn a_candidate_that_holds_for_the_window_changes_the_count() {
+        let now = Instant::now();
+        let mut state = AppStateInner::minimal();
+        state.dwell_person_count(1, now);
+        assert_eq!(state.dwell_person_count(2, now), 1);
+        assert_eq!(
+            state.dwell_person_count(2, now + Duration::from_secs(2)),
+            2,
+            "a candidate that has held for the dwell window must be published"
+        );
+    }
+
+    #[test]
+    fn a_flapping_candidate_never_changes_the_count() {
+        let now = Instant::now();
+        let mut state = AppStateInner::minimal();
+        state.dwell_person_count(1, now);
+        for step in 0..100u64 {
+            let at = now + Duration::from_millis(step * 100);
+            let candidate = if step % 2 == 0 { 2 } else { 3 };
+            assert_eq!(
+                state.dwell_person_count(candidate, at),
+                1,
+                "a flapping candidate must not move the published count"
+            );
+        }
+    }
+
+    #[test]
+    fn the_dwell_timer_restarts_for_a_new_candidate() {
+        let now = Instant::now();
+        let mut state = AppStateInner::minimal();
+        state.dwell_person_count(1, now);
+        state.dwell_person_count(2, now + Duration::from_millis(1400));
+        // A different candidate arrives: the hold timer must restart for it.
+        assert_eq!(state.dwell_person_count(3, now + Duration::from_millis(1400)), 1);
+        assert_eq!(
+            state.dwell_person_count(3, now + Duration::from_millis(2800)),
+            1,
+            "the new candidate must hold for its own window"
+        );
+        assert_eq!(state.dwell_person_count(3, now + Duration::from_millis(2900)), 3);
+    }
+
+    #[test]
+    fn an_empty_room_is_reported_as_empty_immediately() {
+        let now = Instant::now();
+        let mut state = AppStateInner::minimal();
+        state.dwell_person_count(2, now);
+        assert_eq!(
+            state.dwell_person_count(0, now),
+            0,
+            "an empty room must not be held back by the dwell"
+        );
+    }
+
+    #[test]
+    fn a_node_count_change_is_not_published_until_it_holds() {
+        let now = Instant::now();
+        let mut state = AppStateInner::minimal();
+        state.room_debounced_level = "present_still".to_string();
+        observe(&mut state, 1, edge(true, false, 2), now);
+        let inference = room(&state, now);
+        let classification = debounce_room_classification(&mut state, &inference);
+        assert!(classification.presence);
+        assert_eq!(
+            update_room_person_count(&mut state, &classification, now, 0),
+            2,
+            "the first positive count is published at once"
+        );
+
+        // The node now reports three people.
+        let later = now + Duration::from_millis(100);
+        observe(&mut state, 1, edge(true, false, 3), later);
+        let inference = room(&state, later);
+        let classification = debounce_room_classification(&mut state, &inference);
+        assert_eq!(
+            update_room_person_count(&mut state, &classification, later, 0),
+            2,
+            "the new count has not held long enough to be published"
+        );
     }
 }
 
@@ -13387,12 +13572,10 @@ async fn simulated_data_task(state: SharedState, tick_ms: u64) {
         let raw_score = compute_person_score(&s, &features);
         s.smoothed_person_score = s.smoothed_person_score * 0.90 + raw_score * 0.10;
         let est_persons = if classification.presence {
-            let count = s.person_count();
-            s.prev_person_count = count;
-            count
+            let candidate = s.person_count();
+            s.dwell_person_count(candidate, std::time::Instant::now())
         } else {
-            s.prev_person_count = 0;
-            0
+            s.dwell_person_count(0, std::time::Instant::now())
         };
 
         let mut update = SensingUpdate {
@@ -14756,6 +14939,8 @@ async fn main() {
         room_debounced_level: "absent".to_string(),
         room_debounce_candidate: "absent".to_string(),
         room_debounce_since: None,
+        person_count_dwell_candidate: 0,
+        person_count_dwell_since: None,
         // Accuracy sprint
         pose_tracker: PoseTracker::new(),
         last_tracker_instant: None,
