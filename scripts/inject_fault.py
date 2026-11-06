@@ -18,8 +18,8 @@ Usage:
 """
 
 import argparse
+import inspect
 import os
-import random
 import socket
 import sys
 import time
@@ -43,12 +43,12 @@ def connect_monitor(sock_path: str, timeout: float = CMD_TIMEOUT) -> socket.sock
               file=sys.stderr)
         sys.exit(2)
 
-    # Read the initial QEMU monitor banner/prompt
+    # Read the initial QEMU monitor banner/prompt. Assumes the banner
+    # arrives in a single recv(); if QEMU ever splits it across packets
+    # this would need the same accumulation fix as send_cmd().
     try:
         banner = s.recv(RECV_BUFSIZE).decode("utf-8", errors="replace")
-        if banner:
-            pass  # Consume silently
-        else:
+        if not banner:
             print(f"WARNING: Connected to {sock_path} but received no banner data. "
                   f"QEMU monitor may not be ready.", file=sys.stderr)
     except socket.timeout:
@@ -67,7 +67,11 @@ def send_cmd(s: socket.socket, cmd: str, timeout: float = CMD_TIMEOUT) -> str:
         print(f"ERROR: Lost connection to QEMU monitor: {e}", file=sys.stderr)
         return ""
 
-    # Read response (may be multi-line)
+    # Read response (may be multi-line, and may arrive across several
+    # recv() calls). The prompt check must run against the accumulated
+    # response, not just the latest chunk, or a "(qemu) " prompt split
+    # across two packets is never detected and every call falls through
+    # to a full timeout instead of returning as soon as data is ready.
     response = ""
     try:
         while True:
@@ -75,8 +79,7 @@ def send_cmd(s: socket.socket, cmd: str, timeout: float = CMD_TIMEOUT) -> str:
             if not chunk:
                 break
             response += chunk
-            # QEMU monitor prompt ends with "(qemu) "
-            if "(qemu)" in chunk:
+            if "(qemu)" in response:
                 break
     except socket.timeout:
         pass  # Response may not have a clean prompt
@@ -102,15 +105,16 @@ def fault_ring_flood(s: socket.socket) -> None:
     handler processes as frame events.
     """
     print("[ring_flood] Sending 1000 rapid commands...")
+    # Batch the writes into one sendall() instead of 1000 individual
+    # syscalls — same wire behavior, far fewer round trips into the
+    # kernel and much faster under load.
+    payload = b"nmi\n" * 1000
     sent = 0
-    for i in range(1000):
-        try:
-            # Use 'nmi' to trigger interrupt handler (mock CSI frame path)
-            s.sendall(b"nmi\n")
-            sent += 1
-        except (BrokenPipeError, ConnectionResetError):
-            print(f"[ring_flood] Connection lost after {sent} commands")
-            break
+    try:
+        s.sendall(payload)
+        sent = 1000
+    except (BrokenPipeError, ConnectionResetError):
+        print(f"[ring_flood] Connection lost while sending batch")
 
     # Drain any accumulated responses
     s.settimeout(1.0)
@@ -183,7 +187,9 @@ def fault_nvs_corrupt(s: socket.socket, flash_path: str = None) -> None:
     """
     if flash_path and os.path.isfile(flash_path):
         nvs_offset = 0x9000
-        garbage = bytes(random.randint(0, 255) for _ in range(16))
+        # os.urandom is a single C-level call for the whole buffer,
+        # instead of 16 individual random.randint() calls in Python.
+        garbage = os.urandom(16)
         with open(flash_path, "r+b") as f:
             f.seek(nvs_offset)
             f.write(garbage)
@@ -235,11 +241,11 @@ def main():
     print(f"[inject_fault] Connecting to {args.socket}...")
     s = connect_monitor(args.socket, timeout=args.timeout)
 
-    print(f"[inject_fault] Injecting fault: {args.fault}")
+    # try/finally guarantees the socket is closed even if the fault
+    # function raises, instead of only closing it on the success path.
     try:
+        print(f"[inject_fault] Injecting fault: {args.fault}")
         fault_fn = FAULT_MAP[args.fault]
-        # Pass flash_path to faults that accept it
-        import inspect
         sig = inspect.signature(fault_fn)
         if "flash_path" in sig.parameters:
             fault_fn(s, flash_path=args.flash)
@@ -247,10 +253,10 @@ def main():
             fault_fn(s)
     except Exception as e:
         print(f"ERROR: Fault injection failed: {e}", file=sys.stderr)
-        s.close()
         sys.exit(1)
+    finally:
+        s.close()
 
-    s.close()
     print(f"[inject_fault] Complete: {args.fault}")
 
 
