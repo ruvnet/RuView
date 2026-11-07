@@ -10,6 +10,11 @@ use crate::room_learner::{
     temporal_acquisition::{AssemblerCheckpoint, ManagedWindowTarget},
 };
 use serde::{Deserialize, Serialize};
+#[path = "temporal_durability.rs"]
+mod durability;
+use durability::AsyncState;
+pub(crate) use durability::DeferredReclamation;
+#[cfg(test)] pub(crate) use durability::ReclamationStats;
 #[path = "temporal_capture_quality.rs"]
 mod bridge;
 use bridge::BridgeState;
@@ -181,13 +186,14 @@ struct TemporalWorkflow {
     live_observed_ns: u64,
     source_high: Vec<(u8, u64, u64)>,
     pending_window: Option<ManagedWindowTarget>,
-    durable: Option<Vec<u8>>,
+    durable: Option<std::sync::Arc<Vec<u8>>>,
     durable_windows: usize,
     custody: SegmentCustody,
     commit_token: Option<TemporalToken>,
     pending_intent: Option<TemporalIntent>,
     pending_prefix: Option<checkpoint::ValidatedTemporalPrefix>,
     bridge: Option<BridgeState>,
+    async_state: Option<AsyncState>,
 }
 impl TemporalWorkflow {
     fn context(&self) -> &CaptureContext {
@@ -259,6 +265,7 @@ impl TemporalWorkflow {
             pending_intent: None,
             pending_prefix: None,
             bridge: None,
+            async_state: None,
         })
     }
     #[cfg(test)]
@@ -266,7 +273,7 @@ impl TemporalWorkflow {
         ConditionsPermit {
             context: self.context().digest(),
             run: self.session.run_id.clone(),
-            durable_sha256: self.durable.as_ref().map(|b| bytes_hash(b)),
+            durable_sha256: self.durable_digest(),
         }
     }
     fn start_segment(
@@ -281,7 +288,7 @@ impl TemporalWorkflow {
             Stage::DurableReady | Stage::PausedNeedsReconfirmation
         ) || permit.context != self.context().digest()
             || permit.run != self.session.run_id
-            || permit.durable_sha256 != self.durable.as_ref().map(|b| bytes_hash(b))
+            || permit.durable_sha256 != self.durable_digest()
             || epoch.is_empty()
             || epoch.len() > 128
             || anchor < self.last_now_ns
@@ -602,6 +609,11 @@ impl TemporalWorkflow {
             u64,
         ) -> Result<TemporalToken, String>,
     ) -> Result<(), String> {
+        if self.async_state.as_ref().is_some_and(|a| a.pending.is_some()) {
+            self.async_state.as_mut().unwrap().busy_pause = true;
+            self.stage = Stage::BlockedDurability;
+            return Err("temporal_storage_busy_pause".into());
+        }
         if slot {
             self.custody_at(self.last_now_ns)?;
             let t = self
@@ -635,6 +647,11 @@ impl TemporalWorkflow {
             self.ledger.spans.push(span);
         }
         self.descriptor.saved_at_ms = self.last_now_ns / 1_000_000;
+        if self.async_state.is_some() {
+            let result=self.submit_async_commit(slot);
+            if result.is_err(){self.stage=Stage::BlockedDurability;}
+            return result;
+        }
         let bytes = checkpoint::encode(self)?;
         let prefix = checkpoint::validated_prefix(&bytes, &self.descriptor, self.last_now_ns)?;
         let intent =
@@ -668,7 +685,7 @@ impl TemporalWorkflow {
         self.pending_intent = None;
         self.pending_prefix = None;
         self.durable_windows = self.session.rows.len();
-        self.durable = Some(bytes);
+        self.durable = Some(std::sync::Arc::new(bytes));
         if slot {
             self.pending_window = None;
         }
@@ -701,7 +718,7 @@ impl TemporalWorkflow {
         restored.mapping = mapping;
         restored.live_observed_ns = live;
         restored.commit_token = Some(loaded.token);
-        restored.durable = Some(prefix.bytes().to_vec());
+        restored.durable = Some(std::sync::Arc::new(prefix.bytes().to_vec()));
         restored.stage = Stage::PausedNeedsReconfirmation;
         restored.last_now_ns = now_ns;
         *self = restored;
@@ -722,7 +739,7 @@ impl TemporalWorkflow {
         let token = store.repair_same_temporal(intent, Some(prefix), now_ns)?;
         let mut restored = checkpoint::decode(prefix.bytes(), prefix.descriptor(), now_ns)?;
         restored.commit_token = Some(token);
-        restored.durable = Some(prefix.bytes().to_vec());
+        restored.durable = Some(std::sync::Arc::new(prefix.bytes().to_vec()));
         restored.stage = Stage::PausedNeedsReconfirmation;
         restored.last_now_ns = now_ns;
         *self = restored;
@@ -771,7 +788,7 @@ impl TemporalWorkflow {
         }
         v.stage = Stage::PausedNeedsReconfirmation;
         v.last_now_ns = now;
-        v.durable = Some(prefix.bytes().to_vec());
+        v.durable = Some(std::sync::Arc::new(prefix.bytes().to_vec()));
         Ok(v)
     }
 }
