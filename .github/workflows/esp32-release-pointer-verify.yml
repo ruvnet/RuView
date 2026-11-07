@@ -1,0 +1,71 @@
+name: ESP32 firmware release pointer validation
+
+on:
+  pull_request:
+    paths:
+      - 'firmware/esp32-csi-node/version.txt'
+      - 'firmware/esp32-csi-node/README.md'
+      - 'firmware/esp32-csi-node/release_bins/README.md'
+      - 'docs/user-guide.md'
+      - 'docs/releases/v*-esp32.md'
+      - '.github/workflows/firmware-ci.yml'
+      - 'scripts/esp32_release_pointer_contract.py'
+      - 'scripts/verify-esp32-release-pointer.py'
+      - 'scripts/tests/test_esp32_release_pointer_contract.py'
+      - '.github/workflows/esp32-release-pointer-verify.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'firmware/esp32-csi-node/version.txt'
+      - 'firmware/esp32-csi-node/README.md'
+      - 'firmware/esp32-csi-node/release_bins/README.md'
+      - 'docs/user-guide.md'
+      - 'docs/releases/v*-esp32.md'
+      - '.github/workflows/firmware-ci.yml'
+      - 'scripts/esp32_release_pointer_contract.py'
+      - 'scripts/verify-esp32-release-pointer.py'
+      - 'scripts/tests/test_esp32_release_pointer_contract.py'
+      - '.github/workflows/esp32-release-pointer-verify.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: The ESP32 firmware docs point at the release this tree builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          submodules: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - name: Test the release pointer contract
+        run: python -m unittest discover -s scripts/tests -p test_esp32_release_pointer_contract.py
+      - name: Verify the documented pointer against the repository
+        run: python scripts/verify-esp32-release-pointer.py
+      - name: The published release carries the documented archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          tag="$(python scripts/verify-esp32-release-pointer.py --print-tag)"
+          python scripts/verify-esp32-release-pointer.py --print-archives > /tmp/expected-archives.txt
+          if ! gh release view "$tag" --json assets --jq '.assets[].name' > /tmp/published-archives.txt 2>/dev/null; then
+            echo "::notice::release $tag is not published yet; the published archives were not compared"
+            exit 0
+          fi
+          status=0
+          while read -r name; do
+            if ! grep -qx "$name" /tmp/published-archives.txt; then
+              echo "::error::release $tag does not carry $name"
+              status=1
+            fi
+          done < /tmp/expected-archives.txt
+          if ! grep -qx "SHA256SUMS.txt" /tmp/published-archives.txt; then
+            echo "::error::release $tag does not carry SHA256SUMS.txt"
+            status=1
+          fi
+          exit $status
