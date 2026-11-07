@@ -904,7 +904,9 @@ fn c2_reverse_clock_and_expiry_while_start_ack_pending_never_authorize_observati
 }
 
 #[test]
+#[cfg_attr(debug_assertions, ignore = "native-persistence journey requires Release; CI explicitly executes and counts this test")]
 fn c2_all_seven_train_phases_use_actual_async_runtime_and_durable_seals_without_fit(){
+    assert!(!cfg!(debug_assertions), "execute this native-persistence journey in the explicit Release batch");
     // Synthetic receiver time accelerates only when no write is pending. While
     // a writer is pending we pace packets, preserving the declared cadence and
     // allowing explicit busy/pause+fresh-start rather than inventing credit.
@@ -1186,7 +1188,9 @@ fn budget_repro_store_observation(rt:&RoomLearningRuntime,now:u64)->(usize,usize
     (revision,rows,gaps,parts,format!("{:x}",<sha2::Sha256 as sha2::Digest>::digest(prefix.bytes())))
 }
 #[test]
+#[cfg_attr(debug_assertions, ignore = "native-persistence journey requires Release; CI explicitly executes and counts this test")]
 fn legacy_329_actual_runtime_saturation_retires_and_explicit_fresh_train_chains_343(){
+    assert!(!cfg!(debug_assertions), "execute this native-persistence journey in the explicit Release batch");
     let dir=tempfile::tempdir().unwrap();let(rt,mut now)=configured_async(dir.path());let original=snapshot(&rt,now)["descriptor"].clone();
     assert_eq!(budget_repro_store_observation(&rt,now).0,0);
     //127 zero-observation pauses followed by127 resumes: initialsegment0 is
@@ -1296,7 +1300,9 @@ fn legacy_329_actual_runtime_saturation_retires_and_explicit_fresh_train_chains_
 // schedule plus a legitimate deferred pause before EACH of the seven seals.
 // All counters below come from authenticated store readback, not a mock limit.
 #[test]
+#[cfg_attr(debug_assertions, ignore = "native-persistence journey requires Release; CI explicitly executes and counts this test")]
 fn fresh_343_actual_runtime_all_128_gaps_seven_terminal_pauses_and_retirement_fit_budget(){
+    assert!(!cfg!(debug_assertions), "execute this native-persistence journey in the explicit Release batch");
     let dir=tempfile::tempdir().unwrap();let rt=runtime(dir.path(),START);
     rt.configure_fresh_train_343_capture(&rt.mutation_guard().unwrap(),context(),"synthetic-full-343".into(),START).unwrap();
     let mut now=settle_async_boundary(&rt,START);let original=snapshot(&rt,now)["descriptor"].clone();

@@ -132,12 +132,33 @@ jobs:
     # device" once the engine/benchmark crates landed; the same tree's local
     # debug target measured 151 GB). Debuginfo is useless in CI — tests either
     # pass or print their failure — so build without it; target shrinks ~5-10x.
+    - name: Verify temporal Debug/Release test classification
+      env:
+        CARGO_PROFILE_DEV_DEBUG: "0"
+        CARGO_PROFILE_TEST_DEBUG: "0"
+        CARGO_BUILD_JOBS: "2"
+      run: |
+        python3 scripts/ci/test_temporal_test_profiles.py
+        python3 scripts/ci/temporal_test_profiles.py debug-check --evidence-dir "${{ runner.temp }}/temporal-test-profiles"
+
     - name: Run Rust tests
       working-directory: v2
       env:
         CARGO_PROFILE_DEV_DEBUG: "0"
         CARGO_PROFILE_TEST_DEBUG: "0"
       run: cargo test --workspace --no-default-features
+
+    - name: Execute native temporal persistence journeys in Release
+      env:
+        CARGO_BUILD_JOBS: "2"
+      run: python3 scripts/ci/temporal_test_profiles.py release-run --evidence-dir "${{ runner.temp }}/temporal-test-profiles"
+
+    - name: Retain temporal profile registration and execution evidence
+      if: always()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: temporal-test-profiles
+        path: ${{ runner.temp }}/temporal-test-profiles
 
     - name: Verify secure companion over real sockets
       env:
