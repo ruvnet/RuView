@@ -19,6 +19,9 @@ pub(crate) use durability::DeferredReclamation;
 mod bridge;
 use bridge::BridgeState;
 pub(crate) use bridge::{TemporalCaptureStage, TemporalTrainCapture};
+#[path = "temporal_fit_admission.rs"]
+mod fit_admission;
+pub(crate) use fit_admission::{PendingTemporalFitInput, TemporalFitCaptureIdentity};
 
 pub(crate) const EXECUTION_POLICY:&str="observed-complete-reservation-prefix-v1;paused-time;immutable-spans;partial-tail-drop;max128segments;persegment-native-firstarrival-skew-gaps;explicit-genesis-gap-anchor;quality-unimplemented;independence-false";
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

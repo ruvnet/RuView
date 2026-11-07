@@ -141,7 +141,7 @@ fn train() -> (TemporalTrainingSession, TemporalModel) {
     );
     let permit = session.synthetic_test_fit_admission().unwrap();
     let (model, report) = session
-        .fit_managed_with_cancel(&permit, &AtomicBool::new(false))
+        .fit_managed_with_cancel(permit, &AtomicBool::new(false))
         .unwrap();
     assert_eq!(report.training_cohorts, 64);
     assert_eq!(report.completed_epochs, 2);
@@ -318,7 +318,7 @@ fn heldout_uses_frozen_whole_artifact_and_never_changes_train_codec_or_profiles(
     assert_eq!(m.export().unwrap(), before);
     let permit = session.synthetic_test_fit_admission().unwrap();
     assert!(session
-        .fit_managed_with_cancel(&permit, &AtomicBool::new(false))
+        .fit_managed_with_cancel(permit, &AtomicBool::new(false))
         .is_err());
     let v: serde_json::Value = serde_json::from_slice(&before).unwrap();
     assert!(v["payload"]["identities"]
@@ -437,7 +437,7 @@ fn v2_codec_remains_unwrapped_and_managed_fit_permit_cannot_be_omitted_or_forged
         identities: "d".repeat(64),
     };
     assert!(s
-        .fit_managed_with_cancel(&fake, &AtomicBool::new(false))
+        .fit_managed_with_cancel(fake, &AtomicBool::new(false))
         .is_err());
     assert!(RoomModel::import(&model().export().unwrap()).is_err());
 }

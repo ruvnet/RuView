@@ -1,5 +1,7 @@
 //! Private Runtime capture facade. Whole-period receiver quality is engineering
-//! admission only: never source-clock precision, teacher truth or fit authority.
+//! admission only: never source-clock precision, teacher truth or qualification.
+//! Seals alone grant no fit authority; the private owner must separately consume
+//! the complete durable producer prefix into its opaque fit-only admission.
 use super::*;
 use crate::room_learner::temporal_acquisition::WindowInputPolicy;
 use serde_json::{json, Value};
@@ -438,6 +440,20 @@ pub(crate) struct TemporalTrainCapture {
     durable_seals: usize,
 }
 impl TemporalTrainCapture {
+    pub(crate) fn prepare_fit_input(&self, now: u64) -> Result<PendingTemporalFitInput, String> {
+        self.ensure_live()?;
+        if self.stage() != TemporalCaptureStage::Complete {
+            return Err("temporal_fit_confirmed_durable_train_required".into());
+        }
+        fit_admission::PendingTemporalFitInput::capture(&self.workflow, &self.schedule, now)
+    }
+    pub(crate) fn fit_capture_identity(&self, now: u64) -> Result<TemporalFitCaptureIdentity, String> {
+        self.ensure_live()?;
+        if self.stage() != TemporalCaptureStage::Complete {
+            return Err("temporal_fit_confirmed_durable_train_required".into());
+        }
+        fit_admission::current_identity(&self.workflow, &self.schedule, now)
+    }
     pub(crate) fn prepare(
         schedule: ManagedScheduleContract,
         run: String,

@@ -1,5 +1,6 @@
 //! Managed-v3 INPUT integration inside the SAME opaque temporal model/session.
-//! No Runtime issuer, full-trial quality, confirmation or managed proof exists here.
+//! The private Runtime may issue fit-only admission from its exact durable Train
+//! producer. Neither this INPUT codec nor its claims issue managed qualification.
 use super::*;
 use crate::room_learner::{
     managed_schedule_contract::{FrozenModelIdentity, ManagedScheduleContract},
@@ -103,8 +104,9 @@ pub(super) struct ManagedModel {
     pub(super) binding: ManagedBinding,
     windows: Vec<ManagedWindowIdentity>,
 }
-/// No production issuer is implemented. A future owner Runtime must issue this
-/// after its actual confirmed/quality-checked/durable Train episode evidence.
+/// The private owner Runtime can obtain this only by consuming the producer's
+/// exact confirmed/quality-checked/durable Train prefix. Permission to compute a
+/// diagnostic candidate is not physical qualification or selection authority.
 /// It cannot be uploaded/deserialized or synthesized from generic model metadata.
 pub(crate) struct ManagedFitAdmission {
     policy: String,
@@ -269,6 +271,11 @@ fn validate_records(
     Ok(())
 }
 impl TemporalTrainingSession {
+    pub(crate) fn bound_managed_fit_config(&self) -> Result<FitConfig, String> {
+        let managed=self.managed.as_ref().ok_or("managed_session_required")?;
+        managed.binding.contract()?;
+        Ok(managed.binding.fit.clone())
+    }
     pub fn managed(
         schedule: ManagedScheduleContract,
         run_id: String,
@@ -330,7 +337,7 @@ impl TemporalTrainingSession {
     }
     pub(crate) fn fit_managed_with_cancel(
         &mut self,
-        permit: &ManagedFitAdmission,
+        permit: ManagedFitAdmission,
         cancel: &AtomicBool,
     ) -> Result<(TemporalModel, TrainingReport), String> {
         let managed = self.managed.as_ref().ok_or("managed_session_required")?;
