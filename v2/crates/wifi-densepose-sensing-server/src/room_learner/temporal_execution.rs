@@ -21,7 +21,9 @@ use bridge::BridgeState;
 pub(crate) use bridge::{TemporalCaptureStage, TemporalTrainCapture};
 #[path = "temporal_fit_admission.rs"]
 mod fit_admission;
-pub(crate) use fit_admission::{PendingTemporalFitInput, TemporalFitCaptureIdentity};
+pub(crate) use fit_admission::{PendingTemporalFitInput, TemporalFitCaptureIdentity,VerifiedTemporalFitSource};
+#[path = "temporal_full_run.rs"]
+pub(crate) mod full_run;
 
 pub(crate) const EXECUTION_POLICY:&str="observed-complete-reservation-prefix-v1;paused-time;immutable-spans;partial-tail-drop;max128segments;persegment-native-firstarrival-skew-gaps;explicit-genesis-gap-anchor;quality-unimplemented;independence-false";
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -179,6 +181,7 @@ struct SegmentCustody {
 /// Future value owned by existing RoomLearningRuntime::Inner's ONE tagged workflow.
 /// No production constructor/permit issuer is exposed by this source slice.
 struct TemporalWorkflow {
+    full_run: Option<full_run::FullRunState>,
     session: TemporalTrainingSession,
     descriptor: RecoveryDescriptor,
     ledger: Ledger,
@@ -242,6 +245,7 @@ impl TemporalWorkflow {
         let digest = c.digest();
         let session = TemporalTrainingSession::managed(schedule, run, config)?;
         Ok(Self {
+            full_run: None,
             session,
             descriptor: RecoveryDescriptor {
                 schema: crate::room_learner::recovery_store::RECOVERY_SCHEMA.into(),

@@ -413,6 +413,7 @@ pub(crate) enum TemporalCaptureStage {
     Observing,
     NeedsConfirmation,
     Complete,
+    Frozen,
     Paused,
     Blocked,
     Failed,
@@ -425,6 +426,7 @@ impl TemporalCaptureStage {
             Self::Observing => "observing",
             Self::NeedsConfirmation => "needs_confirmation",
             Self::Complete => "complete",
+            Self::Frozen => "frozen",
             Self::Paused => "paused",
             Self::Blocked => "blocked",
             Self::Failed => "failed",
@@ -440,6 +442,32 @@ pub(crate) struct TemporalTrainCapture {
     durable_seals: usize,
 }
 impl TemporalTrainCapture {
+    #[cfg(test)]
+    pub(crate) fn test_full_run_floors(&self)->(Vec<(u8,u64,u64)>,Option<u64>){
+        (self.workflow.source_high.clone(),self.workflow.full_run.as_ref().and_then(|m|m.local_start_not_before_ns))
+    }
+    pub(crate) fn is_full_run(&self)->bool{self.workflow.full_run.is_some()}
+    pub(crate) fn verified_frozen_model(&self)->Option<std::sync::Arc<TemporalModel>>{if self.failure.is_some(){return None;}self.workflow.full_run.as_ref().and_then(|m|m.verified_model())}
+    pub(crate) fn request_frozen(&mut self,accepted:crate::room_learner::lifecycle::AcceptedTemporalFit,witness:crate::room_learner::lifecycle::FrozenOwnerWitness,store:std::sync::Arc<crate::room_learner::artifact::ArtifactStore>,now:u64)->Result<(),String>{
+        self.ensure_live()?;
+        if self.stage()!=TemporalCaptureStage::Complete{return Err("temporal_full_run_train_complete_required".into());}
+        self.workflow.request_frozen(accepted,witness,store,now)
+    }
+    pub(crate) fn prepare_full_run_async(
+        schedule:ManagedScheduleContract,run:String,config:FitConfig,now:u64,
+        store:std::sync::Arc<RecoveryStore>,witness:crate::room_learner::lifecycle::FullRunGenesisWitness,
+    )->Result<(Self,Option<String>),String>{
+        // Fail unsupported full-run profiles before creating a writer/genesis.
+        full_run::ContinuationPolicy::build(&ManagedBinding::build(&schedule,config.clone())?)?;
+        let owned_store=store.clone();
+        Self::prepare_with(schedule,run,config,now,&store,move|w,store|{
+            let binding=&w.session.managed.as_ref().ok_or("managed_session_required")?.binding;
+            w.full_run=Some(full_run::FullRunState::fresh(binding,&w.session.run_id,witness)?);
+            let writer=std::sync::Arc::new(durability::Writer::new(owned_store,now)?);
+            w.async_state=Some(durability::AsyncState::new(writer));
+            w.persist_initial(store)
+        })
+    }
     pub(crate) fn prepare_fit_input(&self, now: u64) -> Result<PendingTemporalFitInput, String> {
         self.ensure_live()?;
         if self.stage() != TemporalCaptureStage::Complete {
@@ -571,10 +599,16 @@ impl TemporalTrainCapture {
     }
     pub(crate) fn prime_fence(&mut self, p: &CanonicalPacket, now: u64) -> Result<(), String> {
         if self.workflow.async_state.is_none(){self.ensure_live()?;}else if self.failure.is_some(){return Err("temporal_capture_failed".into());}
+        // A full-run owner keeps listening between Train completion and the
+        // future HeldOut stage. This admits only the existing replay/clock
+        // fence update below: never another row, seal, model or role credit.
+        let full_run_continuation_fence = self.is_full_run()
+            && matches!(self.stage(), TemporalCaptureStage::Complete | TemporalCaptureStage::Frozen);
         if !matches!(
             self.stage(),
             TemporalCaptureStage::Ready | TemporalCaptureStage::Paused | TemporalCaptureStage::Preparing | TemporalCaptureStage::Blocked
-        ) && !(self.workflow.async_state.is_some() && self.logical_phase_complete()) {
+        ) && !(self.workflow.async_state.is_some() && self.logical_phase_complete())
+            && !full_run_continuation_fence {
             return Err("temporal_priming_state".into());
         }
         let result: Result<(), String> = (|| {
@@ -620,6 +654,7 @@ impl TemporalTrainCapture {
         if w.stage == Stage::BlockedDurability {
             return TemporalCaptureStage::Blocked;
         }
+        if w.full_run.as_ref().is_some_and(|m|m.is_frozen()){return TemporalCaptureStage::Frozen;}
         if w.bridge
             .as_ref()
             .is_some_and(|b| b.disposition == Disposition::Complete)
@@ -911,6 +946,7 @@ impl TemporalTrainCapture {
         anchor: u64,
     ) -> Result<Self, String> {
         let w = TemporalWorkflow::cold_restore(store, context, now, epoch, anchor)?;
+        if w.full_run.is_some(){return Err("temporal_full_run_restore_requires_exact_model_consumer".into());}
         let b = w
             .bridge
             .as_ref()
@@ -923,6 +959,14 @@ impl TemporalTrainCapture {
             failure: None,
             durable_seals: n,
         })
+    }
+    pub(crate) fn cold_restore_full_run(
+        store:&RecoveryStore,artifact:std::sync::Arc<crate::room_learner::artifact::ArtifactStore>,context:&CaptureContext,
+        now:u64,epoch:&str,anchor:u64,witness:crate::room_learner::lifecycle::FullRunRecoveryWitness,
+    )->Result<Self,String>{
+        let w=full_run::recover_current(store,artifact,context,now,epoch,anchor,witness)?;
+        let n=w.bridge.as_ref().ok_or("temporal_bridge_checkpoint_required")?.seals.len();let schedule=w.schedule()?;
+        Ok(Self{workflow:w,schedule,failure:None,durable_seals:n})
     }
     pub(crate) fn repair_pending(&mut self, store: &RecoveryStore, now: u64) -> Result<(), String> {
         if self.workflow.async_state.is_some(){return self.workflow.request_async_repair(now);}

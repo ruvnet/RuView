@@ -5,7 +5,7 @@ use crate::room_learner::{
     artifact::{TemporalCandidateReceipt, TemporalFitDiagnostics, TemporalFitSaveResult},
     recovery_store::RecoveryStore,
     temporal_model_input::{
-        managed::execution::{PendingTemporalFitInput, TemporalFitCaptureIdentity},
+        managed::execution::{PendingTemporalFitInput, TemporalFitCaptureIdentity,VerifiedTemporalFitSource},
         TemporalModel,
     },
 };
@@ -24,6 +24,21 @@ struct TemporalFitIdentity {
 pub(super) struct TemporalDiagnosticFit {
     model: Arc<TemporalModel>,
     saved: TemporalFitSaveResult,
+    accepted: Option<AcceptedTemporalFit>,
+}
+/// Minted ONLY in the actual current C3 result-admission branch. Not serde,
+/// Clone, a candidate-import constructor, or a report/claims permission.
+pub(crate) struct AcceptedTemporalFit {
+    runtime_epoch:String,generation:u64,fit_attempt:u64,
+    model:Arc<TemporalModel>,source:VerifiedTemporalFitSource,
+}
+impl AcceptedTemporalFit {
+    pub(crate) fn consume_for_owner(self,epoch:&str,generation:u64,binding:&TemporalFitCaptureIdentity)->Result<(Arc<TemporalModel>,VerifiedTemporalFitSource),String>{
+        if self.runtime_epoch!=epoch||self.generation!=generation||self.fit_attempt==0||self.source.binding()!=binding{
+            return Err("temporal_accepted_fit_owner_changed".into());
+        }
+        Ok((self.model,self.source))
+    }
 }
 /// One lifetime barrier for the SAME existing Job/executor, not a new queue or
 /// trainer. Cancellation is atomic; waiting/publication never holds inner.
@@ -162,6 +177,15 @@ impl RuntimeTemporalCapture {
             job.cancel();
         }
     }
+    pub(super) fn take_current_accepted_fit(&mut self,epoch:&str,generation:u64,now:u64)->Result<AcceptedTemporalFit,String>{
+        if self.owner_generation!=generation||self.failure.is_some(){return Err("temporal_accepted_fit_owner_changed".into());}
+        let job=self.fit_job.as_ref().ok_or("temporal_actual_current_fit_required")?;
+        if job.identity.runtime_epoch!=epoch||job.lifetime.cancel.load(Ordering::Acquire)||!job.done(){return Err("temporal_actual_current_fit_required".into());}
+        let current=self.core.as_ref().ok_or("temporal_initial_barrier_unconfirmed")?.fit_capture_identity(now)?;
+        let accepted=self.diagnostic_fit.as_ref().and_then(|d|d.accepted.as_ref()).ok_or("temporal_full_run_actual_accepted_fit_required")?;
+        if accepted.source.binding()!=&current{return Err("temporal_accepted_fit_capture_changed".into());}
+        Ok(self.diagnostic_fit.as_mut().unwrap().accepted.take().unwrap())
+    }
 }
 impl RoomLearningRuntime {
     /// Private cancellation of the SAME Job, preserving confirmed Train data.
@@ -173,6 +197,22 @@ impl RoomLearningRuntime {
                 return Err(PRIVATE_KIND.into());
             };
             let job = capture.fit_job.clone().ok_or("temporal_fit_job_missing")?;
+            // Ready is published only after actual fit/store validation. A
+            // late compute-only cancel cannot revoke that accepted result or
+            // its separately owned Frozen transaction, even before the final
+            // completion notification. Capture/owner cancellation still uses
+            // cancel_fit + drain and revokes the entire owner operation.
+            if state.job.phase == JobPhase::Ready
+                && job.identity.runtime_epoch == self.runtime_epoch
+                && job.identity.generation == state.generation
+                && Arc::ptr_eq(&state.job.cancel, &job.lifetime.cancel)
+                && capture.owner_generation == state.generation
+                && capture.failure.is_none()
+                && capture.core.as_ref().is_some_and(|c| c.is_full_run())
+                && capture.diagnostic_fit.is_some()
+            {
+                return Ok(JobPhase::Ready);
+            }
             job.cancel();
             if busy(&state.job) {
                 state.job.phase = JobPhase::Cancelling;
@@ -291,6 +331,8 @@ impl RoomLearningRuntime {
             lifetime.at("completion_owner_upgraded");
             if let Some(runtime) = &completion.owner {
                 runtime.admit_temporal_fit(&identity, &lifetime, result);
+                #[cfg(test)]
+                lifetime.at("accepted_ready_published");
             } else {
                 drop(result);
             }
@@ -303,10 +345,10 @@ impl RoomLearningRuntime {
         input: PendingTemporalFitInput,
         identity: &TemporalFitIdentity,
         lifetime: &FitLifetime,
-    ) -> Result<(Arc<TemporalModel>, TrainingReport, TemporalFitSaveResult), String> {
+    ) -> Result<(Arc<TemporalModel>, TrainingReport, TemporalFitSaveResult,Option<VerifiedTemporalFitSource>), String> {
         lifetime.at("before_validate");
         let validated = input.validate(recovery, lifetime.allowed()?)?;
-        let (mut session, permit) = validated.into_session_and_admission()?;
+        let (mut session, permit,mut source) = validated.into_session_admission_and_source()?;
         lifetime.at("before_fit");
         lifetime.allowed()?;
         let configured = session.bound_managed_fit_config()?;
@@ -337,18 +379,19 @@ impl RoomLearningRuntime {
             lifetime.at("after_save");
             saved
         };
+        source.bind_saved_fit(&model,&saved)?;
         identity
             .capture
             .recertify_current(recovery, lifetime.allowed()?)?;
         lifetime.at("before_admission");
         lifetime.allowed()?;
-        Ok((Arc::new(model), report, saved))
+        Ok((Arc::new(model), report, saved,Some(source)))
     }
     fn admit_temporal_fit(
         &self,
         identity: &TemporalFitIdentity,
         lifetime: &Arc<FitLifetime>,
-        outcome: Result<(Arc<TemporalModel>, TrainingReport, TemporalFitSaveResult), String>,
+        mut outcome: Result<(Arc<TemporalModel>, TrainingReport, TemporalFitSaveResult,Option<VerifiedTemporalFitSource>), String>,
     ) {
         // Outcome and retired owners precede the guard: even rejection/panic
         // releases inner before destroying model/evidence/report allocations.
@@ -379,8 +422,8 @@ impl RoomLearningRuntime {
             return;
         }
         state.workflow_revision = state.workflow_revision.saturating_add(1);
-        match &outcome {
-            Ok((model, report, saved)) => {
+        match &mut outcome {
+            Ok((model, report, saved,source)) => {
                 if let Some(CaptureWorkflow::Temporal(capture)) = state.capture.as_mut() {
                     retired_diagnostic = capture.diagnostic_fit.take();
                     capture.diagnostic_fit = Some(TemporalDiagnosticFit {
@@ -389,6 +432,10 @@ impl RoomLearningRuntime {
                             candidate: saved.candidate.clone(),
                             fit_diagnostics: saved.fit_diagnostics.clone(),
                         },
+                        accepted:if source.as_ref().is_some_and(|s|s.is_full_run()){
+                            Some(AcceptedTemporalFit{runtime_epoch:identity.runtime_epoch.clone(),generation:identity.generation,
+                                fit_attempt:identity.attempt,model:model.clone(),source:source.take().unwrap()})
+                        }else{None},
                     });
                 }
                 retired_report = state.job.report.replace(report.clone());
