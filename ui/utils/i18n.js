@@ -1,4 +1,4 @@
-// Internationalization - EN/PL language support
+// Internationalization - EN/PL/TR language support
 // Detects browser language, persists choice, translates UI strings
 
 const translations = {
@@ -156,6 +156,84 @@ const translations = {
     'misc.confirm': 'Potwierdz',
     'misc.settings': 'Ustawienia',
     'misc.language': 'Jezyk'
+  },
+
+  tr: {
+    // Navigation
+    'nav.dashboard': 'Kontrol Paneli',
+    'nav.hardware': 'Donanım',
+    'nav.demo': 'Canlı Demo',
+    'nav.architecture': 'Mimari',
+    'nav.performance': 'Performans',
+    'nav.applications': 'Uygulamalar',
+    'nav.sensing': 'Algılama',
+    'nav.training': 'Eğitim',
+
+    // Dashboard
+    'dashboard.title': 'WiFi Tabanlı Devrimsel İnsan Duruşu Algılama',
+    'dashboard.subtitle': 'WiFi Sinyalleriyle Duvarların Arkasındaki İnsanları Takip Etme',
+    'dashboard.description': 'Yapay zeka, yalnızca WiFi sinyallerini kullanarak duvarların arkasındaki tüm vücut hareketlerinizi takip edebilir. Carnegie Mellon araştırmacıları, temel WiFi sinyallerini insan vücudunun ayrıntılı iskelet modellerine dönüştüren bir sinir ağı eğitti.',
+    'dashboard.status': 'Sistem Durumu',
+    'dashboard.metrics': 'Sistem Ölçümleri',
+    'dashboard.features': 'Özellikler',
+    'dashboard.liveStats': 'Canlı İstatistikler',
+    'dashboard.activePersons': 'Aktif Kişiler',
+    'dashboard.avgConfidence': 'Ortalama Güven',
+    'dashboard.totalDetections': 'Toplam Algılama',
+    'dashboard.zoneOccupancy': 'Bölge Doluluğu',
+
+    // Status
+    'status.apiServer': 'API Sunucusu',
+    'status.hardware': 'Donanım',
+    'status.inference': 'Çıkarım',
+    'status.streaming': 'Akış',
+    'status.dataSource': 'Veri Kaynağı',
+
+    // Metrics
+    'metrics.cpu': 'CPU Kullanımı',
+    'metrics.memory': 'Bellek Kullanımı',
+    'metrics.disk': 'Disk Kullanımı',
+
+    // Benefits
+    'benefit.throughWalls': 'Duvarların Arkasından',
+    'benefit.throughWallsDesc': 'Doğrudan görüş gerektirmeden katı engellerin arkasında çalışır',
+    'benefit.privacy': 'Gizliliği Korur',
+    'benefit.privacyDesc': 'Kamera veya görüntü kaydı kullanmaz; yalnızca WiFi sinyallerini analiz eder',
+    'benefit.realtime': 'Gerçek Zamanlı',
+    'benefit.realtimeDesc': '100 Hz örnekleme hızıyla 24 vücut bölgesini gerçek zamanlı olarak haritalar',
+    'benefit.lowCost': 'Düşük Maliyet',
+    'benefit.lowCostDesc': '30 dolarlık ticari WiFi donanımıyla oluşturulmuştur',
+
+    // Stats
+    'stat.bodyRegions': 'Vücut Bölgeleri',
+    'stat.samplingRate': 'Örnekleme Hızı',
+    'stat.accuracy': 'Doğruluk (AP@50)',
+    'stat.hardwareCost': 'Donanım Maliyeti',
+
+    // Actions
+    'action.startDetection': 'Algılamayı Başlat',
+    'action.stopDetection': 'Algılamayı Durdur',
+    'action.toggleTheme': 'Temayı değiştir',
+    'action.exportData': 'Verileri dışa aktar',
+    'action.screenshot': 'Ekran görüntüsü al',
+
+    // Connection
+    'conn.connected': 'Bağlandı',
+    'conn.connecting': 'Bağlanıyor...',
+    'conn.offline': 'Çevrimdışı',
+    'conn.reconnecting': 'Yeniden bağlanıyor...',
+    'conn.live': 'Canlı',
+    'conn.simulated': 'Simülasyon',
+
+    // Misc
+    'misc.loading': 'Yükleniyor...',
+    'misc.error': 'Bir hata oluştu',
+    'misc.noData': 'Veri yok',
+    'misc.close': 'Kapat',
+    'misc.cancel': 'İptal',
+    'misc.confirm': 'Onayla',
+    'misc.settings': 'Ayarlar',
+    'misc.language': 'Dil'
   }
 };
 
@@ -172,6 +250,7 @@ export class I18n {
 
   detectLocale() {
     const lang = navigator.language?.toLowerCase() || 'en';
+    if (lang.startsWith('tr')) return 'tr';
     if (lang.startsWith('pl')) return 'pl';
     return 'en';
   }
@@ -239,6 +318,7 @@ export class I18n {
       <select id="lang-selector" class="lang-selector" aria-label="Language">
         <option value="en">EN</option>
         <option value="pl">PL</option>
+        <option value="tr">TR</option>
       </select>
     `;
 
