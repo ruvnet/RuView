@@ -149,7 +149,13 @@ static esp_timer_handle_t s_hop_timer = NULL;
  *   [16]     RSSI (i8)
  *   [17]     Noise floor (i8)
  *   [18..19] Reserved
- *   [20..]   I/Q data (raw bytes from ESP-IDF callback)
+ *   [20..25] Transmitter MAC (addr2) -- wire v3
+ *   [26..27] 802.11 rx_seq of the overheard frame (LE u16) -- wire v3
+ *   [28..]   I/Q data (raw bytes from ESP-IDF callback)
+ *
+ * Emits wire v3 (CSI_MAGIC_V3). v1 differs only in lacking bytes 20..27, so
+ * its I/Q begins at 20 instead of 28; a sink that does not know v3 rejects the
+ * magic rather than misreading the payload.
  */
 size_t csi_serialize_frame(const wifi_csi_info_t *info, uint8_t *buf, size_t buf_len)
 {
@@ -161,7 +167,7 @@ size_t csi_serialize_frame(const wifi_csi_info_t *info, uint8_t *buf, size_t buf
     uint16_t iq_len = (uint16_t)info->len;
     uint16_t n_subcarriers = iq_len / (2 * n_antennas);
 
-    size_t frame_size = CSI_HEADER_SIZE + iq_len;
+    size_t frame_size = CSI_HEADER_SIZE_V3 + iq_len;
     if (frame_size > buf_len) {
         ESP_LOGW(TAG, "Buffer too small: need %u, have %u", (unsigned)frame_size, (unsigned)buf_len);
         return 0;
@@ -181,7 +187,7 @@ size_t csi_serialize_frame(const wifi_csi_info_t *info, uint8_t *buf, size_t buf
     }
 
     /* Magic (LE) */
-    uint32_t magic = CSI_MAGIC;
+    uint32_t magic = CSI_MAGIC_V3;
     memcpy(&buf[0], &magic, 4);
 
     /* Node ID (captured at init into s_node_id to survive memory corruption
@@ -266,14 +272,36 @@ size_t csi_serialize_frame(const wifi_csi_info_t *info, uint8_t *buf, size_t buf
     buf[19] = 0;
 #endif
 
+    /* Bytes 20..25: the TRANSMITTER's MAC (802.11 addr2), and 26..27 its
+     * sequence number.
+     *
+     * Together these name one transmission, and that is the point. Without
+     * them a sink receiving CSI from several nodes cannot tell whether two
+     * frames describe the same packet in the air or two unrelated ones: node
+     * ids differ, arrival timestamps differ, and the per-node `sequence` at
+     * bytes 12..15 is each node's own counter, so nothing in a v1 frame links
+     * the two.
+     *
+     * `rx_seq` is assigned by the transmitter, so every receiver of the same
+     * packet reports the same value. `(addr2, rx_seq)` is therefore a
+     * receiver-independent name for a single transmission -- no clocks, no
+     * synchronisation and no guard interval required, because the frames are
+     * literally the same emission arriving nanoseconds apart.
+     *
+     * `info->mac` is addr2 of the captured frame, which the driver fills for
+     * every CSI callback. */
+    memcpy(&buf[20], info->mac, 6);
+    uint16_t rx_seq = (uint16_t)info->rx_seq;
+    memcpy(&buf[26], &rx_seq, 2);
+
     /* I/Q data. ESP-IDF documents that the first four CSI bytes are invalid
      * when first_word_invalid is set. Never let those hardware artifacts feed
      * either the host or edge DSP path. Preserve the fixed ADR-018 geometry by
      * zeroing rather than removing bytes, and mark the sanitation in bit 5. */
-    memcpy(&buf[CSI_HEADER_SIZE], info->buf, iq_len);
+    memcpy(&buf[CSI_HEADER_SIZE_V3], info->buf, iq_len);
     if (info->first_word_invalid && iq_len > 0) {
         size_t invalid_len = iq_len < 4 ? iq_len : 4;
-        memset(&buf[CSI_HEADER_SIZE], 0, invalid_len);
+        memset(&buf[CSI_HEADER_SIZE_V3], 0, invalid_len);
         buf[19] |= CSI_FLAG_FIRST_WORD_SANITIZED;
     }
 
@@ -385,7 +413,7 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
      * while the on-device Tier 1/2 pipeline receives a uniform, sustainable
      * stream. Enqueuing every burst frame overloaded the unicore C6 DSP and
      * turned 30-40 callback pps into an irregular approximately 8 Hz subset. */
-    if (frame_len > CSI_HEADER_SIZE) {
+    if (frame_len > CSI_HEADER_SIZE_V3) {
         if (s_next_edge_enqueue_us == 0) {
             s_next_edge_enqueue_us = now_us;
         }
@@ -393,8 +421,8 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
         if (now_us >= s_next_edge_enqueue_us) {
             /* Reuse the sanitized ADR-018 payload. Feeding info->buf here
              * would reintroduce first_word_invalid artifacts on device. */
-            (void)edge_enqueue_csi(&frame_buf[CSI_HEADER_SIZE],
-                                   (uint16_t)(frame_len - CSI_HEADER_SIZE),
+            (void)edge_enqueue_csi(&frame_buf[CSI_HEADER_SIZE_V3],
+                                   (uint16_t)(frame_len - CSI_HEADER_SIZE_V3),
                                    (int8_t)info->rx_ctrl.rssi, info->rx_ctrl.channel);
 
             /* Preserve the configured sample clock instead of resetting it to
