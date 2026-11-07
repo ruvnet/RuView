@@ -317,53 +317,63 @@ def main() -> int:
                     # ADR-118 PrivacyGate: classify + redact before the
                     # HAP boundary. Returns None for non-eligible classes.
                     gated = apply_privacy_gate(pkt, privacy_class)
-                    if gated is not None and gated["presence_valid"]:
-                        n_valid += 1
-                        presence_sum += gated["presence"]
-                        motion_sum += gated["motion"]
-                        last_packet_ts = now
-                        # MotionDetected — short-window (each packet)
+                    if gated is not None:
                         prev_motion = motion
-                        if not motion and gated["presence"] >= PRESENCE_ON_THRESHOLD:
-                            motion = set_motion(args.toggle, True, motion)
-                        elif motion and gated["presence"] <= PRESENCE_OFF_THRESHOLD:
-                            motion = set_motion(args.toggle, False, motion)
+                        if gated["presence_valid"]:
+                            n_valid += 1
+                            presence_sum += gated["presence"]
+                            motion_sum += gated["motion"]
+                            last_packet_ts = now
+                            # MotionDetected — short-window (each packet)
+                            if not motion and gated["presence"] >= PRESENCE_ON_THRESHOLD:
+                                motion = set_motion(args.toggle, True, motion)
+                            elif motion and gated["presence"] <= PRESENCE_OFF_THRESHOLD:
+                                motion = set_motion(args.toggle, False, motion)
 
-                        # OccupancyDetected — rolling-window avg (§2.1.d
-                        # "Unexpected Occupancy" is a future iter; for now
-                        # we expose Occupancy as sustained presence).
-                        occ_window.append((now, gated["presence"]))
-                        cutoff = now - args.occupancy_window
-                        while occ_window and occ_window[0][0] < cutoff:
-                            occ_window.popleft()
-                        if occ_window:
-                            occ_avg = (sum(p for _, p in occ_window)
-                                       / len(occ_window))
-                            if not occupancy and occ_avg >= OCC_ON_THRESH:
-                                occupancy = True
+                            # OccupancyDetected — rolling-window avg (§2.1.d
+                            # "Unexpected Occupancy" is a future iter; for now
+                            # we expose Occupancy as sustained presence).
+                            occ_window.append((now, gated["presence"]))
+                            cutoff = now - args.occupancy_window
+                            while occ_window and occ_window[0][0] < cutoff:
+                                occ_window.popleft()
+                            if occ_window:
+                                occ_avg = (sum(p for _, p in occ_window)
+                                           / len(occ_window))
+                                if not occupancy and occ_avg >= OCC_ON_THRESH:
+                                    occupancy = True
+                                    print(f"[{time.strftime('%H:%M:%S')}] "
+                                          f"Unknown Presence — Occupancy ON "
+                                          f"(rolling_avg={occ_avg:.2f})",
+                                          flush=True)
+                                elif occupancy and occ_avg <= OCC_OFF_THRESH:
+                                    occupancy = False
+                                    print(f"[{time.strftime('%H:%M:%S')}] "
+                                          f"Occupancy OFF "
+                                          f"(rolling_avg={occ_avg:.2f})",
+                                          flush=True)
+
+                            # Anomaly — only when class allows (Restricted
+                            # gate drops anomaly_score entirely; the dict
+                            # missing the key is the type-level enforcement).
+                            if ("anomaly" in gated
+                                    and gated["anomaly"] >= args.anomaly_threshold):
+                                last_anomaly_ts = now
+                                n_anomaly_fires += 1
                                 print(f"[{time.strftime('%H:%M:%S')}] "
-                                      f"Unknown Presence — Occupancy ON "
-                                      f"(rolling_avg={occ_avg:.2f})",
-                                      flush=True)
-                            elif occupancy and occ_avg <= OCC_OFF_THRESH:
-                                occupancy = False
-                                print(f"[{time.strftime('%H:%M:%S')}] "
-                                      f"Occupancy OFF "
-                                      f"(rolling_avg={occ_avg:.2f})",
+                                      f"Unrecognized Activity Pattern "
+                                      f"(anomaly={gated['anomaly']:.2f})",
                                       flush=True)
 
-                        # Anomaly — only when class allows (Restricted
-                        # gate drops anomaly_score entirely; the dict
-                        # missing the key is the type-level enforcement).
-                        if ("anomaly" in gated
-                                and gated["anomaly"] >= args.anomaly_threshold):
-                            last_anomaly_ts = now
-                            n_anomaly_fires += 1
-                            print(f"[{time.strftime('%H:%M:%S')}] "
-                                  f"Unrecognized Activity Pattern "
-                                  f"(anomaly={gated['anomaly']:.2f})",
-                                  flush=True)
-
+                        # Write on every privacy-eligible packet, not just
+                        # presence_valid ones — otherwise the feature file's
+                        # `ts` only advances during "confident" readings, and
+                        # goes stale (per ruview-sensing-server.py's 10s
+                        # staleness gate) during perfectly normal stretches
+                        # where the room is calm/empty and presence_score
+                        # legitimately sits below the firmware's 0.5 quality
+                        # threshold. That previously read as "watcher/device
+                        # dead" to consumers when it was actually just quiet.
                         if (motion != prev_motion
                                 or not state_path.endswith(".disabled")):
                             write_state(motion, occupancy, last_anomaly_ts)
