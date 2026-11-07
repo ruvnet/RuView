@@ -223,6 +223,7 @@ fn packet(source: u8, sequence: u32, at: u64, label: RoomLabel) -> CanonicalPack
     .unwrap()
 }
 fn record_train_uncached(root: &Path) -> (Arc<RoomLearningRuntime>, u64) {
+    assert!(!cfg!(debug_assertions), "complete native-persistence fixture requires Release; classify the caller");
     let (runtime, mut now) = configured(root);
     let schedule = ManagedScheduleContract::build(
         fixture::context(),
@@ -359,6 +360,7 @@ fn floors(rt: &RoomLearningRuntime) -> (Vec<(u8, u64, u64)>, Option<u64>) {
     c.core.as_ref().unwrap().test_full_run_floors()
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[cfg_attr(debug_assertions, ignore = "native-persistence journey requires Release; CI explicitly executes and counts this test")]
 async fn c4a_actual_seven_train_fit_frozen_ack_and_exact_cold_model() {
     let directory = tempfile::tempdir().unwrap();
     let (runtime, now) = record_train(directory.path());
@@ -728,6 +730,7 @@ async fn prepare_frozen(rt: &Arc<RoomLearningRuntime>, at: u64) -> u64 {
     }
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[cfg_attr(debug_assertions, ignore = "native-persistence journey requires Release; CI explicitly executes and counts this test")]
 async fn c4a_actual_frozen_cold_missing_corrupt_wrong_kind_bytes_and_expiry_fail_closed() {
     let directory = tempfile::tempdir().unwrap();
     let (rt, now) = record_train(directory.path());
@@ -789,6 +792,7 @@ async fn c4a_actual_frozen_cold_missing_corrupt_wrong_kind_bytes_and_expiry_fail
     }
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[cfg_attr(debug_assertions, ignore = "native-persistence journey requires Release; CI explicitly executes and counts this test")]
 async fn c4a_owner_cancel_drains_actual_prepared_frozen_writer_before_synthetic_erase() {
     let directory = tempfile::tempdir().unwrap();
     let (rt, now) = record_train(directory.path());
@@ -839,6 +843,7 @@ async fn c4a_owner_cancel_drains_actual_prepared_frozen_writer_before_synthetic_
     println!("SYNTHETIC_C4A_OWNER_DRAIN_PREPARED_FROZEN_AT={at}");
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[cfg_attr(debug_assertions, ignore = "native-persistence journey requires Release; CI explicitly executes and counts this test")]
 async fn c4a_actual_frozen_lost_ack_same_intent_repair_installs_only_after_exact_ack() {
     let directory = tempfile::tempdir().unwrap();
     let (rt, now) = record_train(directory.path());
@@ -892,6 +897,7 @@ async fn c4a_actual_frozen_lost_ack_same_intent_repair_installs_only_after_exact
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[cfg_attr(debug_assertions, ignore = "native-persistence journey requires Release; CI explicitly executes and counts this test")]
 async fn c4a_running_compute_cancel_cannot_produce_accepted_fit_or_frozen() {
     let directory = tempfile::tempdir().unwrap();
     let (rt, now) = record_train(directory.path());
