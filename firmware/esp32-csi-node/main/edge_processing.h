@@ -23,6 +23,11 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "esp_err.h"
+/* Required for CONFIG_SOC_WIFI_HE_SUPPORT, which EDGE_MAX_SUBCARRIERS below
+ * switches on. Without it the macro is undefined, and C evaluates an undefined
+ * identifier in #if as 0 — silently selecting the pre-HE size on an HE part
+ * with no warning. */
+#include "sdkconfig.h"
 
 /* ---- Magic numbers ---- */
 #define EDGE_VITALS_MAGIC     0xC5110002  /**< Vitals packet magic. */

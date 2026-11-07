@@ -58,11 +58,12 @@ FUZZ_JOBS     ?= 1
         test_thermal run_thermal test_csi_sanitize run_csi_sanitize \
         test_c6_antenna run_c6_antenna test_serial_onboarding run_serial_onboarding \
         test_config_rules run_config_rules \
-        run_delivery_contract test_ota_health run_ota_health run_onboarding_identity run_onboarding_console
+        run_delivery_contract test_ota_health run_ota_health run_onboarding_identity run_onboarding_console \
+        test_edge_grid run_edge_grid
 
 all: fuzz_serialize fuzz_edge fuzz_nvs test_adr110 test_vitals test_mmwave_detect \
      test_thermal test_csi_sanitize test_c6_antenna test_serial_onboarding \
-     test_ota_health test_config_rules
+     test_ota_health test_config_rules test_edge_grid
 
 # --- XIAO ESP32-C6 RF switch selection ---
 # Host-side truth table for the GPIO14 antenna selector. GPIO3 is always driven
@@ -136,6 +137,22 @@ test_serial_onboarding: test_serial_onboarding_protocol.c $(MAIN_DIR)/serial_onb
 run_serial_onboarding: test_serial_onboarding
 	./test_serial_onboarding
 
+# --- Edge subcarrier grid (HE20 truncation regression) ---
+# Host-side. Pins EDGE_MAX_SUBCARRIERS against ../main/edge_processing.h so the
+# test and the firmware cannot disagree about how wide a CSI frame may be.
+#
+# Built TWICE on purpose. The constant is target-conditional -- 256 on HE-capable
+# parts (C6/C5), 128 pre-HE (S3) -- so a single compilation can only ever prove
+# one branch. The HE build is the regression that failed before the fix; the
+# pre-HE build guards against fixing C6 by spending .bss on every S3.
+test_edge_grid: test_edge_subcarrier_grid.c $(MAIN_DIR)/edge_processing.h
+	cc -std=c99 -Wall -Wextra -Istubs_he -Istubs -I$(MAIN_DIR) -DEXPECT_HE=1 -o test_edge_grid_he $<
+	cc -std=c99 -Wall -Wextra -Istubs -I$(MAIN_DIR) -o test_edge_grid_pre_he $<
+
+run_edge_grid: test_edge_grid
+	./test_edge_grid_he
+	./test_edge_grid_pre_he
+
 test_onboarding_identity: test_onboarding_identity.c $(MAIN_DIR)/onboarding_identity.h identity_stubs/esp_mac.h identity_stubs/psa/crypto.h
 	cc -std=c11 -Wall -Wextra -Werror -pedantic -Iidentity_stubs -I$(MAIN_DIR) -o $@ $<
 
@@ -202,7 +219,7 @@ run_mmwave_pins: test_mmwave_pins
 
 host_tests: run_mmwave_pins run_self_ping run_edge_stbc run_adr110 run_vitals run_mmwave_detect run_thermal run_csi_sanitize \
             run_c6_antenna run_serial_onboarding run_onboarding_identity run_onboarding_console run_delivery_contract run_ota_health \
-            run_config_rules run_config_recovery
+            run_config_rules run_config_recovery run_edge_grid
 	@echo "Host tests passed (firmware contracts, DSP, configuration recovery, onboarding and OTA health)"
 
 # --- Serialize fuzzer ---
@@ -241,5 +258,5 @@ run_all: run_serialize run_edge run_nvs
 clean:
 	rm -f fuzz_serialize fuzz_edge fuzz_nvs test_adr110 test_vitals test_mmwave_detect \
 		test_thermal test_csi_sanitize test_c6_antenna test_serial_onboarding \
-		test_ota_health test_onboarding_identity test_config_rules test_edge_stbc test_self_ping test_config_recovery
+		test_ota_health test_onboarding_identity test_config_rules test_edge_stbc test_self_ping test_config_recovery test_edge_grid_he test_edge_grid_pre_he
 	rm -rf corpus_serialize/ corpus_edge/ corpus_nvs/
