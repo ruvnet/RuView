@@ -1,6 +1,9 @@
 [workspace]
 resolver = "2"
 members = [
+    # Checksum-verified dependency patches; keep their upstream tests in CI.
+    "vendor/security/zip-0.6.6",
+    "vendor/security/wasmtime-internal-cache-36.0.19",
     "crates/wifi-densepose-core",
     "crates/wifi-densepose-physics", # ADR-323 bounded pose assessment/correction
     "crates/wifi-densepose-signal",
@@ -337,3 +340,10 @@ strip = false
 [profile.bench]
 inherits = "release"
 debug = true
+
+# Narrow, checksum-verified parent manifest patches. Source/API code is
+# unchanged; both parents use the fixed zstd 0.14.3 implementation.
+# See each directory's RUVIEW-PROVENANCE.md for archive digests and scope.
+[patch.crates-io]
+zip-legacy = { package = "zip", path = "vendor/security/zip-0.6.6" }
+wasmtime-internal-cache = { path = "vendor/security/wasmtime-internal-cache-36.0.19" }

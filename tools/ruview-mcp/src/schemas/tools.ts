@@ -168,7 +168,7 @@ export const PolicyCanSubscribeInputSchema = z.object({
 
 /** ruview.policy.redact_identity_fields */
 export const PolicyRedactIdentityFieldsInputSchema = z.object({
-  payload: z.record(z.unknown()).describe("Tool return value to redact."),
+  payload: z.record(z.string(), z.unknown()).describe("Tool return value to redact."),
   agent_id: z.string().min(1),
 });
 

@@ -2,3 +2,5 @@
 # files in this boundary on LF even when Windows enables core.autocrlf.
 harness/ruview/** text=auto eol=lf
 harness/homecore/** text=auto eol=lf
+# Linux containers must receive an executable LF shebang from Windows checkouts.
+docker/docker-entrypoint.sh text eol=lf

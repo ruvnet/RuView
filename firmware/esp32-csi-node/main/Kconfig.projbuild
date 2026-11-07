@@ -1,5 +1,14 @@
 menu "CSI Node Configuration"
 
+    config C5_STATUS_LED_GPIO
+        int "ESP32-C5 addressable status LED GPIO (-1 disables)"
+        depends on IDF_TARGET_ESP32C5
+        default -1
+        range -1 28
+        help
+            Leave disabled unless the board schematic confirms the LED pin.
+            C5 boards must never inherit the ESP32-S3 GPIO48 assignment.
+
     config C6_XIAO_ANTENNA_SELECT
         bool "Control the Seeed XIAO ESP32-C6 RF switch"
         depends on IDF_TARGET_ESP32C6
@@ -101,7 +110,7 @@ menu "Edge Intelligence (ADR-039)"
 
     config EDGE_DSP_SAMPLE_HZ
         int "On-device edge DSP sample rate (Hz)"
-        default 8 if IDF_TARGET_ESP32C6
+        default 8 if IDF_TARGET_ESP32C6 || IDF_TARGET_ESP32C5
         default 20
         range 8 50
         help
@@ -109,7 +118,8 @@ menu "Edge Intelligence (ADR-039)"
             edge DSP. Raw CSI transmission keeps its independent full-rate
             path. Eight hertz is the hardware-measured sustainable C6 Tier 2
             setting and preserves a 4 Hz Nyquist limit for the 0.1-2.0 Hz
-            vital bands.
+            vital bands. C5 starts with the same conservative rate until
+            target-specific hardware measurements justify an increase.
 
     config EDGE_FALL_THRESH
         int "Fall detection threshold (x1000)"

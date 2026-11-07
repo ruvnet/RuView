@@ -116,6 +116,11 @@ static void event_handler(void *arg, esp_event_base_t event_base,
                           int32_t event_id, void *event_data)
 {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+        /* The band API requires started WiFi. Set it before association,
+         * using the same 2.4 GHz radio domain as existing CSI nodes. */
+        ESP_ERROR_CHECK(esp_wifi_set_band_mode(WIFI_BAND_MODE_2G_ONLY));
+#endif
         esp_wifi_connect();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         wifi_event_sta_disconnected_t *disc = (wifi_event_sta_disconnected_t *)event_data;
@@ -363,7 +368,9 @@ void app_main(void)
     csi_collector_set_node_id(g_nvs_config.node_id);
 
     const esp_app_desc_t *app_desc = esp_app_get_description();
-#if defined(CONFIG_IDF_TARGET_ESP32C6)
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+    const char *target_name = "ESP32-C5";
+#elif defined(CONFIG_IDF_TARGET_ESP32C6)
     const char *target_name = "ESP32-C6";
 #elif defined(CONFIG_IDF_TARGET_ESP32S3)
     const char *target_name = "ESP32-S3";
@@ -396,7 +403,10 @@ void app_main(void)
      * common module). On C6, GPIO 38/48 don't exist (only 0-30) — gate by target.
      * Behaviour is set by CONFIG_LED_GAMMA_VIZ (ADR-183): on = 40 Hz gamma flicker
      * coloured by CSI motion; off = clear the LED at boot. */
-#if defined(CONFIG_IDF_TARGET_ESP32C6)
+#if !defined(CONFIG_IDF_TARGET_ESP32C5) || CONFIG_C5_STATUS_LED_GPIO >= 0
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+    const int led_gpio = CONFIG_C5_STATUS_LED_GPIO;
+#elif defined(CONFIG_IDF_TARGET_ESP32C6)
     const int led_gpio = 8;
 #else
     const int led_gpio = 48;
@@ -432,6 +442,7 @@ void app_main(void)
         led_strip_del(led_strip);
     }
 #endif /* CONFIG_LED_GAMMA_VIZ */
+#endif /* C5 LED wiring is opt-in; never drive an unknown board pin. */
 
     /* ADR-110 P4: 802.15.4 mesh time-sync (C6 only).
      * Initialized BEFORE WiFi so it's available even when WiFi STA can't

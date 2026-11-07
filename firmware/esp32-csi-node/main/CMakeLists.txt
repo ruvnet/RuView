@@ -48,9 +48,12 @@ set(REQUIRES
     led_strip
 )
 
-# ADR-110: C6-only components — pulled in when building for esp32c6.
-# Note: CONFIG_* symbols are not available in main CMakeLists.txt evaluation —
-# we use the IDF_TARGET variable that idf.py sets from sdkconfig.defaults / set-target.
+if(IDF_TARGET STREQUAL "esp32c5" AND
+   "${IDF_VERSION_MAJOR}.${IDF_VERSION_MINOR}.${IDF_VERSION_PATCH}" VERSION_LESS "5.5.2")
+    message(FATAL_ERROR "RuView ESP32-C5 requires ESP-IDF >= 5.5.2")
+endif()
+
+# ADR-110: C6-only components. Use IDF_TARGET during dependency discovery.
 if(IDF_TARGET STREQUAL "esp32c6")
     list(APPEND REQUIRES ieee802154 ulp esp_hw_support)
 endif()

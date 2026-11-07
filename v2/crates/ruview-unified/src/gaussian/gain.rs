@@ -179,20 +179,54 @@ mod tests {
         Provenance { device_id: "gain-test".into(), model_version: 1, synthetic: true }
     }
 
+    /// Free space is the free-space Friis term, with and without a map.
+    ///
+    /// An empty map has no absorption at all: `optical_depth` short-circuits
+    /// to `tau = 0` before the loop that calls `line_integral`/`erf`, so the
+    /// first half of this test is the free-space term and nothing else. The
+    /// closed-form path through `line_integral` is covered by
+    /// `line_integral_matches_numeric_quadrature` (RuView#1438), so this test
+    /// is not cited as validating it. The second half repeats the same
+    /// expectation with a transparent Gaussian in the map, which does go
+    /// through the erf/Beer-Lambert path and must give the same answer.
     #[test]
-    fn empty_map_returns_exact_friis() {
-        let map = GaussianMap::new(1.0);
+    fn free_space_friis_holds_with_and_without_a_transparent_map() {
         let f = 2.437e9;
         let tx = [0.0, 0.0, 1.0];
         let rx = [4.0, 3.0, 1.0]; // d = 5
-        let h = channel_gain(&map, tx, rx, f);
         let lambda = C / f;
         let expected_amp = lambda / (4.0 * std::f64::consts::PI * 5.0);
-        assert!((h.norm() - expected_amp).abs() < 1e-15, "amplitude must be exact Friis");
         let expected_phase = -2.0 * std::f64::consts::PI * 5.0 / lambda;
+
+        // Empty map: no absorption, so the gain is the free-space Friis term.
+        let map = GaussianMap::new(1.0);
+        let h = channel_gain(&map, tx, rx, f);
+        assert!((h.norm() - expected_amp).abs() < 1e-15, "amplitude must be exact Friis");
         // Compare phasors (phase is only defined mod 2π).
         let diff = (h / Complex64::from_polar(expected_amp, expected_phase)) - 1.0;
         assert!(diff.norm() < 1e-9, "propagation phase must match");
+
+        // A map holding only a transparent Gaussian goes through the
+        // erf/Beer-Lambert path and must give the same free-space answer.
+        let mut transparent = GaussianMap::new(1.0);
+        let g = RfGaussian::new(
+            [2.0, 1.5, 1.0],
+            [0.4, 0.4, 0.4],
+            [1.0, 0.0, 0.0, 0.0],
+            0.0,
+            0.9,
+            0,
+            300.0,
+            prov(),
+        )
+        .expect("valid");
+        transparent.insert(g);
+        let h = channel_gain(&transparent, tx, rx, f);
+        assert!(
+            (h.norm() - expected_amp).abs() < 1e-12,
+            "a zero-occupancy map must not attenuate: got {} dB",
+            gain_db(&transparent, tx, rx, f)
+        );
     }
 
     #[test]
@@ -277,8 +311,16 @@ mod tests {
         );
     }
 
+    /// One link, one unknown: the occupancy of a single absorber converges
+    /// from a repeated measurement of the same link.
+    ///
+    /// This is a convergence check of the `observe_link` update rule -- each
+    /// call is a damped Newton step and the residual shrinks geometrically --
+    /// and not evidence of learning from diverse observations (RuView#1438).
+    /// `two_distinct_links_resolve_two_distinct_absorbers` is the one that
+    /// resolves different unknowns.
     #[test]
-    fn inverse_update_learns_a_wall_from_link_residuals() {
+    fn single_link_occupancy_converges_to_the_measured_absorption() {
         let f = 2.437e9;
         let tx = [0.0, 0.0, 1.0];
         let rx = [6.0, 0.0, 1.0];
@@ -302,6 +344,84 @@ mod tests {
         assert!(
             (predicted_db - measured_db).abs() < 0.5,
             "map prediction {predicted_db:.2} dB must match measurement {measured_db:.2} dB"
+        );
+    }
+
+    /// RuView#1438 (item 3): several distinct links must resolve genuinely
+    /// different unknowns.
+    ///
+    /// The single-link test above converges one scalar from one repeated
+    /// measurement. Here the map gets two links with different geometry and
+    /// different true attenuations, and each link has to end up explained by
+    /// its own absorber -- the one it spawned -- rather than by the other.
+    #[test]
+    fn two_distinct_links_resolve_two_distinct_absorbers() {
+        let f = 2.437e9;
+        // Two links out of the same corner, in different directions.
+        let (tx_a, rx_a) = ([0.0, 0.0, 1.0], [6.0, 0.0, 1.0]);
+        let (tx_b, rx_b) = ([0.0, 0.0, 1.0], [0.0, 6.0, 1.0]);
+
+        // Ground truth: one absorber on each path, with different optical
+        // depths (0.7 and 0.3 nepers).
+        let mut truth = GaussianMap::new(1.0);
+        for (pos, occ) in [([3.0, 0.0, 1.0], 0.7), ([0.0, 3.0, 1.0], 0.3)] {
+            let g = RfGaussian::new(
+                pos,
+                [0.3, 0.3, 0.3],
+                [1.0, 0.0, 0.0, 0.0],
+                occ,
+                0.9,
+                0,
+                300.0,
+                prov(),
+            )
+            .expect("valid");
+            truth.insert(g);
+        }
+        let measured_a = channel_gain(&truth, tx_a, rx_a, f).norm();
+        let measured_b = channel_gain(&truth, tx_b, rx_b, f).norm();
+
+        // Learn from an empty map, alternating the two links.
+        let mut map = GaussianMap::new(1.0);
+        let mut res_a = f64::INFINITY;
+        let mut res_b = f64::INFINITY;
+        for step in 0..20 {
+            res_a = observe_link(&mut map, tx_a, rx_a, f, measured_a, 0.7, step);
+            res_b = observe_link(&mut map, tx_b, rx_b, f, measured_b, 0.7, step);
+        }
+        assert!(res_a.abs() < 0.06, "link A residual {res_a} must converge");
+        assert!(res_b.abs() < 0.06, "link B residual {res_b} must converge");
+        assert_eq!(
+            map.len(),
+            2,
+            "one absorber per link is expected, got {}",
+            map.len()
+        );
+
+        // Each link must be explained by the absorber on its own path.
+        let occ_a = map
+            .gaussians()
+            .iter()
+            .filter(|g| g.position[1] < 1.5)
+            .map(|g| g.occupancy)
+            .fold(0.0f64, f64::max);
+        let occ_b = map
+            .gaussians()
+            .iter()
+            .filter(|g| g.position[0] < 1.5)
+            .map(|g| g.occupancy)
+            .fold(0.0f64, f64::max);
+        assert!(
+            (occ_a - 0.7).abs() < 0.05,
+            "link A must resolve its own absorber (occupancy {occ_a:.3}, expected 0.7)"
+        );
+        assert!(
+            (occ_b - 0.3).abs() < 0.05,
+            "link B must resolve its own absorber (occupancy {occ_b:.3}, expected 0.3)"
+        );
+        assert!(
+            (occ_a - occ_b).abs() > 0.2,
+            "the two links resolved different unknowns, got {occ_a:.3} and {occ_b:.3}"
         );
     }
 }

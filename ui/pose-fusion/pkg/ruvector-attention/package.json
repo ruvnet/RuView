@@ -5,6 +5,7 @@
   ],
   "description": "High-performance WebAssembly attention mechanisms: Multi-Head, Flash, Hyperbolic, MoE, CGT Sheaf Attention with GPU acceleration for transformers and LLMs",
   "version": "2.0.5",
+  "private": true,
   "license": "MIT",
   "repository": {
     "type": "git",
