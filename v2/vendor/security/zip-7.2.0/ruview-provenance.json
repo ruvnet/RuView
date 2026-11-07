@@ -1,0 +1,16 @@
+{
+  "crate": "zip",
+  "version": "7.2.0",
+  "registrySHA256": "c42e33efc22a0650c311c2ef19115ce232583abbe80850bc8b66509ebef02de0",
+  "upstreamVCS": "46dc29cda6749736ddb1ec502aff06a65ffe54f8",
+  "fixPR": "https://github.com/zip-rs/zip2/pull/984",
+  "fixMerge": "a543a1fc8f3f3eef36f27bb137230295284cdb98",
+  "fixHead": "4d1c864bb62cc342147bf44c13a0a743fc844c4d",
+  "hostileSHA256": "0c68c3934f22651a6bd2726f7d58140124b1839196a1d0ae468864cdfda74676",
+  "licenseSHA256": "04dc52136d82400b11df5f474949863a70a5d05d2278dec45b99c479494450a6",
+  "securityPatchSHA256": "d7da70fb4223322f0915384589558fa732999eacc62f4eef09ca4cb58719280f",
+  "upstreamTestSourceCommit": "46dc29cda6749736ddb1ec502aff06a65ffe54f8",
+  "codeAdaptation": "final PR984 guards, read/mod.rs mapped to7.2 read.rs, stream invalid macro imported",
+  "tests": "original102lib+1symlink integration; upstream984 hostile test plus4097 boundary and stream-bit regression",
+  "manifestChanges": "only explicit ruview_0429_backport self-contained integration-test registration; version7.2.0 and licenses unchanged"
+}

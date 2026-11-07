@@ -10,10 +10,16 @@
 #![allow(dead_code)]
 
 mod adaptive_classifier;
+mod companion_integration;
+mod companion_room;
+mod managed_worldgraph;
+mod companion_spatial;
 pub mod cli;
 pub mod csi;
 mod engine_bridge;
 mod field_bridge;
+mod source_bank_shadow;
+mod room_learner_api;
 mod field_localize;
 mod model_format;
 mod multistatic_bridge;
@@ -38,6 +44,7 @@ mod rvf_pipeline;
 mod tracker_bridge;
 pub mod types;
 mod vital_signs;
+mod vital_publication;
 
 // Training pipeline modules (exposed via lib.rs)
 use wifi_densepose_sensing_server::{
@@ -102,6 +109,10 @@ use wifi_densepose_signal::ruvsense::pose_tracker::PoseTracker;
 #[derive(Parser, Debug)]
 #[command(name = "sensing-server", about = "WiFi-DensePose sensing server")]
 struct Args {
+    /// App-managed helper only: exit when this verified spawning parent ends.
+    #[arg(long)]
+    parent_pid: Option<u32>,
+
     /// HTTP port for UI and REST API
     #[arg(long, default_value = "8080")]
     http_port: u16,
@@ -168,6 +179,10 @@ struct Args {
     /// Bind address (default 127.0.0.1; set to 0.0.0.0 for network access)
     #[arg(long, default_value = "127.0.0.1", env = "SENSING_BIND_ADDR")]
     bind_addr: String,
+
+    /// Enable QR-pinned HTTPS companion service on this separate port.
+    #[arg(long, env = "RUVIEW_COMPANION_PORT")]
+    companion_port: Option<u16>,
 
     /// Disable local `_ruview._tcp` discovery. Discovery is automatically
     /// skipped for loopback-only binds and never carries sensor data.
@@ -304,6 +319,14 @@ struct Args {
     #[arg(long)]
     calibrate: bool,
 
+    /// Collect a memory-only per-source shadow during explicit room calibration; never promote it.
+    #[arg(long)]
+    source_bank_shadow: bool,
+
+    /// Enable the account-owned managed capture/train/candidate room learner.
+    #[arg(long)]
+    room_learner: bool,
+
     // ---------------------------------------------------------------
     // ADR-102: Edge Module Registry — surface the canonical Cognitum
     // cog catalog via `GET /api/v1/edge/registry`.
@@ -434,6 +457,29 @@ struct CalibrationGridEvidence {
     latest_age_s: f64,
 }
 
+impl CalibrationGridEvidence {
+    fn from_arrivals(arrivals: &[std::time::Instant], now: std::time::Instant) -> Option<Self> {
+        let first = *arrivals.first()?;
+        let last = *arrivals.last()?;
+        let span_s = last.saturating_duration_since(first).as_secs_f64();
+        let latest_age_s = now.saturating_duration_since(last).as_secs_f64();
+        let mut max_gap_s = latest_age_s;
+        for pair in arrivals.windows(2) {
+            max_gap_s = max_gap_s.max(
+                pair[1]
+                    .saturating_duration_since(pair[0])
+                    .as_secs_f64(),
+            );
+        }
+        let rate_hz = if span_s > 0.0 {
+            arrivals.len().saturating_sub(1) as f64 / span_s
+        } else {
+            0.0
+        };
+        Some(Self {sample_count:arrivals.len(),span_s,rate_hz,max_gap_s,latest_age_s})
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct CalibrationGridBinding {
     source_node_id: u8,
@@ -441,19 +487,7 @@ struct CalibrationGridBinding {
     evidence: Option<CalibrationGridEvidence>,
 }
 
-#[derive(Debug, Clone, Serialize)]
-struct CalibrationModelReceipt {
-    schema: &'static str,
-    boot_epoch: String,
-    session_id: String,
-    model_id: String,
-    binding_digest: String,
-    source_node_ids: Vec<u8>,
-    frame_count: u64,
-    variance_explained: f64,
-    baseline_eigenvalue_count: usize,
-    completed_at_unix_ms: u64,
-}
+use wifi_densepose_sensing_server::room_calibration::{self, RoomReceipt as CalibrationModelReceipt};
 
 /// Per-frame occupancy result bound to one immutable field-model calibration
 /// receipt. Absent whenever the model is stale, unavailable, or cannot score
@@ -500,10 +534,18 @@ struct SensingUpdate {
     nodes: Vec<NodeInfo>,
     features: FeatureInfo,
     classification: ClassificationInfo,
+    /// Legacy classification is retained only as a labelled comparison while a
+    /// selected binary model owns presence. It does not acquire learner authority.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    classification_source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    selected_binary_evidence: Option<serde_json::Value>,
     signal_field: SignalField,
     /// Vital sign estimates (breathing rate, heart rate, confidence).
     #[serde(skip_serializing_if = "Option::is_none")]
     vital_signs: Option<VitalSigns>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    vital_evidence: Option<vital_publication::VitalEvidence>,
     /// Strict calibrated occupancy evidence for this frame, bound to the
     /// active model receipt. Omitted when no calibrated result is available.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1148,6 +1190,9 @@ struct NodeState {
     rssi_history: VecDeque<f64>,
     vital_detector: VitalSignDetector,
     latest_vitals: VitalSigns,
+    vital_candidate: Option<vital_publication::NodeVitalCandidate>,
+    last_vital_decision: Option<vital_publication::Decision>,
+    vital_sample_rate_resets: u64,
     pub(crate) last_frame_time: Option<std::time::Instant>,
     edge_vitals: Option<Esp32VitalsPacket>,
     /// ADR-110 §A0.12: Latest sync packet received from this node. When a
@@ -1551,6 +1596,9 @@ impl NodeState {
             rssi_history: VecDeque::new(),
             vital_detector: VitalSignDetector::new(20.0),
             latest_vitals: VitalSigns::default(),
+            vital_candidate: None,
+            last_vital_decision: None,
+            vital_sample_rate_resets: 0,
             last_frame_time: None,
             edge_vitals: None,
             latest_sync: None,
@@ -1623,35 +1671,7 @@ impl NodeState {
         }
         grouped
             .into_iter()
-            .filter_map(|(grid, arrivals)| {
-                let first = *arrivals.first()?;
-                let last = *arrivals.last()?;
-                let span_s = last.saturating_duration_since(first).as_secs_f64();
-                let latest_age_s = now.saturating_duration_since(last).as_secs_f64();
-                let mut max_gap_s = latest_age_s;
-                for pair in arrivals.windows(2) {
-                    max_gap_s = max_gap_s.max(
-                        pair[1]
-                            .saturating_duration_since(pair[0])
-                            .as_secs_f64(),
-                    );
-                }
-                let rate_hz = if span_s > 0.0 {
-                    arrivals.len().saturating_sub(1) as f64 / span_s
-                } else {
-                    0.0
-                };
-                Some((
-                    grid,
-                    CalibrationGridEvidence {
-                        sample_count: arrivals.len(),
-                        span_s,
-                        rate_hz,
-                        max_gap_s,
-                        latest_age_s,
-                    },
-                ))
-            })
+            .filter_map(|(grid, arrivals)| CalibrationGridEvidence::from_arrivals(&arrivals, now).map(|evidence|(grid,evidence)))
             .collect()
     }
 
@@ -1661,13 +1681,7 @@ impl NodeState {
     ) -> Option<(CsiGridKey, CalibrationGridEvidence)> {
         self.calibration_grid_candidates(now)
             .into_iter()
-            .filter(|(grid, evidence)| {
-                grid.ppdu_type <= 3
-                    && evidence.span_s >= CALIBRATION_GRID_MIN_SPAN_S
-                    && evidence.rate_hz >= CALIBRATION_GRID_MIN_RATE_HZ
-                    && evidence.max_gap_s < CALIBRATION_GRID_MAX_GAP_S
-                    && evidence.latest_age_s < CALIBRATION_GRID_MAX_GAP_S
-            })
+            .filter(|(grid, evidence)| legacy_grid_readiness::eligible_grid(*grid, *evidence))
             // Density first. This was chosen to agree with `accept_grid` when
             // that gate locked each node onto the densest grid it had seen;
             // since #1894 the gate locks onto the most frequent grid instead,
@@ -2195,6 +2209,11 @@ struct AppStateInner {
     engine_bridge: engine_bridge::EngineBridge,
     /// SVD-based room field model for eigenvalue person counting (None until calibration).
     field_model: Option<FieldModel>,
+    source_bank_shadow_enabled: bool,
+    source_bank_shadow: Option<source_bank_shadow::ShadowCapture>,
+    room_learning: Option<Arc<wifi_densepose_sensing_server::room_learner::lifecycle::RoomLearningRuntime>>,
+    room_learning_sources: HashMap<room_learner_api::NativeSourceKey, room_learner_api::LiveSource>,
+    current_room_store: Option<Arc<companion_room::SharedRoomStore>>,
     /// Stable installation identity used only to bind local persisted state.
     installation_id: Option<String>,
     /// Metadata for the privacy reduced empty room image, when available.
@@ -2213,6 +2232,8 @@ struct AppStateInner {
     calibration_observed_source_node_ids: std::collections::BTreeSet<u8>,
     /// Immutable evidence created when the active model is finalized.
     calibration_model_receipt: Option<CalibrationModelReceipt>,
+    /// Requires current-boot evidence from every saved contributor before publication.
+    calibration_restored: bool,
     /// Immutable source and CSI symbol grid selected from recent header-only
     /// evidence for the current field model.
     calibration_grid_binding: Option<CalibrationGridBinding>,
@@ -2549,6 +2570,40 @@ fn calibration_sequence_order(previous: Option<u32>, sequence: u32) -> Calibrati
 }
 
 impl AppStateInner {
+    fn restore_saved_room(&mut self) -> Result<bool, bootstrap_baseline::BootstrapBaselineError> {
+        // Historical expiry metadata is retained for diagnostics after restart;
+        // it is not a restored model and cannot restore a full-room receipt.
+        if self.field_model.is_none() { return Ok(false); }
+        let Some((installation, metadata)) = self.installation_id.as_deref().zip(self.bootstrap_baseline.as_ref()) else { return Ok(false); };
+        match room_calibration::load(&room_calibration::path_in(&self.data_dir), installation, metadata) {
+            Ok(receipt) => {
+                let [source_node_id] = metadata.source_node_ids.as_slice() else { return Ok(false); };
+                self.calibration_grid_binding = Some(CalibrationGridBinding {
+                    source_node_id: *source_node_id, grid: CsiGridKey::from_bootstrap_grid(metadata.source_grid), evidence: None,
+                });
+                self.install_restored_room(receipt);
+                Ok(true)
+            }
+            Err(bootstrap_baseline::BootstrapBaselineError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn install_restored_room(&mut self, mut receipt: CalibrationModelReceipt) {
+        receipt.boot_epoch = self.calibration_boot_epoch.clone();
+        receipt.session_id = opaque_calibration_id("cal-session");
+        self.calibration_model_id = Some(receipt.model_id.clone());
+        self.calibration_session_id = Some(receipt.session_id.clone());
+        self.calibration_binding_digest = Some(receipt.binding_digest.clone());
+        self.calibration_source_node_ids = receipt.source_node_ids.iter().copied().collect();
+        self.calibration_observed_source_node_ids.clear();
+        self.clear_calibration_sequence_state();
+        for node in self.node_states.values_mut() { node.clear_field_model_history(); }
+        self.calibration_model_receipt = Some(receipt);
+        self.calibration_restored = true;
+        self.bootstrap_baseline_active = false;
+    }
+
     /// Advance the sensing tick and record the update for the measured
     /// stream rate (#2087). Returns the new tick.
     fn advance_tick(&mut self) -> u64 {
@@ -2604,6 +2659,7 @@ impl AppStateInner {
             }
             CalibrationSequenceOrder::Discontinuity => {
                 self.calibration_sequence_fault_node_ids.insert(node_id);
+                if let Some(shadow) = self.source_bank_shadow.as_mut() { shadow.invalidate(); }
                 warn!(
                     node_id,
                     previous_sequence,
@@ -2646,6 +2702,11 @@ impl AppStateInner {
                     (chrono::Utc::now().timestamp_millis().max(0) as u64)
                         .saturating_mul(1_000),
                 ) == CalibrationStatus::Fresh
+                    || (self.bootstrap_baseline_active
+                        && field.check_freshness(
+                            (chrono::Utc::now().timestamp_millis().max(0) as u64)
+                                .saturating_mul(1_000),
+                        ) == CalibrationStatus::Stale)
             }
         });
         if accepted {
@@ -2653,6 +2714,9 @@ impl AppStateInner {
             self.calibration_last_sequences.insert(node_id, sequence);
             if let Some(node) = self.node_states.get_mut(&node_id) {
                 node.push_field_model_frame(sequence, amplitudes, observed_at);
+            }
+            if let Some(shadow) = self.source_bank_shadow.as_mut() {
+                shadow.observe(node_id, chrono::Utc::now().timestamp_micros().max(0) as u64, amplitudes);
             }
         }
         accepted
@@ -2666,6 +2730,7 @@ impl AppStateInner {
     }
 
     fn clear_field_model_binding(&mut self) {
+        self.source_bank_shadow = None;
         self.calibration_grid_binding = None;
         for node in self.node_states.values_mut() {
             node.clear_field_model_history();
@@ -2726,7 +2791,16 @@ impl AppStateInner {
     }
 
     fn explicit_calibration_fresh_at(&self, observed_at_unix_ms: u64) -> bool {
-        !self.bootstrap_baseline_active
+        (!self.calibration_restored || (!self.calibration_source_node_ids.is_empty()
+            && self.calibration_source_node_ids.iter().all(|id| self.node_states.get(id).is_some_and(|node|
+                self.calibration_observed_source_node_ids.contains(id)
+                && !self.calibration_sequence_fault_node_ids.contains(id)
+                && node.field_model_latest_seen.is_some_and(|seen| seen.elapsed() < ESP32_OFFLINE_TIMEOUT)))
+            && self.calibration_grid_binding.is_some_and(|binding| self.field_model.as_ref()
+                .and_then(|model| model.modes()).and_then(|modes| modes.baseline_runtime_window_size)
+                .filter(|size| *size > 0 && *size <= FRAME_HISTORY_CAPACITY)
+                .is_some_and(|size| self.field_model_holdout_ready(binding, size, std::time::Instant::now())))))
+            && !self.bootstrap_baseline_active
             && self.field_model_status_at(observed_at_unix_ms) == Some(CalibrationStatus::Fresh)
     }
 
@@ -2781,7 +2855,7 @@ impl AppStateInner {
     /// heuristic, so a consumer may treat a present value as calibrated.
     fn calibrated_presence_evidence(
         &self,
-        inference_node_id: u8,
+        _inference_node_id: u8,
         source_tick: u64,
         observed_at_unix_ms: u64,
     ) -> Option<CalibratedPresenceEvidence> {
@@ -2802,7 +2876,7 @@ impl AppStateInner {
             binding_digest: receipt.binding_digest.clone(),
             source_node_ids: receipt.source_node_ids.clone(),
             model_completed_at_unix_ms: receipt.completed_at_unix_ms,
-            inference_node_id,
+            inference_node_id: self.bound_source_node_id()?,
             source_tick,
             observed_at_unix_ms,
             inference_method: occupancy.method.wire_name().to_string(),
@@ -2826,7 +2900,7 @@ impl AppStateInner {
         // A persisted bootstrap model has negative-only authority. Its only
         // allowed occupancy effect is the explicit empty-background suppression
         // in `bootstrap_empty_prior_applies`; it must never infer positive count.
-        if self.bootstrap_baseline_active {
+        if self.bootstrap_baseline_active || (self.calibration_restored && !self.explicit_calibration_fresh_at(observed_at_unix_ms)) {
             return score_to_person_count(self.smoothed_person_score, self.prev_person_count);
         }
         match self.field_model.as_ref() {
@@ -3075,6 +3149,11 @@ impl AppStateInner {
                 None,
             ),
             field_model: None,
+            source_bank_shadow_enabled: false,
+            source_bank_shadow: None,
+            room_learning: None,
+            room_learning_sources: HashMap::new(),
+            current_room_store: None,
             installation_id: None,
             bootstrap_baseline: None,
             bootstrap_baseline_active: false,
@@ -3085,6 +3164,7 @@ impl AppStateInner {
             calibration_source_node_ids: std::collections::BTreeSet::new(),
             calibration_observed_source_node_ids: std::collections::BTreeSet::new(),
             calibration_model_receipt: None,
+            calibration_restored: false,
             calibration_grid_binding: None,
             calibration_last_sequences: HashMap::new(),
             calibration_reordered_packets: HashMap::new(),
@@ -3109,7 +3189,7 @@ mod calibration_expiry_tests {
     use super::*;
     use wifi_densepose_signal::ruvsense::field_model::FieldModelConfig;
 
-    fn finalized_model(calibrated_at_unix_ms: u64) -> FieldModel {
+    pub(super) fn finalized_model(calibrated_at_unix_ms: u64) -> FieldModel {
         let mut model = FieldModel::new(FieldModelConfig {
             n_links: 1,
             n_subcarriers: 56,
@@ -3178,7 +3258,7 @@ mod calibration_expiry_tests {
         state.calibration_model_id = Some("cal-model-test".to_string());
         state.calibration_binding_digest = Some("ab".repeat(32));
         state.calibration_model_receipt = Some(CalibrationModelReceipt {
-            schema: field_bridge::CALIBRATION_MODEL_RECEIPT_SCHEMA,
+            schema: field_bridge::CALIBRATION_MODEL_RECEIPT_SCHEMA.to_string(),
             boot_epoch: state.calibration_boot_epoch.clone(),
             session_id: "cal-session-test".to_string(),
             model_id: "cal-model-test".to_string(),
@@ -3252,6 +3332,58 @@ mod calibration_expiry_tests {
         }
     }
 
+    // Investigation fixture only: no production gate or publication change.
+    #[test]
+    fn investigation_vitals_candidate_source_is_not_checked_by_bound_model_gate() {
+        let mut state = state_with_runtime_window();
+        let baseline = state.field_model.as_ref().unwrap().modes().unwrap().baseline[0].clone();
+        state.node_states.get_mut(&5).unwrap().field_model_history =
+            (0..50).map(|_| baseline.iter().map(|value| value + 0.3).collect()).collect();
+        assert_eq!(state.bound_source_node_id(), Some(5));
+        assert_eq!(state.person_count_at(1_500), 1);
+        let mut foreign = NodeState::new();
+        foreign.latest_vitals = VitalSigns { heart_rate_bpm: Some(101.0), ..qualified_vital_candidates() };
+        state.node_states.insert(6, foreign);
+        let result = calibrated_vitals_for_publication(
+            &state, &state.node_states[&6].latest_vitals, 1, 1_500,
+        ).expect("baseline accepts a qualified candidate without checking its node identity");
+        assert_eq!(result.heart_rate_bpm, Some(101.0));
+        println!("INVESTIGATION: candidate node6 accepted using model bound to node5; publication API carries no candidate-node identity");
+    }
+
+    #[tokio::test]
+    async fn investigation_vitals_rest_preserves_websocket_multi_person_refusal() {
+        let observed = chrono::Utc::now().timestamp_millis().max(0) as u64;
+        let mut state = state_with_runtime_window();
+        let mut snapshot = finalized_model(observed).export_snapshot().unwrap();
+        snapshot.modes.baseline_runtime_window_size = Some(50);
+        state.field_model = Some(FieldModel::from_snapshot(snapshot, observed * 1_000).unwrap());
+        state.calibration_model_receipt.as_mut().unwrap().completed_at_unix_ms = observed;
+        let baseline = state.field_model.as_ref().unwrap().modes().unwrap().baseline[0].clone();
+        let node = state.node_states.get_mut(&5).unwrap();
+        node.field_model_history = (0..50).map(|_| baseline.iter().map(|value| value + 0.3).collect()).collect();
+        node.last_frame_time = Some(std::time::Instant::now());
+        node.prev_person_count = 1;
+        let mut second = NodeState::new();
+        second.last_frame_time = Some(std::time::Instant::now());
+        second.prev_person_count = 2;
+        state.node_states.insert(6, second);
+        let room_count = update_room_person_count(&mut state, &ClassificationInfo {
+            motion_level: "present_still".into(), presence: true, confidence: 0.9,
+        }, std::time::Instant::now(), observed);
+        assert_eq!(room_count, 2);
+        assert_eq!(state.person_count_at(observed), 1);
+        let (ws_rates, _) = record_node_vital_decision(&mut state, 5, vital_publication::NodeVitalCandidate {
+            kind: vital_publication::CandidateKind::RawCsiSpectral, tick: 77,
+            observed_at_unix_ms: observed, received_at: std::time::Instant::now(), rates: qualified_vital_candidates(), calibration_identity: None,
+        }, room_count);
+        assert!(ws_rates.is_none());
+        assert!(node_vital_decision(&state, 5, 1, observed).0.is_some(), "same candidate must qualify with a single room occupant");
+        let Json(body) = vital_signs_endpoint(State(Arc::new(RwLock::new(state)))).await;
+        println!("INVESTIGATION: fused room count2 / bound count1: websocket withheld; REST authority={} heart={}", body["authority"], body["vital_signs"]["heart_rate_bpm"]);
+        assert_eq!(body["authority"], "abstained", "REST must not bypass the existing multi-person refusal used by WebSocket publication");
+    }
+
     fn state_with_runtime_window() -> AppStateInner {
         let mut state = state_with_receipt();
         let model = state.field_model.as_mut().unwrap();
@@ -3259,6 +3391,366 @@ mod calibration_expiry_tests {
         snapshot.modes.baseline_runtime_window_size = Some(50);
         *model = FieldModel::from_snapshot(snapshot, 1_500_000).unwrap();
         state
+    }
+
+    #[test]
+    fn saved_room_roundtrips_through_real_restart_loader_with_new_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let now = chrono::Utc::now().timestamp_millis().max(0) as u64;
+        let source = qualified_vital_state(now);
+        let mut receipt = source.calibration_model_receipt.clone().unwrap();
+        receipt.frame_count = 18942;
+        let metadata = bootstrap_baseline::store(&bootstrap_baseline::path_in(dir.path()), "account-A-installation", &[5],
+            source.calibration_grid_binding.unwrap().grid.as_bootstrap_grid(), &receipt.model_id, now,
+            source.field_model.as_ref().unwrap()).unwrap();
+        room_calibration::store(&room_calibration::path_in(dir.path()), "account-A-installation", &metadata, &receipt).unwrap();
+        let (model, metadata) = bootstrap_baseline::load(&bootstrap_baseline::path_in(dir.path()), "account-A-installation", now + 1).unwrap();
+        let mut restarted = AppStateInner::minimal();
+        restarted.data_dir = dir.path().to_path_buf();
+        restarted.installation_id = Some("account-A-installation".into());
+        restarted.field_model = Some(model);
+        restarted.bootstrap_baseline = Some(metadata.clone());
+        restarted.bootstrap_baseline_active = true;
+        assert!(restarted.restore_saved_room().unwrap());
+        let current = restarted.calibration_model_receipt.as_ref().unwrap();
+        assert_eq!(current.frame_count, 18942);
+        assert_eq!(current.completed_at_unix_ms, receipt.completed_at_unix_ms);
+        assert_ne!(current.boot_epoch, receipt.boot_epoch);
+        assert_ne!(current.session_id, receipt.session_id);
+        assert!(!restarted.explicit_calibration_fresh_at(now));
+        restarted.installation_id = Some("account-B-installation".into());
+        assert!(restarted.restore_saved_room().is_err());
+        room_calibration::remove(dir.path()).unwrap();
+        assert!(!restarted.restore_saved_room().unwrap());
+    }
+
+    #[test]
+    fn expired_metadata_cannot_restore_a_full_room_without_a_model() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = (chrono::Utc::now().timestamp_millis().max(0) as u64) - 1_000_000_000;
+        let source = qualified_vital_state(old);
+        let receipt = source.calibration_model_receipt.as_ref().unwrap();
+        let path = bootstrap_baseline::path_in(dir.path());
+        let metadata = bootstrap_baseline::store(&path, "account-A-installation", &[5],
+            source.calibration_grid_binding.unwrap().grid.as_bootstrap_grid(), &receipt.model_id, old,
+            source.field_model.as_ref().unwrap()).unwrap();
+        room_calibration::store(&room_calibration::path_in(dir.path()), "account-A-installation", &metadata, receipt).unwrap();
+        let mut restarted = AppStateInner::minimal();
+        restarted.data_dir = dir.path().to_path_buf();
+        restarted.installation_id = Some("account-A-installation".into());
+        restarted.bootstrap_baseline = Some(bootstrap_baseline::load_expired_metadata(&path,
+            "account-A-installation", metadata.expires_at_unix_ms + 1).unwrap());
+        assert!(!restarted.restore_saved_room().unwrap());
+        assert!(restarted.field_model.is_none());
+        assert!(restarted.calibration_model_receipt.is_none());
+        assert!(restarted.calibration_session_id.is_none());
+        assert!(!restarted.bootstrap_baseline_active_at(metadata.expires_at_unix_ms + 1));
+    }
+
+    #[test]
+    fn restored_room_requires_new_boot_source_evidence_and_never_renews_completion() {
+        let mut state = state_with_runtime_window();
+        let old = state.calibration_model_receipt.clone().unwrap();
+        state.install_restored_room(old.clone());
+        let current = state.calibration_model_receipt.as_ref().unwrap();
+        assert_eq!(current.completed_at_unix_ms, old.completed_at_unix_ms);
+        assert_eq!(current.model_id, old.model_id);
+        assert_ne!(current.session_id, old.session_id);
+        assert!(!state.explicit_calibration_fresh_at(1_500));
+        state.calibration_observed_source_node_ids.insert(5);
+        assert!(!state.explicit_calibration_fresh_at(1_500));
+        let baseline = state.field_model.as_ref().unwrap().modes().unwrap().baseline[0].clone();
+        let node = state.node_states.get_mut(&5).unwrap();
+        node.field_model_history = (0..50).map(|_| baseline.clone()).collect();
+        node.field_model_latest_seen = Some(std::time::Instant::now());
+        node.field_model_latest_sequence = Some(60);
+        assert!(state.explicit_calibration_fresh_at(1_500));
+        state.node_states.get_mut(&5).unwrap().field_model_history.pop_front();
+        assert!(!state.explicit_calibration_fresh_at(1_500));
+        state.calibration_source_node_ids.insert(17);
+        assert!(!state.explicit_calibration_fresh_at(1_500));
+    }
+
+    fn qualified_vital_state(observed: u64) -> AppStateInner {
+        let mut state = state_with_runtime_window();
+        let mut snapshot = finalized_model(observed).export_snapshot().unwrap();
+        snapshot.modes.baseline_runtime_window_size = Some(50);
+        state.field_model = Some(FieldModel::from_snapshot(snapshot, observed * 1_000).unwrap());
+        state
+            .calibration_model_receipt
+            .as_mut()
+            .unwrap()
+            .completed_at_unix_ms = observed;
+        let baseline = state
+            .field_model
+            .as_ref()
+            .unwrap()
+            .modes()
+            .unwrap()
+            .baseline[0]
+            .clone();
+        let node = state.node_states.get_mut(&5).unwrap();
+        node.field_model_history = (0..50)
+            .map(|_| baseline.iter().map(|value| value + 0.3).collect())
+            .collect();
+        node.last_frame_time = Some(std::time::Instant::now());
+        state.prev_person_count = 1;
+        state.tick = 77;
+        state
+    }
+
+    fn record_qualified_vitals(
+        state: &mut AppStateInner,
+        observed: u64,
+    ) -> (Option<VitalSigns>, Option<vital_publication::VitalEvidence>) {
+        record_node_vital_decision(
+            state,
+            5,
+            vital_publication::NodeVitalCandidate {
+                kind: vital_publication::CandidateKind::RawCsiSpectral,
+                tick: 77,
+                observed_at_unix_ms: observed,
+                received_at: std::time::Instant::now(),
+                rates: qualified_vital_candidates(),
+                calibration_identity: None,
+            },
+            1,
+        )
+    }
+
+    #[tokio::test]
+    async fn vital_publication_rest_matches_recorded_single_person_decision() {
+        let observed = chrono::Utc::now().timestamp_millis().max(0) as u64;
+        let mut state = qualified_vital_state(observed);
+        let (ws, proof) = record_qualified_vitals(&mut state, observed);
+        assert_eq!(proof.unwrap().source_node_ids, vec![5]);
+        let Json(rest) = vital_signs_endpoint(State(Arc::new(RwLock::new(state)))).await;
+        assert_eq!(
+            rest["vital_signs"],
+            serde_json::to_value(ws.unwrap()).unwrap()
+        );
+        assert_eq!(
+            rest["diagnostics"]["nodes"][0]["last_publication_decision"]["reason"],
+            "published"
+        );
+    }
+
+    #[test]
+    fn vital_publication_diagnostics_identify_gates_without_suppressed_rates() {
+        use vital_publication::Reason;
+        let mut state = qualified_vital_state(1_500);
+        record_qualified_vitals(&mut state, 1_500);
+        let inspect = |state: &AppStateInner| node_vital_decision(state, 5, 1, 1_500);
+        let node = state.node_states.get_mut(&5).unwrap();
+        node.vital_candidate.as_mut().unwrap().rates.signal_quality = 0.1;
+        let (rates, diagnostic) = inspect(&state);
+        assert!(rates.is_none());
+        assert_eq!(diagnostic.reason, Reason::LowSignalQuality);
+        assert!(!serde_json::to_string(&diagnostic)
+            .unwrap()
+            .contains("rate_bpm"));
+        state
+            .node_states
+            .get_mut(&5)
+            .unwrap()
+            .vital_candidate
+            .as_mut()
+            .unwrap()
+            .rates = VitalSigns {
+            heart_rate_bpm: Some(70.0),
+            heartbeat_confidence: 0.1,
+            signal_quality: 0.9,
+            ..VitalSigns::default()
+        };
+        assert_eq!(inspect(&state).1.reason, Reason::LowRateConfidence);
+        state.node_states.get_mut(&5).unwrap().vital_candidate.as_mut().unwrap().rates = VitalSigns {
+            heart_rate_bpm: Some(f64::NAN), heartbeat_confidence: 0.9, signal_quality: 0.9, ..VitalSigns::default()
+        };
+        assert_eq!(inspect(&state).1.reason, Reason::InvalidCandidateRate);
+        state
+            .node_states
+            .get_mut(&5)
+            .unwrap()
+            .vital_candidate
+            .as_mut()
+            .unwrap()
+            .rates = VitalSigns {
+            signal_quality: 0.9,
+            ..VitalSigns::default()
+        };
+        assert_eq!(inspect(&state).1.reason, Reason::NoCandidateRate);
+        state.calibration_sequence_fault_node_ids.insert(5);
+        assert_eq!(inspect(&state).1.reason, Reason::SequenceFault);
+    }
+
+    #[tokio::test]
+    async fn vital_publication_stale_candidate_cannot_be_revived_by_another_nodes_freshness() {
+        let observed = chrono::Utc::now().timestamp_millis().max(0) as u64;
+        let mut state = qualified_vital_state(observed);
+        record_qualified_vitals(&mut state, observed);
+        state
+            .node_states
+            .get_mut(&5)
+            .unwrap()
+            .vital_candidate
+            .as_mut()
+            .unwrap()
+            .received_at -= Duration::from_secs(4);
+        let Json(rest) = vital_signs_endpoint(State(Arc::new(RwLock::new(state)))).await;
+        assert_eq!(rest["authority"], "abstained");
+        assert_eq!(rest["abstention_reason"], "candidate_stale");
+    }
+
+    #[test]
+    fn vital_publication_rest_cannot_promote_a_previously_withheld_packet() {
+        let mut state = qualified_vital_state(1_500);
+        let (rates, _) = record_node_vital_decision(
+            &mut state,
+            5,
+            vital_publication::NodeVitalCandidate {
+                kind: vital_publication::CandidateKind::RawCsiSpectral,
+                tick: 77,
+                observed_at_unix_ms: 1_500,
+                received_at: std::time::Instant::now(),
+                rates: qualified_vital_candidates(),
+                calibration_identity: None,
+            },
+            2,
+        );
+        assert!(rates.is_none());
+        // Synthetic state transition without a new candidate: a read cannot
+        // grant publication authority to the packet withheld at capture time.
+        let (rates, decision) = reevaluate_node_vitals(&state, 5, 1, 1_500);
+        assert!(rates.is_none());
+        assert_eq!(
+            decision.reason,
+            vital_publication::Reason::NotPublishedForSourceTick
+        );
+    }
+
+    #[test]
+    fn vital_publication_candidate_is_bound_to_full_calibration_identity() {
+        let mut state = qualified_vital_state(1_500);
+        record_qualified_vitals(&mut state, 1_500);
+        // Keep the same model ID, replacing only the session identity.
+        state.calibration_model_receipt.as_mut().unwrap().session_id = "other-session".into();
+        let (rates, decision) = reevaluate_node_vitals(&state, 5, 1, 1_500);
+        assert!(rates.is_none());
+        assert_eq!(
+            decision.reason,
+            vital_publication::Reason::CandidateCalibrationChanged
+        );
+    }
+
+    #[test]
+    fn vital_publication_rejected_feature_grid_cannot_promote_old_candidate() {
+        use wifi_densepose_hardware::PpduType;
+        let observed = chrono::Utc::now().timestamp_millis().max(0) as u64;
+        let mut state = qualified_vital_state(observed);
+        state
+            .node_states
+            .get_mut(&5)
+            .unwrap()
+            .field_model_history
+            .clear();
+        let (rates, _) = record_qualified_vitals(&mut state, observed);
+        assert!(
+            rates.is_none(),
+            "candidate withheld while bound window is incomplete"
+        );
+        let baseline = state
+            .field_model
+            .as_ref()
+            .unwrap()
+            .modes()
+            .unwrap()
+            .baseline[0]
+            .clone();
+        let amplitudes: Vec<_> = (0..64)
+            .map(|i| {
+                let x = i as f64 * 55.0 / 63.0;
+                let lo = x.floor() as usize;
+                baseline[lo] * (1.0 - x.fract()) + baseline[(lo + 1).min(55)] * x.fract() + 0.3
+            })
+            .collect();
+        for sequence in 100..150 {
+            // Mirror receive ordering: field model accepts its frozen grid
+            // before the independent feature grid refuses this same packet.
+            for _ in 0..5 {
+                state
+                    .node_states
+                    .get_mut(&5)
+                    .unwrap()
+                    .accept_grid((256, PpduType::HeSu));
+            }
+            assert!(state.maybe_feed_calibration_frame(
+                5,
+                CsiGridKey {
+                    n_subcarriers: 64,
+                    ppdu_type: 0
+                },
+                sequence,
+                &amplitudes,
+                std::time::Instant::now()
+            ));
+            assert!(!state
+                .node_states
+                .get_mut(&5)
+                .unwrap()
+                .accept_grid((64, PpduType::HtLegacy)));
+        }
+        assert!(
+            node_vital_decision(&state, 5, 1, observed).0.is_some(),
+            "updated model alone now permits the cached candidate"
+        );
+        let (rates, decision) = reevaluate_node_vitals(&state, 5, 1, observed);
+        assert!(rates.is_none());
+        assert_eq!(
+            decision.reason,
+            vital_publication::Reason::NotPublishedForSourceTick
+        );
+    }
+
+    #[test]
+    fn vital_publication_diagnostics_separate_observed_and_detector_clocks() {
+        let mut state = qualified_vital_state(1_500);
+        let node = state.node_states.get_mut(&5).unwrap();
+        node.csi_fps_ema = 23.0;
+        node.csi_fps_samples = 10;
+        assert!(!node.vital_detector.reconfigure_sample_rate(23.0));
+        let (_, diagnostic) = node_vital_decision(&state, 5, 1, 1_500);
+        assert_eq!(diagnostic.sample_rate_hz, 20.0);
+        assert_eq!(diagnostic.observed_sample_rate_hz, 23.0);
+    }
+
+    #[tokio::test]
+    async fn vital_publication_privacy_hides_candidate_diagnostics_and_rates() {
+        let observed = chrono::Utc::now().timestamp_millis().max(0) as u64;
+        let mut state = qualified_vital_state(observed);
+        record_qualified_vitals(&mut state, observed);
+        state.privacy_mode = true;
+        let Json(rest) = vital_signs_endpoint(State(Arc::new(RwLock::new(state)))).await;
+        assert_eq!(rest["abstention_reason"], "privacy_redacted");
+        assert_eq!(rest["diagnostics"]["nodes"], serde_json::json!([]));
+        assert!(rest["buffer_status"].is_null());
+        assert!(rest["vital_signs"]["heart_rate_bpm"].is_null());
+        let redacted = privacy_filter::redact_json_str(
+            &serde_json::json!({
+                "vital_evidence": {"heart_rate_bpm": 70, "source_node_ids": [5]},
+                "classification": {"presence": true}
+            })
+            .to_string(),
+        )
+        .unwrap();
+        assert!(!redacted.contains("vital_evidence"));
+    }
+
+    #[test]
+    fn vital_publication_presence_tags_scored_node_not_packet_arrival() {
+        let state = qualified_vital_state(1_500);
+        let proof = state.calibrated_presence_evidence(6, 77, 1_500).unwrap();
+        assert_eq!(proof.inference_node_id, 5);
+        assert!(proof.source_node_ids.contains(&proof.inference_node_id));
     }
 
     #[test]
@@ -3344,6 +3836,24 @@ mod calibration_expiry_tests {
             score_to_person_count(0.0, 0),
             "a bootstrap prior must not derive a positive or negative count through the runtime model path"
         );
+    }
+
+    #[tokio::test]
+    async fn expired_metadata_after_restart_reports_original_deadline_without_authority() {
+        let mut state = state_with_model(true);
+        let expected_expiry = state.bootstrap_baseline.as_ref().unwrap().expires_at_unix_ms;
+        state.field_model = None;
+        state.bootstrap_baseline_active = false;
+        let state = Arc::new(RwLock::new(state));
+        let Json(status) = calibration_status(State(state)).await;
+        assert_eq!(status["status"], "expired");
+        assert_eq!(status["active"], false);
+        assert_eq!(status["binding_mode"], "none");
+        assert_eq!(status["bootstrap_baseline"]["expires_at_unix_ms"], expected_expiry);
+        assert_eq!(status["bootstrap_baseline"]["active"], false);
+        assert_eq!(status["bootstrap_baseline"]["calibrated_evidence_authorized"], false);
+        assert_eq!(status["bootstrap_baseline"]["numeric_vitals_authorized"], false);
+        assert!(status["model_receipt"].is_null());
     }
 
     #[tokio::test]
@@ -5090,6 +5600,8 @@ async fn wifi_task(state: SharedState, tick_ms: u64) {
             }],
             features,
             classification,
+            classification_source: None,
+            selected_binary_evidence: None,
             signal_field: generate_signal_field(
                 first_rssi,
                 motion_score,
@@ -5098,6 +5610,7 @@ async fn wifi_task(state: SharedState, tick_ms: u64) {
                 &sub_variances,
             ),
             vital_signs: None,
+            vital_evidence: None,
             calibrated_presence_evidence: None,
             detector_diagnostics: None,
             enhanced_motion,
@@ -5136,6 +5649,7 @@ async fn wifi_task(state: SharedState, tick_ms: u64) {
         attach_field_positions(&mut update);
         assess_legacy_image_pose(&mut s, &update);
 
+        room_learner_api::project_live_selection(&s, &mut update);
         if let Ok(json) = serde_json::to_string(&update) {
             let _ = s.tx.send(json);
         }
@@ -5260,6 +5774,8 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
         }],
         features,
         classification,
+        classification_source: None,
+        selected_binary_evidence: None,
         signal_field: generate_signal_field(
             rssi_dbm,
             motion_score,
@@ -5268,6 +5784,7 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
             &sub_variances,
         ),
         vital_signs: None,
+        vital_evidence: None,
         calibrated_presence_evidence: None,
         detector_diagnostics: None,
         enhanced_motion: None,
@@ -5302,6 +5819,7 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
     attach_field_positions(&mut update);
     assess_legacy_image_pose(&mut s, &update);
 
+    room_learner_api::project_live_selection(&s, &mut update);
     if let Ok(json) = serde_json::to_string(&update) {
         let _ = s.tx.send(json);
     }
@@ -5795,19 +6313,54 @@ fn generate_simulated_frame(tick: u64) -> Esp32Frame {
     }
 }
 
+/// A cached observation is not a new measurement. Keep its original identity
+/// and timestamp while refreshing receive-clock metadata for a new subscriber
+/// or source-state transition. Never rebroadcast this snapshot per subscriber.
+fn current_sensing_snapshot(state: &AppStateInner) -> Option<SensingUpdate> {
+    let mut snapshot = state.latest_update.clone()?;
+    snapshot.source = state.effective_source();
+    if snapshot.source.starts_with("esp32") {
+        let now = std::time::Instant::now();
+        snapshot.node_features = build_node_features(&state.node_states, now);
+        for node in &mut snapshot.nodes {
+            node.node_inference = state.node_states.get(&node.node_id)
+                .map(|state| node_inference_for(state, now));
+        }
+    }
+    let age_ms = chrono::Utc::now().timestamp_millis() as f64 - snapshot.timestamp * 1000.0;
+    if snapshot.source.ends_with(":offline") || age_ms > LATEST_UPDATE_STALE_AFTER.as_millis() as f64 {
+        // Preserve historical classification, not a fabricated absence.
+        snapshot.vital_signs = None;
+        snapshot.vital_evidence = None;
+        snapshot.calibrated_presence_evidence = None;
+        snapshot.detector_diagnostics = None;
+        snapshot.room_inference = None;
+        snapshot.persons = None;
+        snapshot.pose_keypoints = None;
+    }
+    room_learner_api::project_cached_selection(state, &mut snapshot);
+    Some(snapshot)
+}
+
 // ── WebSocket handler ────────────────────────────────────────────────────────
 
 async fn ws_sensing_handler(
     ws: WebSocketUpgrade,
     State(state): State<SharedState>,
+    grant: Option<Extension<wifi_densepose_sensing_server::companion::Grant>>,
 ) -> impl IntoResponse {
-    ws.on_upgrade(|socket| handle_ws_client(socket, state))
+    ws.on_upgrade(move |socket| async move {
+        if let Some(Extension(grant)) = grant {
+            companion_integration::guard_stream(grant, handle_ws_client(socket, state)).await;
+        } else { handle_ws_client(socket, state).await; }
+    })
 }
 
 async fn handle_ws_client(mut socket: WebSocket, state: SharedState) {
-    let (mut rx, privacy_mode, _client) = {
+    let (mut rx, privacy_mode, _client, mut initial_snapshot) = {
         let s = state.read().await;
-        (s.tx.subscribe(), s.privacy_mode, s.ws_clients.enter())
+        (s.tx.subscribe(), s.privacy_mode, s.ws_clients.enter(),
+            current_sensing_snapshot(&s).and_then(|update| serde_json::to_string(&update).ok()))
     };
 
     info!("WebSocket client connected (sensing)");
@@ -5818,9 +6371,19 @@ async fn handle_ws_client(mut socket: WebSocket, state: SharedState) {
 
     loop {
         tokio::select! {
-            msg = rx.recv() => {
+            msg = async {
+                match initial_snapshot.take() {
+                    Some(snapshot) => Ok(snapshot),
+                    None => rx.recv().await,
+                }
+            } => {
                 match msg {
                     Ok(json) => {
+                        let refreshed = {
+                            let s = state.read().await;
+                            room_learner_api::refresh_queued_update(&s, &json)
+                        };
+                        let Some(json) = refreshed else { continue; };
                         let json = if privacy_mode {
                             match privacy_filter::redact_json_str(&json) {
                                 Some(json) => json,
@@ -5922,9 +6485,10 @@ async fn ws_pose_handler(
 }
 
 async fn handle_ws_pose_client(mut socket: WebSocket, state: SharedState) {
-    let (mut rx, privacy_mode, _client) = {
+    let (mut rx, privacy_mode, _client, mut initial_snapshot) = {
         let s = state.read().await;
-        (s.tx.subscribe(), s.privacy_mode, s.ws_clients.enter())
+        (s.tx.subscribe(), s.privacy_mode, s.ws_clients.enter(),
+            current_sensing_snapshot(&s).and_then(|update| serde_json::to_string(&update).ok()))
     };
 
     info!("WebSocket client connected (pose)");
@@ -5936,14 +6500,46 @@ async fn handle_ws_pose_client(mut socket: WebSocket, state: SharedState) {
     });
     let _ = socket.send(Message::Text(conn_msg.to_string())).await;
 
+    let mut ping_interval = tokio::time::interval(Duration::from_secs(30));
+    ping_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
     loop {
         tokio::select! {
-            msg = rx.recv() => {
+            msg = async {
+                match initial_snapshot.take() {
+                    Some(snapshot) => Ok(snapshot),
+                    None => rx.recv().await,
+                }
+            } => {
                 match msg {
                     Ok(json) => {
+                        let refreshed = {
+                            let s = state.read().await;
+                            room_learner_api::refresh_queued_update(&s, &json)
+                        };
+                        let Some(json) = refreshed else { continue; };
                         // Parse the sensing update and convert to pose format
                         if let Ok(sensing) = serde_json::from_str::<SensingUpdate>(&json) {
                             if sensing.msg_type == "sensing_update" {
+                                let age_ms = chrono::Utc::now().timestamp_millis() as f64 - sensing.timestamp * 1000.0;
+                                if sensing.selected_binary_evidence.is_some() || sensing.source.ends_with(":offline") || age_ms > LATEST_UPDATE_STALE_AFTER.as_millis() as f64 {
+                                    // Unavailable is not measured absence. Never reconstruct
+                                    // a skeleton from a deliberately expired cached snapshot.
+                                    let mut unavailable = serde_json::json!({
+                                        "type": "pose_data", "zone_id": "zone_1",
+                                        "timestamp": sensing.timestamp, "physics": null,
+                                        "payload": {
+                                            "pose": {"persons": []}, "confidence": null,
+                                            "activity": "unavailable", "pose_source": "unavailable",
+                                            "metadata": {"frame_id": format!("rust_frame_{}", sensing.tick),
+                                                "source": sensing.source, "tick": sensing.tick,
+                                                "estimated_persons": null, "evidence_state": "unavailable"}
+                                        }
+                                    });
+                                    if privacy_mode { privacy_filter::redact_value(&mut unavailable); }
+                                    if socket.send(Message::Text(unavailable.to_string())).await.is_err() { break; }
+                                    continue;
+                                }
                                 // Determine pose estimation mode for the UI indicator.
                                 // "model_inference"    — a trained RVF model is loaded.
                                 // "signal_derived"     — keypoints estimated from raw CSI features.
@@ -6052,6 +6648,9 @@ async fn handle_ws_pose_client(mut socket: WebSocket, state: SharedState) {
                     Err(_) => break, // channel closed
                 }
             }
+            _ = ping_interval.tick() => {
+                if socket.send(Message::Ping(vec![])).await.is_err() { break; }
+            }
             msg = socket.recv() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
@@ -6152,11 +6751,14 @@ mod latest_update_staleness_tests {
                 presence: false,
                 confidence: 0.97,
             },
+            classification_source: None,
+            selected_binary_evidence: None,
             signal_field: SignalField {
                 grid_size: [0, 0, 0],
                 values: vec![],
             },
             vital_signs: None,
+            vital_evidence: None,
             classifier: None,
             activity: None,
             calibrated_presence_evidence: None,
@@ -7317,6 +7919,10 @@ fn derive_single_person_pose(
 /// ever *lowers* a Derived cycle from P5 to P4, both of which are already held
 /// edge-local, so it cannot leak.
 fn emit_rufield_event(s: &AppStateInner, update: &SensingUpdate, node_id: u8) {
+    // The legacy field bridge cannot encode a selected model/qualification or
+    // its source-set/window identity. Never relabel packet features and signal
+    // field peaks as qualified binary-model motion/count/location evidence.
+    if update.selected_binary_evidence.is_some() { return; }
     // No-presence ⇒ no phantom event.
     if !update.classification.presence {
         return;
@@ -7504,6 +8110,7 @@ fn assess_legacy_image_pose(state: &mut AppStateInner, update: &SensingUpdate) {
 }
 
 fn derive_pose_from_sensing(update: &SensingUpdate) -> Vec<PersonDetection> {
+    if update.selected_binary_evidence.is_some() { return vec![]; }
     let cls = &update.classification;
     if !cls.presence {
         return vec![];
@@ -7783,6 +8390,12 @@ async fn pose_current(
     Query(query): Query<PoseCurrentQuery>,
 ) -> impl IntoResponse {
     let s = state.read().await;
+    if room_learner_api::selection_owns_output(&s) {
+        return (StatusCode::CONFLICT, Json(serde_json::json!({
+            "code":"selected_binary_model_has_no_pose_authority", "persons":[], "total_persons":null,
+            "detail":"The selected model qualifies room presence only; no pose or person count is available."
+        })));
+    }
     let persons = match &s.latest_update {
         Some(update) => update
             .persons
@@ -7868,6 +8481,10 @@ async fn pose_physics_metrics(State(state): State<SharedState>) -> impl IntoResp
 
 async fn pose_stats(State(state): State<SharedState>) -> Json<serde_json::Value> {
     let s = state.read().await;
+    if room_learner_api::selection_owns_output(&s) {
+        return Json(serde_json::json!({"authority":"withheld","reason":"selected_binary_model_has_no_pose_authority",
+            "total_detections":null,"average_confidence":null,"frames_processed":s.tick,"source":s.effective_source()}));
+    }
     Json(serde_json::json!({
         "total_detections": s.total_detections,
         "average_confidence": 0.87,
@@ -7878,6 +8495,9 @@ async fn pose_stats(State(state): State<SharedState>) -> Json<serde_json::Value>
 
 async fn pose_zones_summary(State(state): State<SharedState>) -> Json<serde_json::Value> {
     let s = state.read().await;
+    if room_learner_api::selection_owns_output(&s) {
+        return Json(serde_json::json!({"zones":{},"authority":"withheld","reason":"selected_binary_model_has_no_zone_count_authority"}));
+    }
     let presence = s
         .latest_update
         .as_ref()
@@ -8177,9 +8797,9 @@ async fn activate_lora_profile(Json(body): Json<serde_json::Value>) -> Json<serd
 /// Return the effective models directory: the `MODELS_DIR` environment
 /// variable if set, otherwise `<data_dir>/models` (issue #2088).
 pub(crate) fn models_dir(data_dir: &std::path::Path) -> PathBuf {
-    std::env::var_os("MODELS_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| data_dir.join("models"))
+    wifi_densepose_sensing_server::account_profile::models_directory(
+        std::env::var_os(wifi_densepose_sensing_server::bearer_auth::OWNER_ACCOUNT_SCOPE_ENV).is_some(),
+        data_dir, std::env::var_os("MODELS_DIR").as_deref())
 }
 
 /// Return the directory CSI recordings are written to and read from:
@@ -8582,26 +9202,50 @@ fn vitals_for_publication(
     if !explicit_calibration_fresh || person_count != 1 {
         return None;
     }
+    if !candidates.signal_quality.is_finite() {
+        return None;
+    }
     let signal_quality = candidates.signal_quality.clamp(0.0, 1.0);
     if signal_quality < VITAL_PUBLICATION_MIN_SIGNAL_QUALITY {
         return None;
     }
-    let breathing_rate_bpm = (candidates.breathing_confidence
-        >= VITAL_PUBLICATION_MIN_CONFIDENCE)
-        .then_some(candidates.breathing_rate_bpm)
-        .flatten();
-    let heart_rate_bpm =
-        (candidates.heartbeat_confidence >= VITAL_PUBLICATION_MIN_CONFIDENCE)
-            .then_some(candidates.heart_rate_bpm)
-            .flatten();
+    let qualified = |rate: Option<f64>, confidence: f64, minimum, maximum| {
+        rate.filter(|rate| {
+            rate.is_finite()
+                && *rate >= minimum
+                && *rate <= maximum
+                && confidence.is_finite()
+                && confidence >= VITAL_PUBLICATION_MIN_CONFIDENCE
+        })
+    };
+    let breathing_rate_bpm = qualified(
+        candidates.breathing_rate_bpm,
+        candidates.breathing_confidence,
+        4.0,
+        40.0,
+    );
+    let heart_rate_bpm = qualified(
+        candidates.heart_rate_bpm,
+        candidates.heartbeat_confidence,
+        30.0,
+        240.0,
+    );
     if breathing_rate_bpm.is_none() && heart_rate_bpm.is_none() {
         return None;
     }
     Some(VitalSigns {
         breathing_rate_bpm,
         heart_rate_bpm,
-        breathing_confidence: candidates.breathing_confidence.clamp(0.0, 1.0),
-        heartbeat_confidence: candidates.heartbeat_confidence.clamp(0.0, 1.0),
+        breathing_confidence: if breathing_rate_bpm.is_some() {
+            candidates.breathing_confidence.clamp(0.0, 1.0)
+        } else {
+            0.0
+        },
+        heartbeat_confidence: if heart_rate_bpm.is_some() {
+            candidates.heartbeat_confidence.clamp(0.0, 1.0)
+        } else {
+            0.0
+        },
         signal_quality,
     })
 }
@@ -8610,26 +9254,222 @@ fn vitals_for_publication(
 /// cannot authorize numeric rates when the bound field model says absent.
 /// Require both the existing room gate and a fresh, complete model window;
 /// never use a heuristic fallback as calibrated single-occupant evidence.
+struct VitalGateAssessment {
+    published: Option<VitalSigns>,
+    reason: vital_publication::Reason,
+    bound_window_ready: bool,
+    calibrated_person_count: Option<usize>,
+}
+
+fn assess_calibrated_vitals(
+    state: &AppStateInner,
+    candidates: &VitalSigns,
+    room_person_count: usize,
+    observed_at_unix_ms: u64,
+) -> VitalGateAssessment {
+    use vital_publication::Reason;
+    let binding = state.calibration_grid_binding;
+    let window = state
+        .field_model
+        .as_ref()
+        .and_then(|m| m.modes())
+        .and_then(|m| m.baseline_runtime_window_size);
+    let ready = binding.zip(window).is_some_and(|(binding, window)| {
+        state.field_model_holdout_ready(binding, window, std::time::Instant::now())
+    });
+    let evidence = binding.filter(|_| ready).and_then(|binding| {
+        state.calibrated_presence_evidence(binding.source_node_id, state.tick, observed_at_unix_ms)
+    });
+    let count = evidence.as_ref().map(|e| e.person_count);
+    let reason = if state.privacy_mode {
+        Reason::PrivacyRedacted
+    } else if room_person_count != 1 {
+        Reason::RoomNotSingleOccupant
+    } else if !state.calibration_sequence_fault_node_ids.is_empty() {
+        Reason::SequenceFault
+    } else if !state.explicit_calibration_fresh_at(observed_at_unix_ms) {
+        Reason::ExplicitCalibrationRequired
+    } else if binding.is_none() || window.is_none() {
+        Reason::BoundModelUnavailable
+    } else if !ready {
+        Reason::BoundWindowNotReady
+    } else if count.is_none() {
+        Reason::CalibratedPresenceUnavailable
+    } else if count != Some(1) {
+        Reason::CalibratedNotSingleOccupant
+    } else if !candidates.signal_quality.is_finite()
+        || candidates.signal_quality < VITAL_PUBLICATION_MIN_SIGNAL_QUALITY
+    {
+        Reason::LowSignalQuality
+    } else if candidates.breathing_rate_bpm.is_none() && candidates.heart_rate_bpm.is_none() {
+        Reason::NoCandidateRate
+    } else if !candidates.breathing_rate_bpm.is_some_and(|rate| rate.is_finite() && (4.0..=40.0).contains(&rate))
+        && !candidates.heart_rate_bpm.is_some_and(|rate| rate.is_finite() && (30.0..=240.0).contains(&rate)) {
+        Reason::InvalidCandidateRate
+    } else {
+        Reason::LowRateConfidence
+    };
+    let published = if matches!(reason, Reason::LowRateConfidence) {
+        vitals_for_publication(candidates, true, 1)
+    } else {
+        None
+    };
+    VitalGateAssessment {
+        reason: if published.is_some() {
+            Reason::Published
+        } else {
+            reason
+        },
+        published,
+        bound_window_ready: ready,
+        calibrated_person_count: count,
+    }
+}
+
 fn calibrated_vitals_for_publication(
     state: &AppStateInner,
     candidates: &VitalSigns,
     room_person_count: usize,
     observed_at_unix_ms: u64,
 ) -> Option<VitalSigns> {
-    if room_person_count != 1 || !state.calibration_sequence_fault_node_ids.is_empty() {
-        return None;
+    assess_calibrated_vitals(state, candidates, room_person_count, observed_at_unix_ms).published
+}
+
+/// REST reuses the last atomic room aggregate, never the single-link field
+/// count in isolation. A stale candidate is independently refused below.
+fn current_vital_room_count(state: &AppStateInner, now: std::time::Instant) -> usize {
+    if state.node_states.values().any(|n| node_is_fresh(n, now)) {
+        state.prev_person_count
+    } else {
+        0
     }
-    let binding = state.calibration_grid_binding?;
-    let window_size = state.field_model.as_ref()?.modes()?.baseline_runtime_window_size?;
-    if !state.field_model_holdout_ready(binding, window_size, std::time::Instant::now()) {
-        return None;
+}
+
+fn vital_calibration_identity(
+    state: &AppStateInner,
+) -> Option<vital_publication::CalibrationIdentity> {
+    let receipt = state.calibration_model_receipt.as_ref()?;
+    Some(vital_publication::CalibrationIdentity {
+        boot_epoch: receipt.boot_epoch.clone(),
+        session_id: receipt.session_id.clone(),
+        model_id: receipt.model_id.clone(),
+        binding_digest: receipt.binding_digest.clone(),
+        source_node_ids: receipt.source_node_ids.clone(),
+        completed_at_unix_ms: receipt.completed_at_unix_ms,
+    })
+}
+
+fn node_vital_decision(
+    state: &AppStateInner,
+    node_id: u8,
+    room_count: usize,
+    observed_at_unix_ms: u64,
+) -> (Option<VitalSigns>, vital_publication::Decision) {
+    use vital_publication::{Decision, Reason, CANDIDATE_MAX_AGE_MS};
+    let node = &state.node_states[&node_id];
+    let candidate = node.vital_candidate.as_ref();
+    let rates = candidate.map(|c| c.rates.clone()).unwrap_or_default();
+    let age = candidate.map(|c| c.received_at.elapsed().as_millis().min(u64::MAX as u128) as u64);
+    let mut gate = assess_calibrated_vitals(state, &rates, room_count, observed_at_unix_ms);
+    if !state.privacy_mode {
+        if candidate.is_none() {
+            gate.reason = Reason::NoCandidate;
+            gate.published = None;
+        } else if age.is_none_or(|age| age > CANDIDATE_MAX_AGE_MS)
+            || candidate.is_some_and(|c| {
+                observed_at_unix_ms.abs_diff(c.observed_at_unix_ms) > CANDIDATE_MAX_AGE_MS
+            })
+        {
+            gate.reason = Reason::CandidateStale;
+            gate.published = None;
+        }
     }
-    let evidence = state.calibrated_presence_evidence(
-        binding.source_node_id,
-        state.tick,
-        observed_at_unix_ms,
-    )?;
-    vitals_for_publication(candidates, true, evidence.person_count)
+    if gate.published.is_some()
+        && candidate.is_some_and(|c| {
+            c.calibration_identity.is_none()
+                || c.calibration_identity != vital_calibration_identity(state)
+        })
+    {
+        gate.reason = Reason::CandidateCalibrationChanged;
+        gate.published = None;
+    }
+    let diagnostic = Decision {
+        node_id,
+        candidate_kind: candidate.map(|c| c.kind),
+        source_tick: candidate.map(|c| c.tick),
+        observed_at_unix_ms: candidate.map(|c| c.observed_at_unix_ms),
+        candidate_age_ms: age,
+        occupancy_source_node_id: state.bound_source_node_id(),
+        room_person_count: room_count,
+        calibrated_person_count: gate.calibrated_person_count,
+        explicit_calibration_fresh: state.explicit_calibration_fresh_at(observed_at_unix_ms),
+        sequence_continuity_ok: state.calibration_sequence_fault_node_ids.is_empty(),
+        bound_window_ready: gate.bound_window_ready,
+        breathing_rate_present: rates.breathing_rate_bpm.is_some(),
+        heart_rate_present: rates.heart_rate_bpm.is_some(),
+        signal_quality_passed: rates.signal_quality.is_finite()
+            && rates.signal_quality >= VITAL_PUBLICATION_MIN_SIGNAL_QUALITY,
+        breathing_confidence_passed: rates.breathing_confidence.is_finite()
+            && rates.breathing_confidence >= VITAL_PUBLICATION_MIN_CONFIDENCE,
+        heartbeat_confidence_passed: rates.heartbeat_confidence.is_finite()
+            && rates.heartbeat_confidence >= VITAL_PUBLICATION_MIN_CONFIDENCE,
+        buffers: node.vital_detector.buffer_status().into(),
+        sample_rate_hz: node.vital_detector.sample_rate_hz(),
+        observed_sample_rate_hz: node.effective_sample_rate_hz(),
+        sample_rate_resets: node.vital_sample_rate_resets,
+        reason: gate.reason,
+    };
+    (gate.published, diagnostic)
+}
+
+/// Called under the same write lock as the room aggregate and outgoing frame.
+fn record_node_vital_decision(
+    state: &mut AppStateInner,
+    node_id: u8,
+    mut candidate: vital_publication::NodeVitalCandidate,
+    room_count: usize,
+) -> (Option<VitalSigns>, Option<vital_publication::VitalEvidence>) {
+    let observed = candidate.observed_at_unix_ms;
+    candidate.calibration_identity = vital_calibration_identity(state);
+    state
+        .node_states
+        .get_mut(&node_id)
+        .expect("active node")
+        .vital_candidate = Some(candidate);
+    let (published, diagnostic) = node_vital_decision(state, node_id, room_count, observed);
+    let node = state.node_states.get_mut(&node_id).expect("active node");
+    let evidence = published.as_ref().and_then(|rates| {
+        vital_publication::evidence(
+            node_id,
+            node.vital_candidate.as_ref().expect("recorded candidate"),
+            rates,
+        )
+    });
+    node.last_vital_decision = Some(diagnostic);
+    (published, evidence)
+}
+
+/// A read may withdraw a previously published candidate, never promote an old
+/// withheld sample under a new room/privacy/calibration context.
+fn reevaluate_node_vitals(
+    state: &AppStateInner,
+    node_id: u8,
+    room_count: usize,
+    observed: u64,
+) -> (Option<VitalSigns>, vital_publication::Decision) {
+    let (mut rates, mut diagnostic) = node_vital_decision(state, node_id, room_count, observed);
+    let recorded = state.node_states[&node_id].last_vital_decision.as_ref();
+    if rates.is_some()
+        && !recorded.is_some_and(|last| {
+            last.reason == vital_publication::Reason::Published
+                && last.source_tick == diagnostic.source_tick
+                && last.observed_at_unix_ms == diagnostic.observed_at_unix_ms
+        })
+    {
+        rates = None;
+        diagnostic.reason = vital_publication::Reason::NotPublishedForSourceTick;
+    }
+    (rates, diagnostic)
 }
 
 fn edge_vitals_message_for_publication(
@@ -8848,6 +9688,8 @@ mod bootstrap_vital_publication_tests {
             Query(CalibrationStartQuery {
                 source_node_id: Some(5),
             }),
+            None,
+            None,
             Json(test_binding_request(vec![5])),
         )
         .await;
@@ -8878,6 +9720,8 @@ mod bootstrap_vital_publication_tests {
             Query(CalibrationStartQuery {
                 source_node_id: Some(5),
             }),
+            None,
+            None,
             Json(test_binding_request(vec![5])),
         )
         .await;
@@ -9486,12 +10330,243 @@ struct BootstrapRefineQuery {
     source_node_id: Option<u8>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BootstrapRecoverRequest {
+    boot_epoch: String,
+    content_sha256: String,
+}
+
+/// Explicitly restore the verified negative-only prior, just as a clean boot
+/// would. This never renews its lifetime or restores a full room receipt.
+async fn calibration_recover_bootstrap(
+    State(state): State<SharedState>,
+    Json(request): Json<BootstrapRecoverRequest>,
+) -> Json<serde_json::Value> {
+    let mut s = state.write().await;
+    if request.boot_epoch != s.calibration_boot_epoch
+        || !valid_binding_digest(&request.content_sha256)
+        || s.bootstrap_baseline.as_ref().is_none_or(|metadata| {
+            metadata.content_sha256 != request.content_sha256
+        })
+    {
+        return Json(serde_json::json!({
+            "success": false, "error_code": "bootstrap_recovery_identity_mismatch",
+            "error": "The saved reference or server boot changed. Refresh calibration status before restoring it.",
+        }));
+    }
+    if s.field_model.as_ref().is_some_and(|model| matches!(
+        model.status(), CalibrationStatus::Uncalibrated | CalibrationStatus::Collecting
+    )) && s.calibration_session_id.is_some() {
+        return Json(serde_json::json!({
+            "success": false, "error_code": "calibration_capture_active",
+            "error": "Cancel the active capture before restoring the saved empty reference.",
+        }));
+    }
+    let Some(installation_id) = s.installation_id.as_deref() else {
+        return Json(serde_json::json!({
+            "success": false, "error_code": "installation_id_required",
+            "error": "A stable installation identity is required to restore the saved reference.",
+        }));
+    };
+    let path = bootstrap_baseline::path_in(&s.data_dir);
+    // Validate disk content before touching the live model, histories or faults.
+    let (model, metadata) = match bootstrap_baseline::load(
+        &path, installation_id, chrono::Utc::now().timestamp_millis().max(0) as u64,
+    ) {
+        Ok(value) => value,
+        Err(_) => return Json(serde_json::json!({
+            "success": false, "error_code": "bootstrap_reference_unavailable",
+            "error": "The saved empty reference is expired or failed validation. Collect a new baseline.",
+        })),
+    };
+    if metadata.content_sha256 != request.content_sha256 {
+        return Json(serde_json::json!({
+            "success": false, "error_code": "bootstrap_recovery_identity_mismatch",
+            "error": "The saved reference changed. Refresh calibration status before restoring it.",
+        }));
+    }
+    let [source_node_id] = metadata.source_node_ids.as_slice() else {
+        return Json(serde_json::json!({
+            "success": false, "error_code": "bootstrap_source_invalid",
+            "error": "The saved reference must have one source radio.",
+        }));
+    };
+    let grid = CsiGridKey::from_bootstrap_grid(metadata.source_grid);
+    let now = std::time::Instant::now();
+    let evidence = s.node_states.get(source_node_id).and_then(|node| {
+        node.calibration_grid_candidates(now).into_iter().find_map(|(candidate, evidence)| {
+            (candidate == grid
+                && evidence.span_s >= CALIBRATION_GRID_MIN_SPAN_S
+                && evidence.rate_hz >= CALIBRATION_GRID_MIN_RATE_HZ
+                && evidence.max_gap_s < CALIBRATION_GRID_MAX_GAP_S
+                && evidence.latest_age_s < CALIBRATION_GRID_MAX_GAP_S).then_some(evidence)
+        })
+    });
+    let Some(evidence) = evidence else {
+        return Json(serde_json::json!({
+            "success": false, "error_code": "bootstrap_source_unavailable",
+            "error": "The saved source radio and CSI grid need at least ten seconds of fresh live data before recovery.",
+            "source_node_id": source_node_id,
+        }));
+    };
+    let binding = CalibrationGridBinding { source_node_id: *source_node_id, grid, evidence: Some(evidence) };
+    if let Err(error) = room_calibration::remove(&s.data_dir) {
+        return error_response::internal_error_json("room calibration downgrade", error);
+    }
+    s.clear_field_model_binding();
+    s.clear_calibration_sequence_state();
+    s.calibration_source_node_ids.clear();
+    s.calibration_source_node_ids.insert(binding.source_node_id);
+    s.calibration_observed_source_node_ids.clear();
+    s.calibration_model_id = None;
+    s.calibration_session_id = None;
+    s.calibration_binding_digest = None;
+    s.calibration_model_receipt = None;
+    s.calibration_restored = false;
+    s.field_model = Some(model);
+    s.calibration_grid_binding = Some(binding);
+    s.bootstrap_baseline = Some(metadata.clone());
+    s.bootstrap_baseline_active = true;
+    Json(serde_json::json!({
+        "success": true, "boot_epoch": s.calibration_boot_epoch,
+        "status": s.field_model_status_at(chrono::Utc::now().timestamp_millis().max(0) as u64).map(|value| format!("{value:?}").to_lowercase()),
+        "bootstrap_baseline": metadata, "restored_frames": 0,
+        "full_calibration_required": true,
+        "calibrated_evidence_authorized": false, "numeric_vitals_authorized": false,
+    }))
+}
+
+#[cfg(test)]
+mod bootstrap_recovery_tests {
+    use super::*;
+
+    fn fixture() -> (tempfile::TempDir, SharedState, BootstrapRecoverRequest) {
+        let directory = tempfile::tempdir().unwrap();
+        let now_ms = chrono::Utc::now().timestamp_millis() as u64;
+        let model = super::calibration_expiry_tests::finalized_model(now_ms);
+        let mut snapshot = model.export_snapshot().unwrap();
+        snapshot.config.baseline_expiry_s = 86_400.0;
+        snapshot.modes.calibrated_at_us = (now_ms - 13 * 3_600_000) * 1_000;
+        let model = FieldModel::from_snapshot(snapshot, now_ms * 1_000).unwrap();
+        let grid = CsiGridKey { n_subcarriers: 64, ppdu_type: 0 };
+        let metadata = bootstrap_baseline::store(
+            &bootstrap_baseline::path_in(directory.path()), "recovery-test", &[5],
+            grid.as_bootstrap_grid(), "cal-model-saved", now_ms, &model,
+        ).unwrap();
+        let mut state = AppStateInner::minimal();
+        state.installation_id = Some("recovery-test".into());
+        state.data_dir = directory.path().to_path_buf();
+        state.bootstrap_baseline = Some(metadata.clone());
+        state.field_model = Some(model);
+        state.calibration_session_id = Some("old-session".into());
+        state.calibration_model_id = Some("old-model".into());
+        state.calibration_binding_digest = Some("ab".repeat(32));
+        state.calibration_sequence_fault_node_ids.insert(5);
+        state.calibration_last_sequences.insert(5, 50_000);
+        let mut node = NodeState::new();
+        let now = std::time::Instant::now();
+        for index in 0..=240 {
+            node.observe_raw_grid(grid, now - Duration::from_millis(12_000 - index * 50));
+        }
+        node.field_model_history.push_back(vec![999.0; 56]);
+        node.field_model_latest_sequence = Some(50_000);
+        node.field_model_latest_seen = Some(now);
+        state.node_states.insert(5, node);
+        let request = BootstrapRecoverRequest {
+            boot_epoch: state.calibration_boot_epoch.clone(), content_sha256: metadata.content_sha256,
+        };
+        (directory, Arc::new(RwLock::new(state)), request)
+    }
+
+    #[tokio::test]
+    async fn stale_recovery_retains_expiry_withdraws_full_receipt_and_requires_new_frames() {
+        let (_directory, state, request) = fixture();
+        let expiry = state.read().await.bootstrap_baseline.as_ref().unwrap().expires_at_unix_ms;
+        let Json(response) = calibration_recover_bootstrap(State(state.clone()), Json(request)).await;
+        assert_eq!(response["success"], true);
+        assert_eq!(response["bootstrap_baseline"]["expires_at_unix_ms"], expiry);
+        assert_eq!(response["restored_frames"], 0);
+        assert_eq!(response["calibrated_evidence_authorized"], false);
+        let mut s = state.write().await;
+        assert!(s.bootstrap_baseline_active);
+        assert!(s.calibration_model_receipt.is_none());
+        assert!(s.calibration_session_id.is_none());
+        assert!(s.calibration_sequence_fault_node_ids.is_empty());
+        assert!(s.node_states[&5].field_model_history.is_empty());
+        assert!(s.node_states[&5].field_model_latest_seen.is_none());
+        assert!(!s.bootstrap_empty_prior_applies(chrono::Utc::now().timestamp_millis() as u64));
+        let frame = s.field_model.as_ref().unwrap().modes().unwrap().baseline[0].clone();
+        let grid = s.calibration_grid_binding.unwrap().grid;
+        assert!(s.maybe_feed_calibration_frame(5, grid, 1, &frame, std::time::Instant::now()));
+        assert!(!s.maybe_feed_calibration_frame(5, grid, 1, &frame, std::time::Instant::now()));
+        assert!(s.maybe_feed_calibration_frame(5, grid, 100, &frame, std::time::Instant::now()));
+        assert!(!s.maybe_feed_calibration_frame(5, grid, 2, &frame, std::time::Instant::now()));
+        assert!(s.calibration_sequence_fault_node_ids.contains(&5));
+        assert!(!s.explicit_calibration_fresh_at(chrono::Utc::now().timestamp_millis() as u64));
+    }
+
+    #[tokio::test]
+    async fn rejected_recovery_preserves_live_state_and_saved_image() {
+        for invalid_case in ["boot", "digest", "tamper", "source", "grid", "capture", "installation", "expired"] {
+            let (directory, state, mut request) = fixture();
+            let path = bootstrap_baseline::path_in(directory.path());
+            match invalid_case {
+                "boot" => request.boot_epoch = "old-boot".into(),
+                "digest" => request.content_sha256 = "cd".repeat(32),
+                "tamper" => std::fs::write(&path, b"{}").unwrap(),
+                "source" => state.write().await.node_states.clear(),
+                "grid" => {
+                    state.write().await.node_states.get_mut(&5).unwrap().raw_grid_observations.clear();
+                }
+                "capture" => {
+                    state.write().await.field_model = Some(FieldModel::new(field_bridge::single_link_config()).unwrap());
+                }
+                "installation" => state.write().await.installation_id = Some("another-installation".into()),
+                "expired" => {
+                    let mut s = state.write().await;
+                    let now_ms = chrono::Utc::now().timestamp_millis() as u64;
+                    let old = s.field_model.as_ref().unwrap().export_snapshot().unwrap();
+                    let mut old = old;
+                    old.modes.calibrated_at_us = (now_ms - 25 * 3_600_000) * 1_000;
+                    // Store a valid image when it was still young, then load now.
+                    let model = FieldModel::from_snapshot(old, (now_ms - 24 * 3_600_000) * 1_000).unwrap();
+                    let metadata = bootstrap_baseline::store(&path, "recovery-test", &[5],
+                        s.calibration_grid_binding.map_or(CsiGridKey { n_subcarriers:64, ppdu_type:0 }, |b| b.grid).as_bootstrap_grid(),
+                        "cal-model-saved", now_ms - 24 * 3_600_000, &model).unwrap();
+                    request.content_sha256 = metadata.content_sha256.clone(); s.bootstrap_baseline = Some(metadata);
+                }
+                _ => unreachable!(),
+            }
+            let bytes = std::fs::read(&path).unwrap();
+            let Json(response) = calibration_recover_bootstrap(State(state.clone()), Json(request)).await;
+            assert_eq!(response["success"], false, "{invalid_case}");
+            let s = state.read().await;
+            assert_eq!(s.calibration_session_id.as_deref(), Some("old-session"), "{invalid_case}");
+            assert!(s.calibration_sequence_fault_node_ids.contains(&5), "{invalid_case}");
+            assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        }
+    }
+}
+
 async fn calibration_start(
     State(state): State<SharedState>,
     Query(query): Query<CalibrationStartQuery>,
+    companion_grant: Option<Extension<wifi_densepose_sensing_server::companion::Grant>>,
+    shared_room: Option<Extension<Arc<companion_room::SharedRoomStore>>>,
     Json(request): Json<CalibrationBindingRequest>,
 ) -> Json<serde_json::Value> {
+    if companion_grant.is_some() && !shared_room.as_ref().is_some_and(|Extension(room)| room.matches_binding(&request.binding_digest, &request.source_node_ids)) {
+        return Json(serde_json::json!({"success":false,"error_code":"shared_room_binding_required","error":"Import the current Mac room revision before starting calibration."}));
+    }
     let mut s = state.write().await;
+    if let Some(learner)=s.room_learning.as_ref() {
+        match learner.capture_active() {
+            Ok(false)=>{},
+            Ok(true)=>return Json(serde_json::json!({"success":false,"error_code":"learner_capture_active","error":"Finish or cancel learner example capture before starting a legacy empty baseline."})),
+            Err(_)=>return Json(serde_json::json!({"success":false,"error_code":"learner_state_unavailable","error":"Learner capture state is unavailable; retry before changing calibration mode."})),
+        }
+    }
     if !valid_binding_digest(&request.binding_digest)
         || !valid_source_node_ids(&request.source_node_ids)
     {
@@ -9561,6 +10636,18 @@ async fn calibration_start(
         };
         *binding
     };
+    let source_grid_readiness=legacy_grid_readiness::inspect(&s,&request.source_node_ids,selected_binding,now)
+        .expect("validated binding includes the selected author");
+    if !source_grid_readiness.all_bound_nodes_ready {
+        return Json(serde_json::json!({
+            "success":false,
+            "error_code":"calibration_bound_grid_unavailable",
+            "error":format!("Legacy baseline uses one author and exact {}-bin/PPDU{} data. Placed nodes {:?} are not grid-ready. No baseline changed. Review grid diagnostics; managed per-source learning is a separate workflow.",selected_binding.grid.n_subcarriers,selected_binding.grid.ppdu_type,source_grid_readiness.nodes.iter().filter(|n|!n.ready).map(|n|n.node_id).collect::<Vec<_>>()),
+            "source_node_ids":request.source_node_ids,
+            "source_grid":selected_binding.grid,
+            "source_grid_readiness":source_grid_readiness,
+        }));
+    }
     if s.bootstrap_baseline_active {
         s.field_model = None;
         s.bootstrap_baseline_active = false;
@@ -9586,6 +10673,9 @@ async fn calibration_start(
             _ => {} // Stale/Expired/Uncalibrated — ok to recalibrate
         }
     }
+    if let Err(error) = room_calibration::remove(&s.data_dir) {
+        return error_response::internal_error_json("room calibration replacement", error);
+    }
     match FieldModel::new(field_bridge::single_link_config()) {
         Ok(fm) => {
             s.field_model = Some(fm);
@@ -9595,11 +10685,17 @@ async fn calibration_start(
             s.calibration_source_node_ids.clear();
             s.calibration_observed_source_node_ids.clear();
             s.calibration_model_receipt = None;
+            s.calibration_restored = false;
             s.clear_field_model_binding();
             s.clear_calibration_sequence_state();
             s.calibration_source_node_ids
                 .extend(request.source_node_ids.iter().copied());
             s.calibration_grid_binding = Some(selected_binding);
+            if s.source_bank_shadow_enabled {
+                s.source_bank_shadow = source_bank_shadow::ShadowCapture::new(
+                    &request.source_node_ids, selected_binding.grid.n_subcarriers as usize,
+                    format!("csi-{}-{}", selected_binding.grid.n_subcarriers, selected_binding.grid.ppdu_type));
+            }
             Json(serde_json::json!({
                 "success": true,
                 "message": "Calibration started — keep room empty while frames accumulate.",
@@ -9612,6 +10708,7 @@ async fn calibration_start(
                 "source_node_ids": s.calibration_source_node_ids,
                 "source_grid": selected_binding.grid,
                 "grid_evidence": selected_binding.evidence,
+                "source_grid_readiness":source_grid_readiness,
             }))
         }
         // ADR-080 #2: FieldModel init error chain stays server-side only.
@@ -9687,6 +10784,19 @@ async fn calibration_stop(
             "latest_seen_ms": latest_seen_ms,
         }));
     }
+    let unfinished=s.field_model.as_ref().is_some_and(|fm|matches!(fm.status(),CalibrationStatus::Collecting|CalibrationStatus::Uncalibrated));
+    if unfinished {
+        if let Some(readiness)=legacy_grid_readiness::inspect(&s,&source_node_ids,binding,std::time::Instant::now()) {
+            if readiness.known_incompatibility() {
+                return Json(serde_json::json!({
+                    "success":false,"error_code":"calibration_bound_grid_unavailable",
+                    "error":"A placed node now has only a different qualified raw CSI grid from this legacy baseline. Restore the frozen grid before finalizing, or review the separate managed per-source learner. The unfinished baseline was preserved.",
+                    "model_id":model_id,"source_node_ids":source_node_ids,"source_grid":source_grid,
+                    "source_grid_readiness":readiness,
+                }));
+            }
+        }
+    }
     if let Some(ref mut fm) = s.field_model {
         // Guard: finalizing before enough empty-room frames have accumulated
         // is a client-side sequencing error, not a server fault. Return a
@@ -9728,7 +10838,7 @@ async fn calibration_stop(
                 let holdout_window_size = modes.baseline_runtime_window_size;
                 let final_frame_count = fm.calibration_frame_count();
                 let receipt = CalibrationModelReceipt {
-                    schema: field_bridge::CALIBRATION_MODEL_RECEIPT_SCHEMA,
+                    schema: field_bridge::CALIBRATION_MODEL_RECEIPT_SCHEMA.to_string(),
                     boot_epoch: s.calibration_boot_epoch.clone(),
                     session_id: s.calibration_session_id.clone().expect("validated identity"),
                     model_id: model_id.clone().expect("bound calibration model identity"),
@@ -9739,7 +10849,9 @@ async fn calibration_stop(
                     baseline_eigenvalue_count: baseline,
                     completed_at_unix_ms: chrono::Utc::now().timestamp_millis().max(0) as u64,
                 };
+                s.calibration_restored = false;
                 s.calibration_model_receipt = Some(receipt.clone());
+                if let Some(shadow) = s.source_bank_shadow.as_mut() { shadow.freeze(ts); }
                 s.begin_field_model_holdout(binding);
                 info!("Field model calibrated: baseline_eigenvalues={baseline}, variance_explained={variance_explained:.2}");
                 Json(serde_json::json!({
@@ -9800,7 +10912,9 @@ async fn calibration_status(State(state): State<SharedState>) -> Json<serde_json
             )
         });
     let status = effective_status.map_or_else(
-        || "none".to_string(),
+        || if !bound && s.field_model.is_none() && s.bootstrap_baseline.as_ref()
+            .is_some_and(|metadata| observed_at_unix_ms > metadata.expires_at_unix_ms)
+        { "expired".to_string() } else { "none".to_string() },
         |status| format!("{status:?}").to_lowercase(),
     );
     // An expired calibration is inactive by definition, but "expired" is a
@@ -9828,6 +10942,10 @@ async fn calibration_status(State(state): State<SharedState>) -> Json<serde_json
             { "active" } else { "stale" },
         })
     });
+    let source_grid_readiness=if bound {s.calibration_grid_binding.and_then(|binding| {
+        let ids:Vec<_>=s.calibration_source_node_ids.iter().copied().collect();
+        legacy_grid_readiness::inspect(&s,&ids,binding,now)
+    })} else {None};
     let mut response = serde_json::json!({
         "active": active,
         "status": status,
@@ -9879,15 +10997,26 @@ async fn calibration_status(State(state): State<SharedState>) -> Json<serde_json
             "numeric_vitals_authorized": false,
         })),
     });
+    response["source_grid_readiness"] = serde_json::json!(source_grid_readiness);
     response["boot_epoch"] = serde_json::json!(s.calibration_boot_epoch);
     response["session_id"] = serde_json::json!(if bound { s.calibration_session_id.clone() } else { None });
     response["binding_digest"] = serde_json::json!(if bound { s.calibration_binding_digest.clone() } else { None });
     response["legacy"] = serde_json::json!(false);
     response["model_id"] = serde_json::json!(if bound { s.calibration_model_id.clone() } else { None });
+    response["restored_from_snapshot"] = serde_json::json!(s.calibration_restored);
+    response["restored_sources_ready"] = serde_json::json!(!s.calibration_restored || s.explicit_calibration_fresh_at(observed_at_unix_ms));
+    if s.calibration_restored {
+        response["frame_count"] = serde_json::json!(s.calibration_model_receipt.as_ref().map_or(0, |r| r.frame_count));
+    }
     response["model_receipt"] = serde_json::json!(if bound { s.calibration_model_receipt.clone() } else { None });
     response["source_node_ids"] = serde_json::json!(if bound { s.calibration_source_node_ids.iter().copied().collect::<Vec<_>>() } else { Vec::new() });
     response["observed_source_node_ids"] = serde_json::json!(if bound { s.calibration_observed_source_node_ids.iter().copied().collect::<Vec<_>>() } else { Vec::new() });
     response["missing_source_node_ids"] = serde_json::json!(if bound { s.calibration_source_node_ids.difference(&s.calibration_observed_source_node_ids).copied().collect::<Vec<_>>() } else { Vec::new() });
+    if !s.privacy_mode {
+        if let Some(shadow) = s.source_bank_shadow.as_ref() {
+            response["source_bank_shadow"] = shadow.diagnostics(observed_at_unix_ms.saturating_mul(1_000));
+        }
+    }
     Json(response)
 }
 
@@ -10142,6 +11271,12 @@ async fn calibration_promote_bootstrap(
             return error_response::internal_error_json("bootstrap baseline store", error)
         }
     };
+    let Some(receipt) = s.calibration_model_receipt.as_ref() else {
+        return error_response::internal_error_json("room calibration receipt", "missing receipt");
+    };
+    if let Err(error) = room_calibration::store(&room_calibration::path_in(&s.data_dir), &installation_id, &stored, receipt) {
+        return error_response::internal_error_json("room calibration store", error);
+    }
     s.bootstrap_baseline = Some(stored.clone());
     info!(
         model_id = %stored.source_model_id,
@@ -10432,6 +11567,9 @@ async fn calibration_cancel(
         }));
     }
     let cancelled_session_id = s.calibration_session_id.clone();
+    if let Err(error) = room_calibration::remove(&s.data_dir) {
+        return error_response::internal_error_json("room calibration removal", error);
+    }
     s.field_model = None;
     s.calibration_model_id = None;
     s.calibration_session_id = None;
@@ -10439,6 +11577,7 @@ async fn calibration_cancel(
     s.calibration_source_node_ids.clear();
     s.calibration_observed_source_node_ids.clear();
     s.calibration_model_receipt = None;
+    s.calibration_restored = false;
     s.clear_field_model_binding();
     s.clear_calibration_sequence_state();
     if let Some(installation_id) = s.installation_id.clone() {
@@ -10489,6 +11628,9 @@ async fn calibration_reset(
     if !boot_only && !calibration_identity_matches(&s, &request) {
         return calibration_identity_error();
     }
+    if let Err(error) = room_calibration::remove(&s.data_dir) {
+        return error_response::internal_error_json("room calibration removal", error);
+    }
     s.field_model = None;
     s.calibration_model_id = None;
     s.calibration_session_id = None;
@@ -10496,6 +11638,7 @@ async fn calibration_reset(
     s.calibration_source_node_ids.clear();
     s.calibration_observed_source_node_ids.clear();
     s.calibration_model_receipt = None;
+    s.calibration_restored = false;
     s.clear_field_model_binding();
     s.clear_calibration_sequence_state();
     s.bootstrap_baseline_active = false;
@@ -10540,33 +11683,80 @@ fn chrono_timestamp() -> u64 {
 
 async fn vital_signs_endpoint(State(state): State<SharedState>) -> Json<serde_json::Value> {
     let s = state.read().await;
-    let observed_at_unix_ms = chrono::Utc::now().timestamp_millis().max(0) as u64;
-    let person_count = s.person_count_at(observed_at_unix_ms);
-    let published = calibrated_vitals_for_publication(
-        &s,
-        &s.latest_vitals,
-        person_count,
-        observed_at_unix_ms,
-    );
-    let (br_len, br_cap, hb_len, hb_cap) = s.vital_detector.buffer_status();
+    if room_learner_api::selection_owns_output(&s) {
+        return Json(serde_json::json!({"vital_signs":{
+            "breathing_rate_bpm":null,"heart_rate_bpm":null,"breathing_confidence":null,
+            "heartbeat_confidence":null,"signal_quality":null},"authority":"abstained",
+            "abstention_reason":"selected_binary_model_has_no_vital_authority","buffer_status":null,
+            "buffer_source_node_id":null,"diagnostics":{"schema":vital_publication::DIAGNOSTICS_SCHEMA,
+            "privacy_redacted":s.privacy_mode,"nodes":[]},"source":s.effective_source(),"tick":s.tick}));
+    }
+    let observed = chrono::Utc::now().timestamp_millis().max(0) as u64;
+    let room_count = current_vital_room_count(&s, std::time::Instant::now());
+    // Candidate, room aggregate, model and diagnostic snapshot share one lock.
+    let selected = s
+        .node_states
+        .iter()
+        .filter_map(|(&id, node)| node.vital_candidate.as_ref().map(|c| (id, c.tick)))
+        .max_by_key(|&(id, tick)| (tick, id))
+        .map(|(id, _)| id);
+    let (published, reason) = selected
+        .map(|id| {
+            let (published, diagnostic) = reevaluate_node_vitals(&s, id, room_count, observed);
+            (published, diagnostic.reason)
+        })
+        .unwrap_or((
+            None,
+            if s.privacy_mode {
+                vital_publication::Reason::PrivacyRedacted
+            } else {
+                vital_publication::Reason::NoCandidate
+            },
+        ));
+    let mut ids: Vec<_> = s.node_states.keys().copied().collect();
+    ids.sort_unstable();
+    // This existing endpoint retains its owner/paired-read/account middleware.
+    // Diagnostics are never added to public health or authority envelopes.
+    let diagnostics: Vec<_> = if s.privacy_mode {
+        vec![]
+    } else {
+        ids.into_iter()
+            .take(256)
+            .map(|id| {
+                let (_, current) = reevaluate_node_vitals(&s, id, room_count, observed);
+                serde_json::json!({"current": current,
+                "last_publication_decision": s.node_states[&id].last_vital_decision})
+            })
+            .collect()
+    };
+    let buffer_source = if s.privacy_mode {
+        None
+    } else {
+        selected.or_else(|| {
+            s.node_states
+                .iter()
+                .max_by_key(|(&id, n)| (n.last_frame_time, id))
+                .map(|(&id, _)| id)
+        })
+    };
+    let buffers = buffer_source.map(|id| {
+        vital_publication::BufferStatus::from(s.node_states[&id].vital_detector.buffer_status())
+    });
     Json(serde_json::json!({
         "vital_signs": {
-            "breathing_rate_bpm": published.as_ref().and_then(|value| value.breathing_rate_bpm),
-            "heart_rate_bpm": published.as_ref().and_then(|value| value.heart_rate_bpm),
-            "breathing_confidence": published.as_ref().map(|value| value.breathing_confidence),
-            "heartbeat_confidence": published.as_ref().map(|value| value.heartbeat_confidence),
-            "signal_quality": published.as_ref().map(|value| value.signal_quality),
+            "breathing_rate_bpm": published.as_ref().and_then(|v| v.breathing_rate_bpm),
+            "heart_rate_bpm": published.as_ref().and_then(|v| v.heart_rate_bpm),
+            "breathing_confidence": published.as_ref().map(|v| v.breathing_confidence),
+            "heartbeat_confidence": published.as_ref().map(|v| v.heartbeat_confidence),
+            "signal_quality": published.as_ref().map(|v| v.signal_quality),
         },
         "authority": if published.is_some() { "explicit_calibration" } else { "abstained" },
-        "abstention_reason": if published.is_some() { serde_json::Value::Null } else { serde_json::json!("fresh explicit calibration with exactly one occupant and qualified evidence required") },
-        "buffer_status": {
-            "breathing_samples": br_len,
-            "breathing_capacity": br_cap,
-            "heartbeat_samples": hb_len,
-            "heartbeat_capacity": hb_cap,
-        },
-        "source": s.effective_source(),
-        "tick": s.tick,
+        "abstention_reason": if published.is_some() { serde_json::Value::Null } else { serde_json::json!(reason) },
+        "buffer_status": buffers,
+        "buffer_source_node_id": buffer_source,
+        "diagnostics": {"schema": vital_publication::DIAGNOSTICS_SCHEMA,
+            "privacy_redacted": s.privacy_mode, "nodes": diagnostics},
+        "source": s.effective_source(), "tick": s.tick,
     }))
 }
 
@@ -10623,6 +11813,10 @@ async fn edge_registry_endpoint(
 /// GET /api/v1/edge-vitals — latest edge vitals from ESP32 (ADR-039).
 async fn edge_vitals_endpoint(State(state): State<SharedState>) -> Json<serde_json::Value> {
     let s = state.read().await;
+    if room_learner_api::selection_owns_output(&s) {
+        return Json(serde_json::json!({"status":"abstained","edge_vitals":null,
+            "message":"The selected binary model does not grant vital-sign authority."}));
+    }
     let observed_at_unix_ms = chrono::Utc::now().timestamp_millis().max(0) as u64;
     let explicit_single_occupant = s.explicit_calibration_fresh_at(observed_at_unix_ms)
         && s.person_count_at(observed_at_unix_ms) == 1;
@@ -11758,11 +12952,14 @@ fn mediatek_room_update(
         classification,
         // No spatial field: this heuristic has no per-subcarrier or
         // multi-antenna geometry to place a heat map from.
+        classification_source: None,
+        selected_binary_evidence: None,
         signal_field: SignalField {
             grid_size: [0, 0, 0],
             values: vec![],
         },
         vital_signs: None,
+        vital_evidence: None,
         calibrated_presence_evidence: None,
         detector_diagnostics: None,
         enhanced_motion: None,
@@ -12401,13 +13598,14 @@ async fn udp_receiver_task(
                                     .observe(now, mean_amp as f64, peak_amp as f64);
                                 s.tick += 1;
                                 let tick = s.tick;
-                                let update = mediatek_room_update(
+                                let mut update = mediatek_room_update(
                                     &mut s,
                                     now,
                                     ESP32_OFFLINE_TIMEOUT,
                                     tick,
                                     source_label,
                                 );
+                                room_learner_api::project_live_selection(&s, &mut update);
                                 if let Ok(json) = serde_json::to_string(&update) {
                                     let _ = s.tx.send(json);
                                 }
@@ -12648,11 +13846,11 @@ async fn udp_receiver_task(
                     };
                     let explicit_calibration_fresh =
                         s.explicit_calibration_fresh_at(observed_at_unix_ms);
-                    let published_vitals = calibrated_vitals_for_publication(
-                        &s,
-                        &vital_candidates,
-                        total_persons,
-                        observed_at_unix_ms,
+                    let (published_vitals, vital_evidence) = record_node_vital_decision(
+                        &mut s, node_id, vital_publication::NodeVitalCandidate {
+                            kind: vital_publication::CandidateKind::FirmwareEdge,
+                            tick, observed_at_unix_ms, received_at: now, rates: vital_candidates, calibration_identity: None,
+                        }, total_persons,
                     );
 
                     // Keep the legacy edge_vitals stream aligned with the
@@ -12666,25 +13864,30 @@ async fn udp_receiver_task(
                         explicit_calibration_fresh,
                         total_persons,
                     );
-                    if let Ok(json) = serde_json::to_string(&edge_vitals_message) {
-                        let _ = s.tx.send(json);
+                    if !room_learner_api::selection_owns_output(&s) {
+                        if let Ok(json) = serde_json::to_string(&edge_vitals_message) {
+                            let _ = s.tx.send(json);
+                        }
                     }
 
                     let calibrated_presence_evidence = s.calibrated_presence_evidence(
                         node_id,
                         tick,
-                        chrono::Utc::now().timestamp_millis().max(0) as u64,
+                        observed_at_unix_ms,
                     );
                     let mut update = SensingUpdate {
                         msg_type: "sensing_update".to_string(),
-                        timestamp: chrono::Utc::now().timestamp_millis() as f64 / 1000.0,
+                        timestamp: observed_at_unix_ms as f64 / 1000.0,
                         source: "esp32".to_string(),
                         tick,
                         nodes: active_nodes,
                         features: fused_features.clone(),
                         classification,
+                        classification_source: None,
+                        selected_binary_evidence: None,
                         signal_field,
                         vital_signs: published_vitals,
+                        vital_evidence,
                         detector_diagnostics: calibrated_presence_evidence.as_ref().and_then(|e| e.diagnostics.clone()),
                         calibrated_presence_evidence,
                         enhanced_motion: None,
@@ -12727,6 +13930,7 @@ async fn udp_receiver_task(
                     attach_field_positions(&mut update);
                     assess_legacy_image_pose(&mut s, &update);
 
+                    room_learner_api::project_live_selection(&s, &mut update);
                     if let Ok(json) = serde_json::to_string(&update) {
                         let _ = s.tx.send(json);
                     }
@@ -12843,6 +14047,7 @@ async fn udp_receiver_task(
                         .entry(frame.node_id)
                         .or_insert_with(NodeState::new)
                         .observe_raw_grid(grid_key, observed_at);
+                    room_learner_api::observe(&mut s, &frame, &buf[..len], observed_at);
 
                     // The field model owns a separate, frozen grid path. Feed
                     // it before the global inference grid gate so a stable
@@ -12996,6 +14201,7 @@ async fn udp_receiver_task(
                     if ns.csi_fps_samples >= 5
                         && ns.vital_detector.reconfigure_sample_rate(sample_rate_hz)
                     {
+                        ns.vital_sample_rate_resets = ns.vital_sample_rate_resets.saturating_add(1);
                         // Never smooth estimates computed against two clocks.
                         ns.smoothed_hr = 0.0;
                         ns.smoothed_br = 0.0;
@@ -13149,21 +14355,21 @@ async fn udp_receiver_task(
                         now,
                         observed_at_unix_ms,
                     );
-                    let published_vitals = calibrated_vitals_for_publication(
-                        &s,
-                        &vitals,
-                        total_persons,
-                        observed_at_unix_ms,
+                    let (published_vitals, vital_evidence) = record_node_vital_decision(
+                        &mut s, node_id, vital_publication::NodeVitalCandidate {
+                            kind: vital_publication::CandidateKind::RawCsiSpectral,
+                            tick, observed_at_unix_ms, received_at: now, rates: vitals, calibration_identity: None,
+                        }, total_persons,
                     );
 
                     let calibrated_presence_evidence = s.calibrated_presence_evidence(
                         node_id,
                         tick,
-                        chrono::Utc::now().timestamp_millis().max(0) as u64,
+                        observed_at_unix_ms,
                     );
                     let mut update = SensingUpdate {
                         msg_type: "sensing_update".to_string(),
-                        timestamp: chrono::Utc::now().timestamp_millis() as f64 / 1000.0,
+                        timestamp: observed_at_unix_ms as f64 / 1000.0,
                         source: "esp32".to_string(),
                         tick,
                         nodes: active_nodes,
@@ -13173,6 +14379,8 @@ async fn udp_receiver_task(
                         // The count uses this same room presence gate; only
                         // `motion_score` remains local to the arriving packet.
                         classification: room_classification,
+                        classification_source: None,
+                        selected_binary_evidence: None,
                         signal_field: generate_signal_field(
                             fused_features.mean_rssi,
                             motion_score,
@@ -13181,6 +14389,7 @@ async fn udp_receiver_task(
                             &sub_variances,
                         ),
                         vital_signs: published_vitals,
+                        vital_evidence,
                         detector_diagnostics: calibrated_presence_evidence.as_ref().and_then(|e| e.diagnostics.clone()),
                         calibrated_presence_evidence,
                         enhanced_motion: None,
@@ -13223,6 +14432,7 @@ async fn udp_receiver_task(
                     attach_field_positions(&mut update);
                     assess_legacy_image_pose(&mut s, &update);
 
+                    room_learner_api::project_live_selection(&s, &mut update);
                     if let Ok(json) = serde_json::to_string(&update) {
                         let _ = s.tx.send(json);
                     }
@@ -13413,6 +14623,8 @@ async fn simulated_data_task(state: SharedState, tick_ms: u64) {
             }],
             features: features.clone(),
             classification,
+            classification_source: None,
+            selected_binary_evidence: None,
             signal_field: generate_signal_field(
                 features.mean_rssi,
                 motion_score,
@@ -13421,6 +14633,7 @@ async fn simulated_data_task(state: SharedState, tick_ms: u64) {
                 &sub_variances,
             ),
             vital_signs: None,
+            vital_evidence: None,
             calibrated_presence_evidence: None,
             detector_diagnostics: None,
             enhanced_motion: None,
@@ -13472,6 +14685,7 @@ async fn simulated_data_task(state: SharedState, tick_ms: u64) {
         if update.classification.presence {
             s.total_detections += 1;
         }
+        room_learner_api::project_live_selection(&s, &mut update);
         if let Ok(json) = serde_json::to_string(&update) {
             let _ = s.tx.send(json);
         }
@@ -13484,26 +14698,19 @@ async fn simulated_data_task(state: SharedState, tick_ms: u64) {
 
 async fn broadcast_tick_task(state: SharedState, tick_ms: u64) {
     let mut interval = tokio::time::interval(Duration::from_millis(tick_ms));
-
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut previous_source = None;
     loop {
         interval.tick().await;
         let s = state.read().await;
-        if let Some(ref update) = s.latest_update {
-            if s.tx.receiver_count() > 0 {
-                // Re-broadcast the latest sensing_update so pose WS clients
-                // always get data even when ESP32 pauses between frames.
-                //
-                // Issue #618: overwrite `source` with `effective_source()`
-                // before each broadcast so a stale latest_update (frozen
-                // payload from a now-offline ESP32) is emitted with
-                // `source: "esp32:offline"` instead of `source: "esp32"`.
-                // The REST `/health` endpoint already does this; before
-                // this fix the WS path was the only consumer that didn't,
-                // so the UI's "LIVE — ESP32 HARDWARE Connected" banner
-                // stayed green long after the hardware went away.
-                let mut tagged = update.clone();
-                tagged.source = s.effective_source();
-                if let Ok(json) = serde_json::to_string(&tagged) {
+        let source = s.effective_source();
+        let changed = previous_source.as_ref().is_some_and(|previous| previous != &source);
+        previous_source = Some(source);
+        // Producers publish observations directly. Only announce source-state
+        // transitions here; WebSocket Ping provides keepalive without cached CSI.
+        if changed && s.tx.receiver_count() > 0 {
+            if let Some(snapshot) = current_sensing_snapshot(&s) {
+                if let Ok(json) = serde_json::to_string(&snapshot) {
                     let _ = s.tx.send(json);
                 }
             }
@@ -13800,6 +15007,26 @@ async fn main() {
     let _telemetry = telemetry::init();
 
     let mut args = Args::parse();
+    let (_parent_lifetime_guard, parent_exit) =
+        match wifi_densepose_sensing_server::parent_lifetime::arm(args.parent_pid) {
+            Ok(lifetime) => lifetime,
+            Err(error) => {
+                eprintln!("Managed helper startup refused: {error}");
+                std::process::exit(2);
+            }
+        };
+    if let Ok(scope) = std::env::var(wifi_densepose_sensing_server::bearer_auth::OWNER_ACCOUNT_SCOPE_ENV) {
+        let directory = match wifi_densepose_sensing_server::account_profile::prepare_directory(&scope, &args.data_dir) {
+            Ok(directory) => directory,
+            Err(error) => { eprintln!("Owned helper startup refused: {error}"); std::process::exit(2); },
+        };
+        // Child-process cwd only: relative model, recording and cache paths
+        // must not reopen a different account's directory or the app's cwd.
+        if let Err(error) = std::env::set_current_dir(&directory) {
+            eprintln!("Owned helper working directory could not be selected: {error}"); std::process::exit(2);
+        }
+        args.data_dir = directory;
+    }
     args.ui_path = coalesce_ui_path(args.ui_path);
 
     if let Err(error) = validate_startup_calibration_request(args.calibrate) {
@@ -14542,6 +15769,14 @@ async fn main() {
                         {
                             (None, None, false)
                         }
+                        Err(bootstrap_baseline::BootstrapBaselineError::Expired) => {
+                            let metadata = bootstrap_baseline::load_expired_metadata(
+                                &path, installation_id, chrono::Utc::now().timestamp_millis().max(0) as u64,
+                            ).ok();
+                            // Keep original timestamps for honest status only.
+                            // No FieldModel, active prior or authority is restored.
+                            (None, metadata, false)
+                        }
                         Err(error) => {
                             warn!(%error, "Ignored invalid empty room bootstrap prior");
                             (None, None, false)
@@ -14591,65 +15826,6 @@ async fn main() {
         );
     }
 
-    // #872: actually start the MQTT publisher when `--mqtt` is set. The publisher
-    // (mqtt::) consumes a typed VitalsSnapshot stream; we bridge the existing JSON
-    // sensing broadcast into it with a defensive serde_json::Value mapping (absent
-    // fields default — never publish wrong values). Gated on the `mqtt` feature
-    // (the Docker image is built `--features mqtt`); without it `--mqtt` WARNs and
-    // no-ops, matching the documented contract.
-    if args.mqtt_opts.mqtt {
-        #[cfg(feature = "mqtt")]
-        {
-            use wifi_densepose_sensing_server::mqtt;
-            let mut mcfg = mqtt::config::MqttConfig::from_args_with_data_dir(
-                &args.mqtt_opts,
-                &data_dir,
-            );
-            mcfg.privacy_mode = args.privacy_mode;
-            let mcfg = std::sync::Arc::new(mcfg);
-            match mcfg.validate() {
-                Ok(()) => {
-                    let node_id = mcfg.client_id.clone();
-                    let builder = mqtt::publisher::OwnedDiscoveryBuilder {
-                        discovery_prefix: mcfg.discovery_prefix.clone(),
-                        node_id: node_id.clone(),
-                        node_friendly_name: Some("RuView".to_string()),
-                        sw_version: env!("CARGO_PKG_VERSION").to_string(),
-                        model: "RuView WiFi Sensing".to_string(),
-                        via_device: None,
-                    };
-                    let (vtx, vrx) = broadcast::channel::<mqtt::state::VitalsSnapshot>(64);
-                    let (host, port) = (mcfg.host.clone(), mcfg.port);
-                    mqtt::publisher::spawn(mcfg, builder, vrx);
-                    let mut jrx = tx.subscribe();
-                    tokio::spawn(async move {
-                        // #898/#872/#2085: one snapshot per physical node from
-                        // each `sensing_update`; `edge_vitals` feeds the fall
-                        // detector; other message types are ignored.
-                        let mut bridge = mqtt::bridge::SensingBridge::new(node_id);
-                        let started = std::time::Instant::now();
-                        while let Ok(json) = jrx.recv().await {
-                            let Ok(v) = serde_json::from_str::<serde_json::Value>(&json) else {
-                                continue;
-                            };
-                            for snap in bridge.ingest(&v, started.elapsed()) {
-                                let _ = vtx.send(snap);
-                            }
-                        }
-                    });
-                    tracing::info!("MQTT publisher started -> {host}:{port}");
-                }
-                Err(e) => tracing::error!("MQTT config invalid: {e}; publisher not started"),
-            }
-        }
-        #[cfg(not(feature = "mqtt"))]
-        tracing::warn!(
-            "--mqtt set but this binary was built without the `mqtt` feature; the publisher is a \
-             no-op. Use the official Docker image (built `--features mqtt`) or rebuild with \
-             `cargo build -p wifi-densepose-sensing-server --features mqtt`."
-        );
-    }
-
     // ADR-262 P3: build the live RuField surface (dedicated ed25519 signer from
     // WDP_RUFIELD_SIGNING_SEED, else a logged dev default). The same Arc is
     // stored in AppStateInner (so the sensing loop can `emit()` per cycle) and
@@ -14673,6 +15849,19 @@ async fn main() {
         .as_ref()
         .map(|p| mediatek_activity::load_activity_state(p))
         .unwrap_or_default();
+    let room_learning = if args.room_learner {
+        let owner = std::env::var(wifi_densepose_sensing_server::bearer_auth::OWNER_ACCOUNT_SCOPE_ENV).unwrap_or_default();
+        let installation = args.installation_id.as_deref().unwrap_or("");
+        let recovery = wifi_densepose_sensing_server::room_learner::recovery_store::RecoveryStore::from_managed_env(&args.data_dir, &owner, installation);
+        let runtime = match recovery {
+            Ok(store) => wifi_densepose_sensing_server::room_learner::lifecycle::RoomLearningRuntime::new_with_recovery(&args.data_dir, &owner, installation, store),
+            Err(reason) => wifi_densepose_sensing_server::room_learner::lifecycle::RoomLearningRuntime::new_with_recovery_unavailable(&args.data_dir, &owner, installation, reason),
+        };
+        match runtime {
+            Ok(runtime) => Some(Arc::new(runtime)),
+            Err(error) => { error!("Managed room learner could not initialize: {error}"); std::process::exit(2); }
+        }
+    } else { None };
     let state: SharedState = Arc::new(RwLock::new(AppStateInner {
         latest_update: None,
         rssi_history: VecDeque::new(),
@@ -14825,6 +16014,11 @@ async fn main() {
         )
         .with_node_positions(engine_bridge_node_positions),
         field_model: bootstrap_field_model,
+        source_bank_shadow_enabled: args.source_bank_shadow,
+        source_bank_shadow: None,
+        room_learning,
+        room_learning_sources: HashMap::new(),
+        current_room_store: None,
         installation_id: args.installation_id.clone(),
         bootstrap_baseline: bootstrap_metadata.clone(),
         bootstrap_baseline_active,
@@ -14838,6 +16032,7 @@ async fn main() {
             .unwrap_or_default(),
         calibration_observed_source_node_ids: std::collections::BTreeSet::new(),
         calibration_model_receipt: None,
+        calibration_restored: false,
         calibration_grid_binding: bootstrap_metadata.as_ref().and_then(|metadata| {
             let [source_node_id] = metadata.source_node_ids.as_slice() else {
                 return None;
@@ -14865,6 +16060,90 @@ async fn main() {
         )
         .expect("default pose physics configuration is valid"),
     }));
+
+    // #872: actually start the MQTT publisher when `--mqtt` is set. The publisher
+    // (mqtt::) consumes a typed VitalsSnapshot stream; we bridge the existing JSON
+    // sensing broadcast into it with a defensive serde_json::Value mapping (absent
+    // fields default — never publish wrong values). Gated on the `mqtt` feature
+    // (the Docker image is built `--features mqtt`); without it `--mqtt` WARNs and
+    // no-ops, matching the documented contract.
+    // Selected models have no MQTT authority in this version. This admission
+    // guard does not retract a snapshot already queued inside the publisher or
+    // a broker-retained legacy value; known nodes retain the existing 10-second
+    // stale threshold / 30-second availability heartbeat. Managed native helpers do
+    // not enable MQTT. Network-time withdrawal needs a separate sink contract.
+    if args.mqtt_opts.mqtt {
+        #[cfg(feature = "mqtt")]
+        {
+            use wifi_densepose_sensing_server::mqtt;
+            let mut mcfg = mqtt::config::MqttConfig::from_args_with_data_dir(
+                &args.mqtt_opts,
+                &data_dir,
+            );
+            mcfg.privacy_mode = args.privacy_mode;
+            let mcfg = std::sync::Arc::new(mcfg);
+            match mcfg.validate() {
+                Ok(()) => {
+                    let node_id = mcfg.client_id.clone();
+                    let builder = mqtt::publisher::OwnedDiscoveryBuilder {
+                        discovery_prefix: mcfg.discovery_prefix.clone(),
+                        node_id: node_id.clone(),
+                        node_friendly_name: Some("RuView".to_string()),
+                        sw_version: env!("CARGO_PKG_VERSION").to_string(),
+                        model: "RuView WiFi Sensing".to_string(),
+                        via_device: None,
+                    };
+                    let (vtx, vrx) = broadcast::channel::<mqtt::state::VitalsSnapshot>(64);
+                    let (host, port) = (mcfg.host.clone(), mcfg.port);
+                    mqtt::publisher::spawn(mcfg, builder, vrx);
+                    let mut jrx = state.read().await.tx.subscribe();
+                    let mqtt_state = Arc::downgrade(&state);
+                    tokio::spawn(async move {
+                        // #898/#872/#2085: one snapshot per physical node from
+                        // each `sensing_update`; `edge_vitals` feeds the fall
+                        // detector; other message types are ignored.
+                        let mut bridge = mqtt::bridge::SensingBridge::new(node_id.clone());
+                        let started = std::time::Instant::now();
+                        while let Ok(json) = jrx.recv().await {
+                            let Ok(v) = serde_json::from_str::<serde_json::Value>(&json) else {
+                                continue;
+                            };
+                            let Some(live_state) = mqtt_state.upgrade() else { break; };
+                            let current = live_state.read().await;
+                            if !room_learner_api::legacy_sink_frame_allowed(
+                                room_learner_api::selection_owns_output(&current), &v,
+                            ) {
+                                // Do not replay pending legacy fall/motion state when
+                                // the operator later explicitly returns to control.
+                                bridge = mqtt::bridge::SensingBridge::new(node_id.clone());
+                                continue;
+                            }
+                            for snap in bridge.ingest(&v, started.elapsed()) {
+                                let _ = vtx.send(snap);
+                            }
+                        }
+                    });
+                    tracing::info!("MQTT publisher started -> {host}:{port}");
+                }
+                Err(e) => tracing::error!("MQTT config invalid: {e}; publisher not started"),
+            }
+        }
+        #[cfg(not(feature = "mqtt"))]
+        tracing::warn!(
+            "--mqtt set but this binary was built without the `mqtt` feature; the publisher is a \
+             no-op. Use the official Docker image (built `--features mqtt`) or rebuild with \
+             `cargo build -p wifi-densepose-sensing-server --features mqtt`."
+        );
+    }
+
+    {
+        let mut s = state.write().await;
+        match s.restore_saved_room() {
+            Ok(true) => info!("Restored saved room model; waiting for fresh current-boot source windows"),
+            Ok(false) => {},
+            Err(error) => warn!(%error, "Ignored invalid full-room receipt; retaining bootstrap-only authority"),
+        }
+    }
 
     // Start background tasks from the resolved plan (issue #1004).
     //
@@ -14978,8 +16257,8 @@ async fn main() {
             Ok(s) => s,
             Err(e) => {
                 error!(
-                    "API auth: OAuth was requested but cannot be initialised: {e}. \
-                     Refusing to start — unset RUVIEW_OAUTH_ISSUER to run without it."
+                    "API auth could not be initialised: {e}. Correct the configuration before restarting; \
+                     an owned helper profile must remain account-bound."
                 );
                 std::process::exit(1);
             }
@@ -15030,6 +16309,9 @@ async fn main() {
         }
     }
 
+    let companion = companion_integration::Integration::prepare(&args, &state, bearer_auth_state.clone()).await
+        .unwrap_or_else(|error| { error!("Companion startup refused: {error}"); std::process::exit(1) });
+
     // DNS-rebinding defense: validate the `Host` header against an allowlist
     // before any handler runs. Default is loopback-only (`localhost`,
     // `127.0.0.1`, `[::1]`, each with or without a port). Operators extend
@@ -15043,16 +16325,10 @@ async fn main() {
         );
         wifi_densepose_sensing_server::host_validation::HostAllowlist::disabled()
     } else {
-        let discovery_label = args.installation_id.as_deref().unwrap_or("installation");
-        let discovery_host =
-            wifi_densepose_sensing_server::discovery::discovery_hostname(discovery_label);
-        let allowlist =
-            wifi_densepose_sensing_server::host_validation::HostAllowlist::from_cli_and_env(
-                args.allowed_hosts
-                    .iter()
-                    .cloned()
-                    .chain(std::iter::once(discovery_host)),
-            );
+        let allowlist = companion_integration::host_allowlist(
+            &args,
+            companion.as_ref().map(companion_integration::Integration::authority),
+        );
         info!(
             "Host-header validation ON ({} entries; loopback names always included)",
             allowlist.entries_for_test().len()
@@ -15103,7 +16379,7 @@ async fn main() {
 
     // HTTP server (serves UI + full DensePose-compatible REST API)
     let ui_path = args.ui_path.clone();
-    let http_app = Router::new()
+    let mut http_app = Router::new()
         .route("/", get(info_page))
         // Health endpoints (DensePose-compatible)
         .route("/health", get(health))
@@ -15144,6 +16420,7 @@ async fn main() {
         .route("/api/v1/rf/vendors/:vendor/events", post(ingest_vendor_events))
         // Per-node health endpoint
         .route("/api/v1/nodes", get(nodes_endpoint))
+        .route("/api/v1/worldgraph/snapshot", get(managed_worldgraph::snapshot))
         // ADR-110 iter 29 — per-node mesh sync state for HTTP clients.
         .route("/api/v1/nodes/:id/sync", get(node_sync_endpoint))
         .route("/api/v1/mesh", get(mesh_endpoint))
@@ -15235,7 +16512,23 @@ async fn main() {
         )
         .route("/api/v1/calibration/cancel", post(calibration_cancel))
         .route("/api/v1/calibration/status", get(calibration_status))
+        // Mutations remain behind the existing default-admin bearer policy.
+        .route("/api/v1/room-learner/status", get(room_learner_api::status))
+        .route("/api/v1/room-learner/selection", get(room_learner_api::selection))
+        .route("/api/v1/room-learner/progress", get(room_learner_api::progress))
+        .merge(room_learner_api::owner_selection_routes(bearer_auth_state.clone()))
+        .route("/api/v1/room-learner/configure", post(room_learner_api::configure))
+        .route("/api/v1/room-learner/phase/start", post(room_learner_api::begin_phase))
+        .route("/api/v1/room-learner/phase/finish", post(room_learner_api::finish_phase))
+        .route("/api/v1/room-learner/phase/cancel", post(room_learner_api::cancel_phase))
+        .route("/api/v1/room-learner/train", post(room_learner_api::train))
+        .route("/api/v1/room-learner/train/cancel", post(room_learner_api::cancel_training))
+        .route("/api/v1/room-learner/evaluate", post(room_learner_api::evaluate))
+        .route("/api/v1/room-learner/prediction", get(room_learner_api::prediction))
+        .route("/api/v1/room-learner/recovery/restore", post(room_learner_api::restore_capture))
+        .route("/api/v1/room-learner/recovery/discard", post(room_learner_api::discard_capture))
         .route("/api/v1/calibration/reset", post(calibration_reset))
+        .route("/api/v1/calibration/bootstrap/recover", post(calibration_recover_bootstrap))
         // ADR-044 §5.3: runtime-configurable dedup factor
         .route(
             "/api/v1/config/dedup-factor",
@@ -15262,6 +16555,9 @@ async fn main() {
         // Merged AFTER `.with_state` (so http_app is already `Router<()>` and
         // can absorb the field router's own `FieldState`).
         .merge(rufield_surface::router(field_surface.clone()))
+        // MAT REST and WebSocket share one incident state on the HTTP origin
+        // used by the app, inside privacy/auth/host and companion protection.
+        .merge(wifi_densepose_sensing_server::mat_surface::router(args.privacy_mode))
         // #2094: strip biometrics from every JSON response in privacy mode
         // (no-op otherwise). Applied after the merge so it covers every route.
         .layer(axum::middleware::from_fn_with_state(
@@ -15291,6 +16587,13 @@ async fn main() {
             host_allowlist.clone(),
             wifi_densepose_sensing_server::host_validation::require_allowed_host,
         ));
+
+    if let Some(companion) = companion {
+        let owner_router = companion.owner_router();
+        http_app = companion.protect_control(http_app);
+        companion.start(http_app.clone()).await;
+        http_app = http_app.merge(owner_router);
+    }
 
     let http_addr = SocketAddr::from((bind_ip, args.http_port));
     let http_listener = tokio::net::TcpListener::bind(http_addr)
@@ -15330,10 +16633,13 @@ async fn main() {
 
     // Run the HTTP server with graceful shutdown support
     let shutdown_state = state.clone();
-    let server = axum::serve(http_listener, http_app).with_graceful_shutdown(async {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("failed to install CTRL+C handler");
+    let server = axum::serve(http_listener, http_app.into_make_service_with_connect_info::<SocketAddr>()).with_graceful_shutdown(async move {
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => result.expect("failed to install CTRL+C handler"),
+            () = wifi_densepose_sensing_server::parent_lifetime::wait_for_exit(parent_exit) => {
+                info!("Managed parent ended; closing helper listeners");
+            }
+        }
         info!("Shutdown signal received");
     });
 
@@ -16124,8 +17430,11 @@ mod observatory_persons_field_position_tests {
                 presence,
                 confidence: 0.8,
             },
+            classification_source: None,
+            selected_binary_evidence: None,
             signal_field,
             vital_signs: None,
+            vital_evidence: None,
             calibrated_presence_evidence: None,
             detector_diagnostics: None,
             enhanced_motion: None,
@@ -16436,7 +17745,7 @@ async fn oauth_callback(
         Err(e) => return bad(axum::http::StatusCode::UNAUTHORIZED, format!("{e}\n")),
     };
 
-    let session_cookie = match bs::issue(&principal, secure) {
+    let session_cookie = match bs::issue_for_account(&principal, secure, auth.owner_account_scope()) {
         Ok(c) => c,
         Err(e) => return bad(axum::http::StatusCode::SERVICE_UNAVAILABLE, format!("{e}\n")),
     };
@@ -16494,19 +17803,10 @@ async fn oauth_status(
     axum::Extension(auth): axum::Extension<wifi_densepose_sensing_server::bearer_auth::AuthState>,
     headers: axum::http::HeaderMap,
 ) -> axum::Json<serde_json::Value> {
-    use wifi_densepose_sensing_server::browser_session as bs;
     let raw = headers
         .get(axum::http::header::COOKIE)
         .and_then(|v| v.to_str().ok());
-    let session = raw.and_then(bs::from_cookie_header);
-    axum::Json(serde_json::json!({
-        "auth_required": auth.is_enabled(),
-        "oauth_enabled": auth.oauth_enabled(),
-        "browser_signin": auth.oauth_enabled() && bs::is_configured(),
-        "signed_in": session.is_some(),
-        "account": session.as_ref().map(|s| s.account_id.clone()),
-        "scope": session.as_ref().map(|s| s.scope.clone()),
-    }))
+    axum::Json(wifi_densepose_sensing_server::bearer_auth::browser_status(&auth, raw))
 }
 #[cfg(test)]
 mod adr186_http_tests {
@@ -16956,3 +18256,195 @@ mod issue_2088_data_dir_tests {
         assert!(!models_dir.join("dd_model_2088.rvf").exists());
     }
 }
+
+
+#[cfg(test)]
+mod investigation_vitals_endpoint_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn investigation_vitals_rest_buffers_follow_active_esp32_detector() {
+        let mut state = AppStateInner::minimal();
+        state.source = "esp32".to_string();
+        state.last_esp32_frame = Some(std::time::Instant::now());
+        let mut node = NodeState::new();
+        for _ in 0..12 {
+            node.vital_detector.process_frame(&[10.0, 11.0, 12.0, 13.0], &[0.0, 0.1, 0.2, 0.3]);
+        }
+        let (expected, _, expected_heart, _) = node.vital_detector.buffer_status();
+        assert_eq!(expected, 12);
+        state.node_states.insert(15, node);
+        let Json(body) = vital_signs_endpoint(State(Arc::new(RwLock::new(state)))).await;
+        println!("INVESTIGATION: ESP32 node15 has {} breathing/{} heartbeat samples; endpoint reports {} / {}", expected, expected_heart, body["buffer_status"]["breathing_samples"], body["buffer_status"]["heartbeat_samples"]);
+        assert_eq!(body["buffer_status"]["breathing_samples"], serde_json::json!(expected), "REST diagnostic must describe the detector populated by the active ESP32 path");
+    }
+
+    #[test]
+    fn investigation_vitals_regular_bursts_do_not_continuously_reset_buffers() {
+        let mut detector = VitalSignDetector::new(20.0);
+        let mut fps = 20.0;
+        let mut resets = 0;
+        for index in 0..300 {
+            let dt = [0.001, 0.001, 0.094][index % 3];
+            fps = update_csi_fps_ema(fps, dt).unwrap().clamp(1.0, 50.0);
+            if index >= 5 && detector.reconfigure_sample_rate(fps) { resets += 1; }
+            detector.process_frame(&[10.0, 11.0, 12.0, 13.0], &[0.0, 0.1, 0.2, 0.3]);
+        }
+        let buffers = detector.buffer_status();
+        println!("INVESTIGATION: synthetic31.25Hz3-packet bursts: resets={} buffers={:?} detector_rate={}", resets, buffers, detector.sample_rate_hz());
+        assert!(resets < 6);
+        assert!(buffers.0 > 40 && buffers.2 > 30);
+    }
+}
+
+#[cfg(test)]
+mod cached_stream_freshness_tests {
+    use super::*;
+
+    fn fixture() -> AppStateInner {
+        let mut state = AppStateInner::minimal();
+        state.source = "esp32".into();
+        state.last_esp32_frame = Some(std::time::Instant::now());
+        state.latest_update = Some(serde_json::from_value(serde_json::json!({
+            "type":"sensing_update", "tick":9,
+            "timestamp":chrono::Utc::now().timestamp_millis() as f64 / 1000.0,
+            "source":"esp32", "nodes":[],
+            "features":{"mean_rssi":-50.0,"variance":1.0,"motion_band_power":0.5,
+                "breathing_band_power":0.2,"dominant_freq_hz":0.25,"change_points":0,"spectral_power":1.0},
+            "classification":{"motion_level":"present_still","presence":true,"confidence":0.9},
+            "signal_field":{"grid_size":[1,1,1],"values":[0.0]},
+            "vital_signs":{"breathing_rate_bpm":14.0,"heart_rate_bpm":62.0,
+                "breathing_confidence":0.8,"heartbeat_confidence":0.7,"signal_quality":0.9},
+            "pose_keypoints":[[0.1,0.2,0.0,0.9]]
+        })).unwrap());
+        state
+    }
+
+    #[test]
+    fn cached_snapshot_retains_observation_identity_and_ages_node_metadata() {
+        let mut state = fixture();
+        let old = std::time::Instant::now() - Duration::from_secs(6);
+        state.last_esp32_frame = Some(old);
+        let mut node = NodeState::new();
+        node.last_frame_time = Some(old);
+        state.node_states.insert(7, node);
+        let previous = serde_json::to_string(state.latest_update.as_ref().unwrap()).unwrap();
+        let snapshot = current_sensing_snapshot(&state).unwrap();
+        let original = state.latest_update.as_ref().unwrap();
+        assert_eq!(snapshot.tick, original.tick);
+        assert_eq!(snapshot.timestamp, original.timestamp);
+        assert_eq!(snapshot.source, "esp32:offline");
+        assert!(snapshot.classification.presence, "history must not become a fabricated absence");
+        assert!(snapshot.vital_signs.is_none());
+        assert!(snapshot.pose_keypoints.is_none());
+        let node = &snapshot.node_features.as_ref().unwrap()[0];
+        assert!(node.stale);
+        assert!(node.last_seen_ms >= 6000);
+        assert_eq!(serde_json::to_string(original).unwrap(), previous, "snapshot must not rewrite stored observations");
+    }
+
+    #[tokio::test]
+    async fn cached_snapshots_use_each_clients_filter_and_protocol_keepalive() {
+        use futures_util::StreamExt;
+        for privacy in [false, true] {
+            let mut inner = fixture();
+            inner.privacy_mode = privacy;
+            let state = Arc::new(RwLock::new(inner));
+            let app = Router::new()
+                .route("/ws/sensing", get(ws_sensing_handler))
+                .route("/api/v1/stream/pose", get(ws_pose_handler))
+                .with_state(state);
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+            for (path, kind) in [("/ws/sensing", "sensing_update"), ("/api/v1/stream/pose", "pose_data")] {
+                let (mut socket, _) = tokio_tungstenite::connect_async(format!("ws://{address}{path}")).await.unwrap();
+                let mut snapshot = None;
+                let mut ping = false;
+                for _ in 0..4 {
+                    let message = tokio::time::timeout(Duration::from_secs(1), socket.next()).await.unwrap().unwrap().unwrap();
+                    match message {
+                        tokio_tungstenite::tungstenite::Message::Ping(_) => ping = true,
+                        tokio_tungstenite::tungstenite::Message::Text(text) => {
+                            let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+                            if value["type"] == kind { snapshot = Some(text); }
+                        }
+                        _ => {}
+                    }
+                    if snapshot.is_some() && ping { break; }
+                }
+                assert!(ping, "{path} needs keepalive independent of sensor snapshots");
+                let snapshot = snapshot.expect("initial snapshot without timer or producer");
+                if privacy {
+                    assert!(!snapshot.contains("vital_signs"));
+                    assert!(!snapshot.contains("keypoints"));
+                } else if kind == "sensing_update" {
+                    assert!(snapshot.contains("heart_rate_bpm"));
+                }
+                socket.close(None).await.unwrap();
+            }
+            server.abort(); let _ = server.await;
+        }
+    }
+
+    #[tokio::test]
+    async fn offline_legacy_snapshot_abstains_instead_of_deriving_a_pose_or_absence() {
+        use futures_util::StreamExt;
+        for model_loaded in [false, true] {
+            let mut inner = fixture();
+            inner.model_loaded = model_loaded;
+            inner.last_esp32_frame = Some(std::time::Instant::now() - Duration::from_secs(6));
+            let original_timestamp = inner.latest_update.as_ref().unwrap().timestamp;
+            let app = Router::new().route("/pose", get(ws_pose_handler))
+                .with_state(Arc::new(RwLock::new(inner)));
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+            let (mut socket, _) = tokio_tungstenite::connect_async(format!("ws://{address}/pose")).await.unwrap();
+            let value = loop {
+                let message = tokio::time::timeout(Duration::from_secs(1), socket.next()).await.unwrap().unwrap().unwrap();
+                if let tokio_tungstenite::tungstenite::Message::Text(text) = message {
+                    let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+                    if value["type"] == "pose_data" { break value; }
+                }
+            };
+            assert_eq!(value["timestamp"], original_timestamp);
+            assert_eq!(value["payload"]["pose_source"], "unavailable");
+            assert_eq!(value["payload"]["activity"], "unavailable");
+            assert!(value["payload"]["confidence"].is_null());
+            assert!(value["payload"]["metadata"]["estimated_persons"].is_null());
+            assert_eq!(value["payload"]["metadata"]["source"], "esp32:offline");
+            assert_eq!(value["payload"]["pose"]["persons"], serde_json::json!([]));
+            assert!(value["physics"].is_null());
+            socket.close(None).await.unwrap();
+            server.abort(); let _ = server.await;
+        }
+    }
+
+    #[tokio::test]
+    async fn timer_emits_only_source_transitions_and_remains_quiet_between_them() {
+        let state = Arc::new(RwLock::new(fixture()));
+        let mut rx = state.read().await.tx.subscribe();
+        let task = tokio::spawn(broadcast_tick_task(state.clone(), 2));
+        tokio::time::sleep(Duration::from_millis(15)).await;
+        assert!(matches!(rx.try_recv(), Err(tokio::sync::broadcast::error::TryRecvError::Empty)));
+        state.write().await.last_esp32_frame = Some(std::time::Instant::now() - Duration::from_secs(6));
+        let offline = tokio::time::timeout(Duration::from_secs(1), rx.recv()).await.unwrap().unwrap();
+        let offline: SensingUpdate = serde_json::from_str(&offline).unwrap();
+        assert_eq!(offline.source, "esp32:offline");
+        assert_eq!(offline.tick, 9);
+        tokio::time::sleep(Duration::from_millis(15)).await;
+        assert!(matches!(rx.try_recv(), Err(tokio::sync::broadcast::error::TryRecvError::Empty)));
+        state.write().await.last_esp32_frame = Some(std::time::Instant::now());
+        let resumed = tokio::time::timeout(Duration::from_secs(1), rx.recv()).await.unwrap().unwrap();
+        assert_eq!(serde_json::from_str::<SensingUpdate>(&resumed).unwrap().source, "esp32");
+        task.abort();
+        let _ = task.await;
+    }
+}
+#[cfg(test)]
+#[path="legacy_grid_readiness_tests.rs"]
+mod legacy_grid_readiness_tests;
+
+#[path="legacy_grid_readiness.rs"]
+mod legacy_grid_readiness;

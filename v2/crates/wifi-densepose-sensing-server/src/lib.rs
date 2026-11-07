@@ -10,6 +10,7 @@
 
 pub mod bearer_auth;
 pub mod bootstrap_baseline;
+pub mod room_calibration;
 pub mod browser_session;
 pub mod ws_ticket;
 pub mod cli;
@@ -24,9 +25,12 @@ pub mod http_bind;
 pub mod inference;
 pub mod introspection;
 pub mod matter;
+/// Existing MAT incident API, hosted under the sensing server's security layers.
+pub mod mat_surface;
 pub mod model_format;
 pub mod mqtt;
 pub mod path_safety;
+pub mod parent_lifetime;
 /// ADR-323: fail-closed pose physics integration and raw/refined view selection.
 pub mod pose_physics;
 /// #2094: server-wide `--privacy-mode` filter for REST, WebSocket and recordings.
@@ -69,3 +73,12 @@ pub mod vendor_rf;
 // `crate::sona`) and public API (`wifi_densepose_sensing_server::embedding`, …)
 // are unchanged.
 pub use wifi_densepose_aether::{embedding, graph_transformer, sona, sparse_inference};
+
+pub mod companion;
+pub mod account_profile;
+pub mod companion_tls;
+
+pub mod companion_sensors;
+
+/// Account-bound multi-source room learning and managed lifecycle.
+pub mod room_learner;

@@ -203,7 +203,24 @@ const WS_PATHS: &[&str] = &["/ws/sensing", "/ws/introspection", "/api/v1/stream/
 /// protected `/api/v1/*` by prefix. `/ws/field` was gated in this PR and its
 /// REST twin, one path segment over, returned 200 to an anonymous caller on
 /// both listeners. That is why the gate is now deny-by-default.
-const PROTECTED_REST_PATHS: &[&str] = &["/api/field", "/api/v1/models"];
+const PROTECTED_REST_PATHS: &[&str] = &["/api/field", "/api/v1/models", "/api/v1/vital-signs"];
+
+#[test]
+fn actual_vital_diagnostics_require_the_existing_bearer_boundary() {
+    let server = Server::start(&[("RUVIEW_API_TOKEN", TOKEN)]);
+    assert_eq!(status(server.http, "GET", "/api/v1/vital-signs", &[]), 401);
+    let mut connection = TcpStream::connect(("127.0.0.1", server.http)).unwrap();
+    connection.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    write!(connection, "GET /api/v1/vital-signs HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nAuthorization: Bearer {}\r\nConnection: close\r\n\r\n", server.http, TOKEN).unwrap();
+    let mut response = String::new();
+    connection.read_to_string(&mut response).unwrap();
+    assert!(response.starts_with("HTTP/1.1 200"));
+    let (_, body) = response.split_once("\r\n\r\n").unwrap();
+    let body: serde_json::Value = serde_json::from_str(body).unwrap();
+    assert_eq!(body["diagnostics"]["schema"], "ruview.vital-publication-diagnostics.v1");
+    assert_eq!(body["authority"], "abstained");
+    assert!(body["vital_signs"]["heart_rate_bpm"].is_null());
+}
 
 #[test]
 fn with_auth_on_no_listener_serves_sensing_data_anonymously() {

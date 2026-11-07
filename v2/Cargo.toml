@@ -3,7 +3,7 @@ resolver = "2"
 members = [
     # Checksum-verified dependency patches; keep their upstream tests in CI.
     "vendor/security/zip-0.6.6",
-    "vendor/security/wasmtime-internal-cache-36.0.19",
+    "vendor/security/wasmtime-internal-cache-36.0.20",
     "crates/wifi-densepose-core",
     "crates/wifi-densepose-physics", # ADR-323 bounded pose assessment/correction
     "crates/wifi-densepose-signal",
@@ -146,6 +146,9 @@ members = [
 # excluded for the same reason. Build separately:
 #   cargo build --target wasm32-unknown-unknown --release -p homecore-plugin-example
 exclude = [
+    # ZIP registry archives omit large upstream unit fixtures; run its dedicated
+    # self-contained security regression target explicitly in CI.
+    "vendor/security/zip-7.2.0",
     "crates/wifi-densepose-wasm-edge",
     "crates/homecore-plugin-example",
     # ADR-368: napi-rs transport for ruview-kernel. Own workspace so napi never
@@ -238,7 +241,7 @@ pcap = "1.1"
 petgraph = "0.6"
 
 # Data loading
-ndarray-npy = "0.10"
+ndarray-npy = { version = "0.10", default-features = false, features = ["num-complex-0_4"] }
 walkdir = "2.4"
 
 # Hashing (for proof)
@@ -275,8 +278,8 @@ wiremock = "0.5"
 # The transitive security floors live in Cargo.lock, which the gating
 # Security Scanning job audits: quinn-proto >=0.11.18
 # (RUSTSEC-2026-0338/0339/0340/0341/0342), rustls >=0.23.46
-# (RUSTSEC-2026-0346/0347/0348/0349) and wasmtime >=36.0.19
-# (RUSTSEC-2026-0363/0379/0380). A plain `cargo update` can walk them backwards;
+# (RUSTSEC-2026-0346/0347/0348/0349) and wasmtime >=36.0.20
+# (RUSTSEC-2026-0363/0379/0380/0424). A plain `cargo update` can walk them backwards;
 # keep the lockfile at or above these until the direct requirements
 # enforce them.
 #
@@ -345,5 +348,6 @@ debug = true
 # unchanged; both parents use the fixed zstd 0.14.3 implementation.
 # See each directory's RUVIEW-PROVENANCE.md for archive digests and scope.
 [patch.crates-io]
+zip-current = { package = "zip", path = "vendor/security/zip-7.2.0" }
 zip-legacy = { package = "zip", path = "vendor/security/zip-0.6.6" }
-wasmtime-internal-cache = { path = "vendor/security/wasmtime-internal-cache-36.0.19" }
+wasmtime-internal-cache = { path = "vendor/security/wasmtime-internal-cache-36.0.20" }
