@@ -89,7 +89,7 @@
     "ssh"
   ],
   "peerDependencies": {
-    "@ruvnet/ruview-kernel": ">=0.1.0"
+    "@ruvnet/ruview-kernel": "^0.1.0"
   },
   "peerDependenciesMeta": {
     "@ruvnet/ruview-kernel": {

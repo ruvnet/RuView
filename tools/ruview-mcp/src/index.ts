@@ -43,8 +43,8 @@ import {
   ErrorCode,
 } from "@modelcontextprotocol/sdk/types.js";
 import type { z } from "zod";
-import { zodToJsonSchema } from "zod-to-json-schema";
 
+import { zodInputJsonSchema } from "./json-schema.js";
 import { loadConfig } from "./config.js";
 import { csiLatestSchema, csiLatest } from "./tools/csi-latest.js";
 import { poseInferSchema, poseInfer } from "./tools/pose-infer.js";
@@ -238,11 +238,7 @@ const jsonSchemaCache = new Map<string, object>();
 export function toolInputJsonSchema(def: ToolDef): object {
   const cached = jsonSchemaCache.get(def.name);
   if (cached !== undefined) return cached;
-  const raw = zodToJsonSchema(def.schema, { $refStrategy: "none" }) as Record<
-    string,
-    unknown
-  >;
-  delete raw["$schema"];
+  const raw = zodInputJsonSchema(def.schema);
   jsonSchemaCache.set(def.name, raw);
   return raw;
 }
