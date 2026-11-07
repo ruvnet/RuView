@@ -92,68 +92,116 @@ fn c4a_fresh_genesis_is_preparing_until_actual_ack_in_same_store_and_raw_read_ca
 }
 #[test]
 fn c4a_new_full_run_reuses_actual_native_train_writer_without_changing_model_input_identity() {
-    let directory = tempfile::tempdir().unwrap();
-    let rt = fixture::runtime(directory.path(), fixture::START);
-    rt.configure_temporal_full_run(
-        &rt.mutation_guard().unwrap(),
-        fixture::context(),
-        "synthetic-c4a-window".into(),
-        fixture::START,
-    )
-    .unwrap();
-    let mut now = fixture::settle_async_boundary(&rt, fixture::START);
-    let original = fixture::snapshot(&rt, now)["descriptor"].clone();
-    now = fixture::async_lead_end(&rt, now);
-    let mut sequence = 0;
-    let end = now + 3_000_000_000;
-    while now <= end {
-        sequence += 1;
-        for source in 1..=3 {
-            rt.ingest_native(&fixture::packet(source, sequence, now), now)
-                .unwrap();
-        }
-        now += fixture::PERIOD;
-        if fixture::snapshot(&rt, now)["durability_pending"] == true {
-            std::thread::sleep(Duration::from_nanos(fixture::PERIOD));
-        } else {
-            std::thread::sleep(Duration::from_micros(500));
-        }
+    struct ReleaseOnDrop(std::sync::mpsc::Sender<()>);
+    impl Drop for ReleaseOnDrop {
+        fn drop(&mut self) { let _ = self.0.send(()); }
     }
-    let pending = fixture::snapshot(&rt, now)["durability_pending"] == true;
-    if pending {
+    // Isolated synthetic stores: the old quiet tail must fail the unchanged
+    // source-custody guard; continued input must survive the same delayed ACK.
+    for quiet_tail in [true, false] {
+        let directory = tempfile::tempdir().unwrap();
+        let rt = fixture::runtime(directory.path(), fixture::START);
+        rt.configure_temporal_full_run(
+            &rt.mutation_guard().unwrap(),
+            fixture::context(),
+            "synthetic-c4a-window".into(),
+            fixture::START,
+        )
+        .unwrap();
+        let mut now = fixture::settle_async_boundary(&rt, fixture::START);
+        let original = fixture::snapshot(&rt, now)["descriptor"].clone();
+        now = fixture::async_lead_end(&rt, now);
+        let mut sequence = 0;
+        // Admit the actual empty segment before holding the first WINDOW write.
+        rt.tick_temporal_capture(&rt.mutation_guard().unwrap(), now).unwrap();
+        now = fixture::settle_observing_with_sources(&rt, now, &mut sequence, Duration::from_secs(30));
+        let writer = {
+            let state = rt.inner.lock().unwrap();
+            let Some(CaptureWorkflow::Temporal(capture)) = &state.capture else { panic!() };
+            capture.core.as_ref().unwrap().writer().unwrap()
+        };
+        let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(1);
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        writer.hold_next(entered_tx, release_rx);
+        let release_on_unwind = ReleaseOnDrop(release_tx.clone());
+        let end = now + 3_000_000_000;
+        while now <= end {
+            sequence += 1;
+            for source in 1..=3 {
+                rt.ingest_native(&fixture::packet(source, sequence, now), now)
+                    .unwrap();
+            }
+            now += fixture::PERIOD;
+            if fixture::snapshot(&rt, now)["durability_pending"] == true {
+                std::thread::sleep(Duration::from_nanos(fixture::PERIOD));
+            } else {
+                std::thread::sleep(Duration::from_micros(500));
+            }
+        }
+        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(fixture::snapshot(&rt, now)["durability_pending"], true);
+        assert_eq!(fixture::snapshot(&rt, now)["retained_rows"], 1);
+        assert_eq!(fixture::snapshot(&rt, now)["durable_windows"], 0);
+        // Keep the actual WINDOW writer blocked for 150ms AFTER the old tail
+        // stopped feeding. A hold measured from row submission misses this seam.
+        if quiet_tail {
+            let wait = Instant::now();
+            std::thread::sleep(Duration::from_millis(80));
+            let error = rt.tick_temporal_capture(
+                &rt.mutation_guard().unwrap(), now + wait.elapsed().as_nanos() as u64,
+            ).unwrap_err();
+            assert_eq!(error, "temporal_missing_segment_source");
+            assert_eq!(fixture::snapshot(&rt, now)["durable_windows"], 0);
+            // Release only AFTER the negative observation; scheduler delay
+            // cannot let a valid ACK arrive before its zero-durable assertion.
+            drop(release_on_unwind);
+            rt.cancel_temporal_durability(&rt.mutation_guard().unwrap()).unwrap();
+            continue;
+        }
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(150));
+            let _ = release_tx.send(());
+        });
+        // Observing requires fresh canonical source packets even while storage
+        // is pending. The supervision bound is test-only, not a receiver budget.
+        now = fixture::settle_observing_with_sources(&rt, now, &mut sequence, Duration::from_secs(30));
+        release.join().unwrap();
+        drop(release_on_unwind);
+        assert_eq!(fixture::snapshot(&rt, now)["stage"], "observing");
+        rt.pause_temporal_capture(&rt.mutation_guard().unwrap(), now).unwrap();
         now = fixture::settle_async_boundary(&rt, now);
-    }
-    assert!(
-        fixture::snapshot(&rt, now)["durable_windows"]
-            .as_u64()
+        assert!(
+            fixture::snapshot(&rt, now)["durable_windows"]
+                .as_u64()
+                .unwrap()
+                >= 1
+        );
+        let loaded = rt
+            .temporal_store()
             .unwrap()
-            >= 1
-    );
-    let loaded = rt
-        .temporal_store()
-        .unwrap()
-        .load_temporal(now)
-        .unwrap()
-        .unwrap();
-    let prefix = loaded.prefix.unwrap();
-    assert_eq!(prefix.metadata_kind(), "temporal-prefix-commitment-v2");
-    assert_eq!(prefix.transition_limit(), 433);
-    assert_eq!(
-        fixture::snapshot(&rt, now)["descriptor"]["id"],
-        original["id"]
-    );
-    assert_eq!(
-        fixture::snapshot(&rt, now)["descriptor"]["expires_at_ms"],
-        original["expires_at_ms"]
-    );
-    let data: serde_json::Value = serde_json::from_slice(prefix.bytes()).unwrap();
-    let policy = &data["payload"]["policy"]["body"];
-    assert_ne!(
-        policy["input_policy_sha256"], data["payload"]["policy"]["sha256"],
-        "continuation identity must not replace model input identity"
-    );
-    rt.cancel_temporal_durability(&rt.mutation_guard().unwrap())
-        .unwrap();
+            .load_temporal(now)
+            .unwrap()
+            .unwrap();
+        let prefix = loaded.prefix.unwrap();
+        assert_eq!(prefix.metadata_kind(), "temporal-prefix-commitment-v2");
+        assert_eq!(prefix.transition_limit(), 433);
+        assert_eq!(
+            fixture::snapshot(&rt, now)["descriptor"]["id"],
+            original["id"]
+        );
+        assert_eq!(
+            fixture::snapshot(&rt, now)["descriptor"]["expires_at_ms"],
+            original["expires_at_ms"]
+        );
+        let data: serde_json::Value = serde_json::from_slice(prefix.bytes()).unwrap();
+        let policy = &data["payload"]["policy"]["body"];
+        assert_ne!(
+            policy["input_policy_sha256"], data["payload"]["policy"]["sha256"],
+            "continuation identity must not replace model input identity"
+        );
+        rt.cancel_temporal_durability(&rt.mutation_guard().unwrap())
+            .unwrap();
+    }
 }
 #[test]
 fn c4a_full_run_rejects_unsupported_source_profile_before_genesis_write() {

@@ -756,13 +756,13 @@ fn c2_real_publish_lost_ack_repairs_same_intent_to_paused_without_new_run_or_dea
     rt.cancel_temporal_durability(&rt.mutation_guard().unwrap()).unwrap();
 }
 
-fn settle_observing_with_sources(rt:&RoomLearningRuntime,after:u64,seq:&mut u32)->u64{
+pub(super) fn settle_observing_with_sources(rt:&RoomLearningRuntime,after:u64,seq:&mut u32,timeout:std::time::Duration)->u64{
     let wait=std::time::Instant::now();let mut now=after;
     loop {
         *seq+=1;
         for source in 1..=3 {rt.ingest_native(&packet(source,*seq,now),now).unwrap();}
         if snapshot(rt,now)["durability_pending"]==false {return now+PERIOD;}
-        assert!(wait.elapsed()<std::time::Duration::from_secs(5));
+        assert!(wait.elapsed()<timeout);
         now+=PERIOD;std::thread::sleep(std::time::Duration::from_nanos(PERIOD));
     }
 }
@@ -773,7 +773,7 @@ fn c2_first_native_window_crash_boundaries_restore_only_real_committed_prefix(){
         let dir=tempfile::tempdir().unwrap();let(rt,at)=configured_async(dir.path());let end=async_lead_end(&rt,at);
         rt.tick_temporal_capture(&rt.mutation_guard().unwrap(),end).unwrap();
         let mut seq=0;
-        let observed=settle_observing_with_sources(&rt,end,&mut seq);
+        let observed=settle_observing_with_sources(&rt,end,&mut seq,std::time::Duration::from_secs(5));
         let original=snapshot(&rt,observed)["descriptor"].clone();
         let writer={let state=rt.inner.lock().unwrap();let Some(CaptureWorkflow::Temporal(c))=&state.capture else{panic!()};c.core.as_ref().unwrap().writer().unwrap()};
         let(entered_tx,entered_rx)=mpsc::sync_channel(1);let(release_tx,release_rx)=mpsc::sync_channel(1);
@@ -813,7 +813,7 @@ fn c2_storage_busy_pauses_at_next_retained_target_with_one_completed_window_and_
     use std::{sync::mpsc,time::Duration};
     let dir=tempfile::tempdir().unwrap();let(rt,at)=configured_async(dir.path());let rt=std::sync::Arc::new(rt);let reclamation=install_reclaim_probe(&rt);let end=async_lead_end(&rt,at);
     rt.tick_temporal_capture(&rt.mutation_guard().unwrap(),end).unwrap();let mut seq=0;
-    let observed=settle_observing_with_sources(&rt,end,&mut seq);
+    let observed=settle_observing_with_sources(&rt,end,&mut seq,std::time::Duration::from_secs(5));
     let writer={let state=rt.inner.lock().unwrap();let Some(CaptureWorkflow::Temporal(c))=&state.capture else{panic!()};c.core.as_ref().unwrap().writer().unwrap()};
     let(entered_tx,entered_rx)=mpsc::sync_channel(1);let(release_tx,release_rx)=mpsc::sync_channel(1);writer.hold_next(entered_tx,release_rx);
     let mut now=observed;let busy;
