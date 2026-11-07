@@ -17,6 +17,31 @@ class ClassificationTests(unittest.TestCase):
         component=[('fixture',None,['module::one'],[('module::',False,2)])]
         result=profiles.validate(component,{'module::one','module::two'},set(),'release-run');self.assertEqual(len(result),1);self.assertEqual(result[0]['names'],['module::one','module::two'])
 
+
+class C4BClassificationTests(unittest.TestCase):
+    def component(self):return [('C4B',None,profiles.C4B,[(profiles.C4B_PREFIX,False,11)])]
+    def test_exact_eleven_release_is_one_batch_with_fixture_cache(self):
+        batches=profiles.validate(self.component(),set(profiles.C4B_ALL),set(),'release-run');self.assertEqual(len(batches),1);self.assertEqual(len(batches[0]['names']),11);self.assertFalse(batches[0]['exact'])
+    def test_debug_keeps_seven_small_active_and_four_heavy_transparent(self):
+        batches=profiles.validate(self.component(),set(profiles.C4B_ALL),set(profiles.C4B),'debug-check');self.assertEqual(len(batches[0]['names']),11);self.assertEqual(len(set(profiles.C4B_ALL)-set(profiles.C4B)),7)
+    def test_missing_heavy_never_counts_as_coverage(self):
+        with self.assertRaises(ValueError):profiles.validate(self.component(),set(profiles.C4B_ALL)-{profiles.C4B[0]},set(),'release-run')
+    def test_extra_unclassified_test_requires_review(self):
+        with self.assertRaises(ValueError):profiles.validate(self.component(),set(profiles.C4B_ALL)|{profiles.C4B_PREFIX+'unexpected'},set(),'release-run')
+    def test_fourth_heavy_must_not_run_in_debug(self):
+        with self.assertRaises(ValueError):profiles.validate(self.component(),set(profiles.C4B_ALL),set(profiles.C4B[:-1]),'debug-check')
+    def test_small_controls_cannot_be_hidden_in_debug(self):
+        small=next(n for n in profiles.C4B_ALL if n not in profiles.C4B)
+        with self.assertRaises(ValueError):profiles.validate(self.component(),set(profiles.C4B_ALL),set(profiles.C4B)|{small},'debug-check')
+    def test_no_ignored_or_opt_in_release_selection(self):
+        with self.assertRaises(ValueError):profiles.validate(self.component(),set(profiles.C4B_ALL),{profiles.C4B[0]},'release-run')
+    def test_zero_tests_and_missing_source_marker_fail_closed(self):
+        import tempfile
+        with self.assertRaises(ValueError):profiles.validate(self.component(),set(),set(),'release-run')
+        with tempfile.TemporaryDirectory() as d:
+            root=pathlib.Path(d);p=root/'v2/crates/wifi-densepose-sensing-server/src/room_learner/lifecycle_temporal_tests.rs';p.parent.mkdir(parents=True);p.write_text('// synthetic marker only')
+            with self.assertRaises(ValueError):profiles.policy(root)
+
 class CargoExecutableCustodyTests(unittest.TestCase):
     def setUp(self):
         import tempfile, copy

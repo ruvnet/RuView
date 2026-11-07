@@ -1031,6 +1031,8 @@ impl AssemblerCheckpoint {
     }
 }
 impl NativeWindowAssembler {
+    #[cfg(test)]
+    pub(crate) fn c4b_test_fence_counts(&self)->(usize,usize,usize,bool,bool){(self.next,self.frames.len(),self.watermarks.len(),self.failed,self.active.is_some())}
     pub(crate) fn fence_checkpoint(&self) -> Result<AssemblerCheckpoint, String> {
         if self.failed {
             return Err("temporal_failed_fences".into());
@@ -1059,13 +1061,19 @@ impl NativeWindowAssembler {
         s: AssemblerCheckpoint,
         expected_next: usize,
     ) -> Result<(), String> {
-        let max = self
-            .policy
-            .sources
-            .iter()
-            .map(|s| s.max_rows)
-            .sum::<usize>()
-            * 128;
+        let max = self.policy.sources.iter().map(|s|s.max_rows).sum::<usize>()*128;
+        self.restore_prefix_fences_with_limit(s,expected_next,max)
+    }
+    /// Only the separately validated canonical Full2 contract may select its
+    /// derived replay bookkeeping bound. Historical callers keep the old API.
+    pub(crate) fn restore_full_run_prefix_fences(
+        &mut self,s:AssemblerCheckpoint,expected_next:usize,
+        budget:&crate::room_learner::temporal_model_input::managed::execution::full_run::ReplayFenceBudget,
+    )->Result<(),String>{
+        budget.matches_native_policy(&self.policy)?;
+        self.restore_prefix_fences_with_limit(s,expected_next,budget.max_frames())
+    }
+    fn restore_prefix_fences_with_limit(&mut self,s:AssemblerCheckpoint,expected_next:usize,max:usize)->Result<(),String>{
         if s.next != expected_next
             || s.next > 128
             || s.frames.len() > max

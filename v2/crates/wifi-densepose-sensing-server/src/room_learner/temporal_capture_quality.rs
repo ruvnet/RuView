@@ -7,6 +7,24 @@ use crate::room_learner::temporal_acquisition::WindowInputPolicy;
 use serde_json::{json, Value};
 
 pub(super) const BRIDGE_POLICY: &str = "native-receiver-whole-train-period-v1;all-selected-packets;existing-cadence-gap-arrival-skew;confirmed-durable-seals;no-fit-authority";
+// Explicit NEW Train genesis only. The generic constructor and old literal
+// remain historical329; restore never upgrades a stored generation.
+pub(super) const FRESH_TRAIN_343_POLICY:&str="native-receiver-whole-train-period-v2;all-selected-packets;existing-cadence-gap-arrival-skew;confirmed-durable-seals;train-budget343;no-fit-authority";
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub(super) enum TrainBudgetProfile { Historical329, FreshTrain343 }
+impl TrainBudgetProfile {
+    pub(super) fn from_stored(policy:&str)->Result<Self,String>{match policy{
+        BRIDGE_POLICY=>Ok(Self::Historical329),FRESH_TRAIN_343_POLICY=>Ok(Self::FreshTrain343),
+        _=>Err("temporal_train_profile_unknown".into()),
+    }}
+    pub(super) fn policy(self)->&'static str{match self{Self::Historical329=>BRIDGE_POLICY,Self::FreshTrain343=>FRESH_TRAIN_343_POLICY}}
+    pub(super) fn transition_limit(self,schedule:&ManagedScheduleContract)->Result<usize,String>{
+        let episodes=schedule.counts().train_episodes;
+        let old=schedule.counts().train_windows.checked_add(2*128).and_then(|n|n.checked_add(episodes)).and_then(|n|n.checked_add(2)).ok_or("temporal_transition_capacity")?;
+        match self{Self::Historical329=>Ok(old),Self::FreshTrain343=>old.checked_add(2*episodes).ok_or("temporal_transition_capacity".into())}
+    }
+}
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum Disposition {
@@ -162,9 +180,9 @@ pub(super) struct TrainSeal {
     pub(super) sha256: String,
 }
 impl TrainSeal {
-    fn digest(&self) -> Result<String, String> {
+    fn digest(&self,profile:TrainBudgetProfile) -> Result<String, String> {
         hash(&(
-            BRIDGE_POLICY,
+            profile.policy(),
             self.episode,
             &self.trial_id,
             &self.context_sha256,
@@ -194,6 +212,10 @@ impl BridgeState {
             parts: vec![],
         }
     }
+    pub(super) fn fresh_train_343()->Self{
+        Self{policy:FRESH_TRAIN_343_POLICY.into(),..Self::new()}
+    }
+    pub(super) fn profile(&self)->Result<TrainBudgetProfile,String>{TrainBudgetProfile::from_stored(&self.policy)}
     pub(super) fn validate(
         &self,
         schedule: &ManagedScheduleContract,
@@ -205,13 +227,24 @@ impl BridgeState {
         mapping: Option<&ObservedSegmentMap>,
         now: u64,
     ) -> Result<(), String> {
+        self.validate_with_prefixes(schedule,run,rows,evidence,ledger,episode,mapping,now,None)
+    }
+    pub(super) fn validate_full_run_with_prefixes(
+        &self,schedule:&ManagedScheduleContract,run:&str,rows:&[CaptureCohort],evidence:&[WindowEvidence],ledger:&Ledger,episode:usize,mapping:Option<&ObservedSegmentMap>,now:u64,digests:&prefix_digests::CanonicalPrefixDigests,
+    )->Result<(),String>{
+        if self.policy!=BRIDGE_POLICY{return Err("temporal_full_run_train_profile_changed".into());}
+        self.validate_with_prefixes(schedule,run,rows,evidence,ledger,episode,mapping,now,Some(digests))
+    }
+    fn validate_with_prefixes(
+        &self,schedule:&ManagedScheduleContract,run:&str,rows:&[CaptureCohort],evidence:&[WindowEvidence],ledger:&Ledger,episode:usize,mapping:Option<&ObservedSegmentMap>,now:u64,digests:Option<&prefix_digests::CanonicalPrefixDigests>,
+    )->Result<(),String>{
         let train = schedule
             .episodes()
             .iter()
             .take_while(|e| e.role == DataRole::Train)
             .count();
-        if self.policy != BRIDGE_POLICY
-            || self.seals.len() > train
+        let profile=self.profile()?;
+        if self.seals.len() > train
             || episode != self.seals.len()
             || episode > train
             || self.parts.len() > 128
@@ -234,10 +267,12 @@ impl BridgeState {
                 || s.confirmed_at_ns < last_confirm
                 || s.confirmed_at_ns > now
                 || s.previous_sha256 != previous
-                || s.sha256 != s.digest()?
+                || s.sha256 != s.digest(profile)?
                 || s.quality_sha256 != hash(&s.parts)?
-                || s.row_prefix_sha256
-                    != hash(&(&rows[..count], &evidence[..count], &ledger.spans[..count]))?
+                || s.row_prefix_sha256 != match digests{
+                    Some(digests)=>digests.at(count)?.to_owned(),
+                    None=>hash(&(&rows[..count], &evidence[..count], &ledger.spans[..count]))?,
+                }
             {
                 return Err("temporal_train_seal_binding".into());
             }
@@ -306,7 +341,7 @@ impl BridgeState {
         Ok(())
     }
 }
-fn validate_part_lineage(
+pub(super) fn validate_part_lineage(
     parts: &[QualityPart],
     episode: usize,
     ledger: &Ledger,
@@ -376,13 +411,20 @@ fn validate_parts(
     complete: Option<u64>,
     now: u64,
 ) -> Result<(), String> {
+    validate_parts_with_frozen(parts,schedule,run,episode,complete,now,None)
+}
+pub(super) fn validate_parts_with_frozen(
+    parts:&[QualityPart],schedule:&ManagedScheduleContract,run:&str,episode:usize,
+    complete:Option<u64>,now:u64,
+    frozen:Option<&crate::room_learner::managed_schedule_contract::FrozenModelIdentity>,
+)->Result<(),String>{
     let native = schedule.native_window_policy();
     let mut frontier = 0;
     let mut ordinal = None;
     let mut receiver_end = 0;
     for p in parts {
         let bound =
-            schedule.bind_episode_start(run, episode, 0, p.mapping.segment_ordinal, None)?;
+            schedule.bind_episode_start(run, episode, 0, p.mapping.segment_ordinal, frozen)?;
         if p.mapping.session_id != bound.session_id()
             || (ordinal.is_none() && p.mapping.segment_ordinal != 0)
             || p.mapping.observed_start_ns != frontier
@@ -414,6 +456,7 @@ pub(crate) enum TemporalCaptureStage {
     NeedsConfirmation,
     Complete,
     Frozen,
+    FullComplete,
     Paused,
     Blocked,
     Failed,
@@ -427,6 +470,7 @@ impl TemporalCaptureStage {
             Self::NeedsConfirmation => "needs_confirmation",
             Self::Complete => "complete",
             Self::Frozen => "frozen",
+            Self::FullComplete => "full_complete",
             Self::Paused => "paused",
             Self::Blocked => "blocked",
             Self::Failed => "failed",
@@ -443,10 +487,19 @@ pub(crate) struct TemporalTrainCapture {
 }
 impl TemporalTrainCapture {
     #[cfg(test)]
+    pub(crate) fn c4b_test_abort_contract(&self)->Result<(),String>{self.workflow.require_abortable_contract()}
+    #[cfg(test)]
+    pub(crate) fn c4b_test_custody(&self)->(usize,usize,bool,(usize,usize,usize,bool,bool)){(self.workflow.session.rows.len(),self.workflow.ledger.spans.len(),self.workflow.session.active,self.workflow.session.assembler.c4b_test_fence_counts())}
+    #[cfg(test)]
+    pub(crate) fn c4b_test_replay_budget(&self)->Result<full_run::ReplayFenceBudget,String>{self.workflow.full_run.as_ref().ok_or("temporal_full_run_required")?.policy.replay_fence_budget(&self.workflow.session.managed.as_ref().unwrap().binding)}
+    #[cfg(test)]
+    pub(crate) fn c4b_test_target(&self)->Option<(u64,u64)>{self.workflow.pending_window.as_ref().map(|w|(w.target_ns(),w.end_ns()))}
+    #[cfg(test)]
     pub(crate) fn test_full_run_floors(&self)->(Vec<(u8,u64,u64)>,Option<u64>){
         (self.workflow.source_high.clone(),self.workflow.full_run.as_ref().and_then(|m|m.local_start_not_before_ns))
     }
     pub(crate) fn is_full_run(&self)->bool{self.workflow.full_run.is_some()}
+    pub(crate) fn current_context_matches(&self,context:&CaptureContext)->bool{self.workflow.context()==context}
     pub(crate) fn verified_frozen_model(&self)->Option<std::sync::Arc<TemporalModel>>{if self.failure.is_some(){return None;}self.workflow.full_run.as_ref().and_then(|m|m.verified_model())}
     pub(crate) fn request_frozen(&mut self,accepted:crate::room_learner::lifecycle::AcceptedTemporalFit,witness:crate::room_learner::lifecycle::FrozenOwnerWitness,store:std::sync::Arc<crate::room_learner::artifact::ArtifactStore>,now:u64)->Result<(),String>{
         self.ensure_live()?;
@@ -507,6 +560,23 @@ impl TemporalTrainCapture {
             w.persist_initial(store)
         })
     }
+    /// Explicit NEW Train genesis only. Existing generic/old constructors and
+    /// cold restore retain their stored profile; C4 never inherits this choice.
+    pub(crate) fn prepare_async_fresh_train_343(
+        schedule:ManagedScheduleContract,run:String,config:FitConfig,now:u64,
+        store:std::sync::Arc<RecoveryStore>,
+    )->Result<(Self,Option<String>),String>{
+        let predecessor=store.fresh_train_genesis_predecessor(now)?;
+        let mut workflow=TemporalWorkflow::prepare(schedule,run,config,now)?;
+        let schedule=workflow.schedule()?;
+        workflow.bridge=Some(BridgeState::fresh_train_343());
+        workflow.commit_token=predecessor;
+        let writer=std::sync::Arc::new(durability::Writer::new(store.clone(),now)?);
+        workflow.async_state=Some(durability::AsyncState::new(writer));
+        let error=workflow.persist_initial(&store).err();
+        if error.is_some(){workflow.stage=Stage::BlockedDurability;}
+        Ok((Self{workflow,schedule,failure:None,durable_seals:0},error))
+    }
     pub(crate) fn async_start(&mut self,now:u64)->Result<bool,String>{
         self.ensure_live()?;
         if self.workflow.async_state.is_none(){return Ok(false);}
@@ -522,14 +592,17 @@ impl TemporalTrainCapture {
             }
         };
         if let Some(state)=&self.workflow.async_state{self.durable_seals=state.accepted_seals;}
+        if start.is_some(){self.workflow.prepare_complete_from_actual_seal_ack(now)?;}
         Ok(start)
     }
     pub(crate) fn enable_async_restore(&mut self,store:std::sync::Arc<RecoveryStore>,now:u64)->Result<(),String>{
         if self.workflow.async_state.is_some(){return Err("temporal_writer_already_present".into());}
         let mut state=durability::AsyncState::new(std::sync::Arc::new(durability::Writer::new(store,now)?));
         state.seed_restored(&self.workflow)?;
-        self.workflow.async_state=Some(state);Ok(())
+        self.workflow.async_state=Some(state);
+        self.workflow.prepare_complete_from_actual_seal_ack(now)?;Ok(())
     }
+    pub(crate) fn current_lead_in_ns(&self)->Result<u64,String>{self.schedule.episodes().get(self.workflow.episode).ok_or("temporal_capture_complete")?.lead_in_ms.checked_mul(1_000_000).ok_or("temporal_time_overflow".into())}
     pub(crate) fn writer(&self)->Option<std::sync::Arc<durability::Writer>>{
         self.workflow.async_state.as_ref().map(|a|a.writer.clone())
     }
@@ -603,7 +676,7 @@ impl TemporalTrainCapture {
         // future HeldOut stage. This admits only the existing replay/clock
         // fence update below: never another row, seal, model or role credit.
         let full_run_continuation_fence = self.is_full_run()
-            && matches!(self.stage(), TemporalCaptureStage::Complete | TemporalCaptureStage::Frozen);
+            && matches!(self.stage(), TemporalCaptureStage::Complete | TemporalCaptureStage::Frozen | TemporalCaptureStage::FullComplete);
         if !matches!(
             self.stage(),
             TemporalCaptureStage::Ready | TemporalCaptureStage::Paused | TemporalCaptureStage::Preparing | TemporalCaptureStage::Blocked
@@ -654,8 +727,9 @@ impl TemporalTrainCapture {
         if w.stage == Stage::BlockedDurability {
             return TemporalCaptureStage::Blocked;
         }
-        if w.full_run.as_ref().is_some_and(|m|m.is_frozen()){return TemporalCaptureStage::Frozen;}
-        if w.bridge
+        if w.full_run.as_ref().is_some_and(|m|m.is_complete()){return TemporalCaptureStage::FullComplete;}
+        if w.full_run.as_ref().is_some_and(|m|m.is_frozen()&&m.held_out.is_none()){return TemporalCaptureStage::Frozen;}
+        if w.full_run.as_ref().is_none_or(|m|m.held_out.is_none()) && w.bridge
             .as_ref()
             .is_some_and(|b| b.disposition == Disposition::Complete)
         {
@@ -677,23 +751,18 @@ impl TemporalTrainCapture {
         let w = &self.workflow;
         let schedule = &self.schedule;
         let e = schedule.episodes().get(w.episode)?;
-        if e.role != DataRole::Train {
-            return None;
-        }
+        if e.role != DataRole::Train && !w.full_run.as_ref().is_some_and(|m|m.is_frozen()) {return None;}
+        let frozen=w.frozen_identity().ok()?;
         let bound = schedule
             .bind_episode_start(
-                &w.session.run_id,
-                w.episode,
-                0,
-                w.mapping.as_ref().map_or(0, |m| m.segment_ordinal),
-                None,
+                &w.session.run_id,w.episode,0,w.mapping.as_ref().map_or(0, |m| m.segment_ordinal),frozen.as_ref(),
             )
             .ok()?;
         Some((bound.trial_id().into(), bound.session_id().into()))
     }
     fn logical_phase_complete(&self)->bool {
         let w=&self.workflow;
-        self.schedule.episodes().get(w.episode).is_some_and(|e|e.role==DataRole::Train
+        self.schedule.episodes().get(w.episode).is_some_and(|e|(e.role==DataRole::Train || w.full_run.as_ref().is_some_and(|m|m.held_out.is_some()))
             && w.pending_window.is_none()
             && w.session.rows.len()==self.schedule.episodes().iter().take(w.episode+1).map(|e|e.slots.len()).sum::<usize>())
     }
@@ -703,7 +772,7 @@ impl TemporalTrainCapture {
         let Some(e) = s.episodes().get(w.episode) else {
             return false;
         };
-        e.role == DataRole::Train
+        (e.role == DataRole::Train || w.full_run.as_ref().is_some_and(|m|m.held_out.is_some()))
             && w.accepted() == e.target_active_recording_ms * 1_000_000
             && w.pending_window.is_none()
             && w.session.rows.len()
@@ -725,12 +794,15 @@ impl TemporalTrainCapture {
         }
         let w = &mut self.workflow;
         let schedule = w.schedule()?;
-        if schedule
-            .episodes()
-            .get(w.episode)
-            .is_none_or(|e| e.role != DataRole::Train)
-        {
-            return Err("temporal_train_complete".into());
+        let role=schedule.episodes().get(w.episode).ok_or("temporal_capture_complete")?.role;
+        if role==DataRole::HeldOut{w.begin_held_out_role(now)?;}
+        else if role!=DataRole::Train{return Err("temporal_train_complete".into());}
+        else if w.full_run.is_some()&&w.mapping.is_none(){
+            let b=w.bridge.as_ref().ok_or("temporal_bridge_required")?;
+            let expected=schedule.episodes().iter().take(w.episode).map(|e|e.slots.len()).sum::<usize>();
+            if b.seals.len()!=w.episode||!b.parts.is_empty()||w.session.rows.len()!=expected||w.async_state.as_ref().is_none_or(|a|a.pending.is_some()||a.accepted_seals!=b.seals.len()){
+                return Err("temporal_initial_episode_prior_seal_ack_required".into());
+            }
         }
         let permit = ConditionsPermit {
             context: w.context().digest(),
@@ -739,9 +811,8 @@ impl TemporalTrainCapture {
         };
         w.start_segment(&permit, epoch, now, now)?;
         let mapping = w.mapping.clone().ok_or("temporal_segment_missing")?;
-        let b = w.bridge.as_mut().ok_or("temporal_bridge_required")?;
-        b.disposition = Disposition::Observing;
-        b.parts.push(QualityPart {
+        w.set_current_disposition(Disposition::Observing)?;
+        w.current_parts_mut()?.push(QualityPart {
             observed_end_ns: mapping.observed_start_ns,
             mapping,
             sources: vec![],
@@ -778,11 +849,7 @@ impl TemporalTrainCapture {
                 return Err("temporal_measured_receiver_required".into());
             }
             w.observe(p, now)?;
-            w.bridge
-                .as_mut()
-                .ok_or("temporal_bridge_required")?
-                .parts
-                .last_mut()
+            w.current_parts_mut()?.last_mut()
                 .ok_or("temporal_quality_segment_missing")?
                 .observe(p)?;
             self.commit_if_ready(store)
@@ -837,13 +904,11 @@ impl TemporalTrainCapture {
             }
             return Ok(());
         }
-        let b = w.bridge.as_mut().ok_or("temporal_bridge_required")?;
-        b.parts
-            .last_mut()
+        w.current_parts_mut()?.last_mut()
             .ok_or("temporal_quality_segment_missing")?
             .observed_end_ns = deadline;
         if deadline == schedule.episodes()[w.episode].target_active_recording_ms * 1_000_000 {
-            b.disposition = Disposition::NeedsConfirmation;
+            w.set_current_disposition(Disposition::NeedsConfirmation)?;
         }
         w.commit_slot(store, w.last_now_ns)?;
         if !self.logical_phase_complete() {
@@ -857,9 +922,13 @@ impl TemporalTrainCapture {
             return Err("temporal_phase_not_complete".into());
         }
         let w = &self.workflow;
+        if let Some(mode)=w.full_run.as_ref().filter(|m|m.held_out.is_some()){
+            let held=mode.held_out.as_ref().unwrap();let fit=mode.frozen.as_ref().ok_or("temporal_verified_frozen_required")?;
+            return hash(&(held_out::HELD_OUT_CONDITIONS_DOMAIN,&w.descriptor.id,&w.session.run_id,w.episode,w.durable_digest(),&fit.sha256,&held.parts,&held.seals));
+        }
         let b = w.bridge.as_ref().ok_or("temporal_bridge_required")?;
         hash(&(
-            BRIDGE_POLICY,
+            b.profile()?.policy(),
             &w.descriptor.id,
             &w.session.run_id,
             w.episode,
@@ -881,6 +950,7 @@ impl TemporalTrainCapture {
         let w = &mut self.workflow;
         w.check_clock(now)?;
         let schedule = w.schedule()?;
+        if schedule.episodes().get(w.episode).is_some_and(|e|e.role==DataRole::HeldOut){return self.confirm_held_out(store,now);}
         let context_sha256 = w.context().digest();
         let row_prefix_sha256 = match &w.async_state {
             Some(state)=>state.row_prefix_sha256.clone().ok_or("temporal_row_prefix_unconfirmed")?,
@@ -908,7 +978,7 @@ impl TemporalTrainCapture {
             previous_sha256: b.seals.last().map(|s| s.sha256.clone()),
             sha256: String::new(),
         };
-        seal.sha256 = seal.digest()?;
+        seal.sha256 = seal.digest(b.profile()?)?;
         b.seals.push(seal);
         b.parts.clear();
         w.episode += 1;
@@ -925,16 +995,29 @@ impl TemporalTrainCapture {
         if w.async_state.is_none(){self.durable_seals = w.bridge.as_ref().unwrap().seals.len();}
         Ok(())
     }
+    fn confirm_held_out(&mut self,store:&RecoveryStore,now:u64)->Result<(),String>{
+        let w=&mut self.workflow;let schedule=w.schedule()?;
+        let frozen=w.frozen_identity()?.ok_or("temporal_verified_frozen_required")?;
+        let mode=w.full_run.as_ref().unwrap();let fit=mode.frozen.as_ref().unwrap();let held=mode.held_out.as_ref().ok_or("temporal_heldout_bridge_required")?;
+        if w.episode!=7+held.seals.len()||held.seals.len()>=8{return Err("temporal_heldout_seal_order".into());}
+        validate_parts_with_frozen(&held.parts,&schedule,&w.session.run_id,w.episode,Some(30_000_000_000),now,Some(&frozen))?;
+        let state=w.async_state.as_ref().ok_or("temporal_async_required")?;
+        if state.pending.is_some()||state.accepted_held_out_seals!=held.seals.len(){return Err("temporal_heldout_prior_seal_ack_required".into());}
+        let row_prefix_sha256=state.row_prefix_sha256.clone().ok_or("temporal_row_prefix_unconfirmed")?;
+        let bound=schedule.bind_episode_start(&w.session.run_id,w.episode,0,0,Some(&frozen))?;
+        let seal=held_out::HeldOutSealData::from_body(held_out::HeldOutSealBody{role:DataRole::HeldOut,episode:w.episode,trial_id:bound.trial_id().into(),context_sha256:w.context().digest(),schedule_sha256:schedule.sha256().into(),continuation_policy_sha256:mode.policy.sha256().into(),verified_fit_sha256:fit.sha256.clone(),artifact_kind:fit.body.artifact_kind.clone(),artifact_sha256:fit.body.artifact_sha256.clone(),row_prefix_sha256,quality_sha256:hash(&held.parts)?,parts:held.parts.clone(),confirmed_at_ns:now,previous_sha256:held.seals.last().map(|s|s.sha256.clone())})?;
+        seal.validate_binding_data(&schedule,&w.session.run_id,fit,now)?;
+        let held=w.full_run.as_mut().unwrap().held_out.as_mut().unwrap();held.seals.push(seal);held.parts.clear();
+        w.episode+=1;w.mapping=None;w.custody=SegmentCustody::default();w.live_observed_ns=0;
+        held.disposition=if w.episode==15{Disposition::Complete}else{Disposition::Ready};w.stage=Stage::DurableReady;w.descriptor.saved_at_ms=now/1_000_000;
+        w.persist_with(store,false,|s,i,p,n|s.publish_temporal(i,Some(p),n))
+    }
     pub(crate) fn pause(&mut self, now: u64, store: &RecoveryStore) -> Result<(), String> {
         self.ensure_live()?;
         if self.workflow.async_state.is_some(){return self.workflow.request_async_pause(now);}
         self.workflow.check_clock(now)?;
         self.workflow.pause()?;
-        self.workflow
-            .bridge
-            .as_mut()
-            .ok_or("temporal_bridge_required")?
-            .disposition = Disposition::Paused;
+        self.workflow.set_current_disposition(Disposition::Paused)?;
         self.workflow
             .persist_with(store, false, |s, i, p, n| s.publish_temporal(i, Some(p), n))
     }
@@ -1006,7 +1089,10 @@ impl TemporalTrainCapture {
     pub(crate) fn snapshot(&self) -> Value {
         let w = &self.workflow;
         let e = self.schedule.episodes().get(w.episode);
-        json!({"schema":"ruview.room-learner.private-temporal-capture.v1","stage":self.stage().as_str(),"episode_index":w.episode,"label":e.filter(|e|e.role==DataRole::Train).map(|e|e.condition),"role":"Train","sealed_train_episodes":self.durable_seals,"retained_rows":w.session.rows.len(),"durable_windows":w.durable_windows,"rows_sha256":w.async_state.as_ref().map(|a|if w.session.rows.len()==w.durable_windows{a.rows_sha256.clone()}else{None}).unwrap_or_else(||hash(&w.session.rows).ok()),"durability_pending":w.async_state.as_ref().is_some_and(|a|a.pending.is_some()),"durability_error":w.async_state.as_ref().and_then(|a|a.error.clone()),"observed_ns":w.live_observed_ns.to_string(),"durable_observed_ns":w.accepted().to_string(),"target_ms":e.filter(|e|e.role==DataRole::Train).map(|e|e.target_active_recording_ms),"descriptor":w.descriptor,"failure":self.failure,"fit_admission_available":false,"quality_is_engineering_only":true,"independence_verified":false,"source_clock_measured":false})
+        let full=w.full_run.is_some();
+        let mut value=json!({"schema":"ruview.room-learner.private-temporal-capture.v1","stage":self.stage().as_str(),"episode_index":w.episode,"label":e.filter(|e|e.role==DataRole::Train||full).map(|e|e.condition),"role":if full&&e.is_some_and(|e|e.role==DataRole::HeldOut){"HeldOut"}else{"Train"},"sealed_train_episodes":self.durable_seals,"retained_rows":w.session.rows.len(),"durable_windows":w.durable_windows,"rows_sha256":w.async_state.as_ref().map(|a|if w.session.rows.len()==w.durable_windows{a.rows_sha256.clone()}else{None}).unwrap_or_else(||hash(&w.session.rows).ok()),"durability_pending":w.async_state.as_ref().is_some_and(|a|a.pending.is_some()),"durability_error":w.async_state.as_ref().and_then(|a|a.error.clone()),"observed_ns":w.live_observed_ns.to_string(),"durable_observed_ns":w.accepted().to_string(),"target_ms":e.filter(|e|e.role==DataRole::Train||full).map(|e|e.target_active_recording_ms),"descriptor":w.descriptor,"failure":self.failure,"fit_admission_available":false,"quality_is_engineering_only":true,"independence_verified":false,"source_clock_measured":false});
+        if full{value["sealed_held_out_episodes"]=json!(w.async_state.as_ref().map_or(0,|s|s.accepted_held_out_seals));}
+        value
     }
 }
 
@@ -1018,3 +1104,7 @@ impl Drop for TemporalTrainCapture {
         if let Some(state)=&self.workflow.async_state {let _=state.writer.drain();}
     }
 }
+
+#[cfg(test)]
+#[path="temporal_budget_profile_tests.rs"]
+mod budget_profile_tests;

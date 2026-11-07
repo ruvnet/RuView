@@ -146,6 +146,10 @@ pub(super) struct FullRunState {
     // Only DATA after raw decode. Verified session installation is separate.
     pub frozen: Option<VerifiedFitRecordData>,
     pub local_start_not_before_ns: Option<u64>,
+    pub held_out: Option<held_out::HeldOutBridgeState>,
+    pub complete: Option<held_out::FullCompleteRecordData>,
+    pending_complete: Option<PendingFullCompleteTransition>,
+    completed: Option<VerifiedFullComplete>,
     pending: Option<PendingFrozenTransition>,
     verified: Option<VerifiedFrozenSession>,
 }
@@ -164,6 +168,10 @@ impl FullRunState {
             }),
             frozen: None,
             local_start_not_before_ns: None,
+            held_out: None,
+            complete: None,
+            pending_complete: None,
+            completed: None,
             pending: None,
             verified: None,
         })
@@ -177,6 +185,10 @@ impl FullRunState {
             owner: None,
             frozen,
             local_start_not_before_ns: None,
+            held_out: None,
+            complete: None,
+            pending_complete: None,
+            completed: None,
             pending: None,
             verified: None,
         }
@@ -189,14 +201,24 @@ impl FullRunState {
             .owner
             .as_ref()
             .ok_or("temporal_full_run_owner_custody_required")?;
-        if self.frozen.is_some() && self.pending.is_none() {
+        if self.frozen.is_some()
+            && self.pending.is_none()
+            && (self.held_out.is_none() || self.verified.is_none() || self.completed.is_some())
+        {
             return Err("temporal_frozen_write_requires_current_producer".into());
+        }
+        if self.complete.is_some() && self.pending_complete.is_none() {
+            return Err("temporal_complete_write_requires_current_producer".into());
         }
         Ok(FullRunSnapshotPermit {
             runtime_epoch: owner.runtime_epoch.clone(),
             generation: owner.generation,
             expected,
-            model: self.pending.as_ref().map(|p| p.model.clone()),
+            model: self
+                .pending
+                .as_ref()
+                .map(|p| p.model.clone())
+                .or_else(|| self.verified.as_ref().map(|v| v.verifier())),
         })
     }
 }
@@ -232,6 +254,13 @@ impl FullRunWriteGrant {
             && self.generation > 0
             && self.expected.as_ref() == expected
             && self.payload_sha256 == bytes_hash(bytes)
+    }
+    pub(super) fn matches_fit_record(&self, sha: Option<&str>) -> bool {
+        match (&self.model, sha) {
+            (None, None) => true,
+            (Some(model), Some(sha)) => model.record.sha256 == sha,
+            _ => false,
+        }
     }
     pub(crate) fn verify_frozen_model(&self) -> Result<(), String> {
         match &self.model {
@@ -350,14 +379,14 @@ impl VerifiedFitRecordData {
 }
 
 #[derive(Clone)]
-struct FrozenModelVerifier {
+pub(super) struct FrozenModelVerifier {
     store: Arc<ArtifactStore>,
     record: VerifiedFitRecordData,
     context: CaptureContext,
     actual: Arc<TemporalModel>,
 }
 impl FrozenModelVerifier {
-    fn verify(&self) -> Result<Arc<TemporalModel>, String> {
+    pub(super) fn verify(&self) -> Result<Arc<TemporalModel>, String> {
         let loaded = self
             .store
             .load_exact_temporal_candidate(&self.context, &self.record.body.artifact_sha256)?;
@@ -406,12 +435,45 @@ pub(crate) struct RecoveredVerifiedFrozen {
     recertified_at_ns: u64,
 }
 struct VerifiedFrozenSession {
+    store: Arc<ArtifactStore>,
     model: Arc<TemporalModel>,
     record: VerifiedFitRecordData,
     rows: Vec<SharedRecord<CaptureCohort>>,
     evidence: Vec<SharedRecord<WindowEvidence>>,
 }
 impl VerifiedFrozenSession {
+    fn verifier(&self) -> FrozenModelVerifier {
+        FrozenModelVerifier {
+            store: self.store.clone(),
+            record: self.record.clone(),
+            context: self.model.context().clone(),
+            actual: self.model.clone(),
+        }
+    }
+    fn check_current_train_prefix(&self, session: &TemporalTrainingSession) -> Result<(), String> {
+        if session.failed
+            || !session.fitted
+            || session.rows.len() < 64
+            || session.evidence.len() < 64
+            || session.rows[..64]
+                .iter()
+                .zip(&self.rows)
+                .any(|(a, b)| !a.same_record(b))
+            || session.evidence[..64]
+                .iter()
+                .zip(&self.evidence)
+                .any(|(a, b)| !a.same_record(b))
+            || session.run_id != self.record.body.run
+            || session
+                .managed
+                .as_ref()
+                .and_then(|m| m.frozen_sha256.as_ref())
+                != Some(&self.record.body.artifact_sha256)
+        {
+            return Err("temporal_heldout_immutable_train_prefix_changed".into());
+        }
+        Ok(())
+    }
     fn check(&self, session: &TemporalTrainingSession) -> Result<(), String> {
         if session.active
             || session.failed
@@ -482,7 +544,8 @@ pub(super) fn recover_current(
             .binding,
     )?;
     let record = mode.frozen.clone();
-    let verified = if let Some(record) = record {
+    let continued = mode.held_out.is_some();
+    if let Some(record) = record {
         if now < record.body.freeze_prepare_receiver_ns {
             return Err("temporal_frozen_recovery_clock_reversed".into());
         }
@@ -490,30 +553,53 @@ pub(super) fn recover_current(
             artifact.load_exact_temporal_candidate(expected, &record.body.artifact_sha256)?,
         );
         verify_model_binding(&record, &model)?;
-        let install = VerifiedFrozenSession {
-            model,
-            record,
-            rows: w.session.rows.clone(),
-            evidence: w.session.evidence.clone(),
-        };
-        install.check(&w.session)?;
-        let recovered = RecoveredVerifiedFrozen {
-            install,
-            recertified_at_ns: now,
-        };
-        recovered.install.apply(&mut w.session);
-        Some(recovered)
-    } else {
-        None
-    };
+        if continued {
+            let token = w
+                .commit_token
+                .clone()
+                .ok_or("temporal_recovered_current_token_required")?;
+            let verifier = FrozenModelVerifier {
+                store: artifact.clone(),
+                record,
+                context: expected.clone(),
+                actual: model,
+            };
+            verifier
+                .continued_witness(&w, &token)?
+                .ok_or("temporal_recovered_continued_witness_missing")?
+                .install_raw(&mut w)?;
+        } else {
+            let install = VerifiedFrozenSession {
+                store: artifact.clone(),
+                model,
+                record,
+                rows: w.session.rows.clone(),
+                evidence: w.session.evidence.clone(),
+            };
+            install.check(&w.session)?;
+            let recovered = RecoveredVerifiedFrozen {
+                install,
+                recertified_at_ns: now,
+            };
+            recovered.install.apply(&mut w.session);
+            w.full_run.as_mut().unwrap().verified = Some(recovered.install);
+        }
+        w.full_run.as_mut().unwrap().local_start_not_before_ns = Some(now);
+    }
     let mode = w.full_run.as_mut().unwrap();
     mode.owner = Some(FullRunOwnerCustody {
         runtime_epoch: owner_epoch,
         generation,
     });
-    if let Some(recovered) = verified {
-        mode.local_start_not_before_ns = Some(recovered.recertified_at_ns);
-        mode.verified = Some(recovered.install);
+    if let Some(record) = &mode.complete {
+        let token = w
+            .commit_token
+            .clone()
+            .ok_or("temporal_recovered_current_token_required")?;
+        mode.completed = Some(VerifiedFullComplete {
+            token,
+            record_sha256: record.sha256.clone(),
+        });
     }
     Ok(w)
 }
@@ -607,6 +693,7 @@ impl TemporalWorkflow {
             return Err("temporal_frozen_ack_owner_cut_or_record".into());
         }
         let install = VerifiedFrozenSession {
+            store: pending.model.store.clone(),
             model: pending.model.actual.clone(),
             record: data.clone(),
             rows: pending.rows.clone(),
@@ -627,5 +714,405 @@ impl TemporalWorkflow {
         mode.local_start_not_before_ns = Some(transition.admitted_at_ns);
         mode.verified = Some(transition.install);
         self.stage = Stage::DurableReady;
+    }
+}
+
+/// Off-writer DATA digests of an actually read-back prefix, never an issuer.
+#[derive(Clone)]
+pub(super) struct FullPrefixHashes {
+    pub raw: String,
+    pub evidence: String,
+    pub identities: String,
+    pub ledger: String,
+}
+impl FullPrefixHashes {
+    pub(super) fn from_workflow(w: &TemporalWorkflow) -> Result<Self, String> {
+        Ok(Self {
+            raw: hash(&w.session.rows)?,
+            evidence: hash(&w.session.evidence)?,
+            identities: hash(
+                &w.session
+                    .managed
+                    .as_ref()
+                    .ok_or("managed_session_required")?
+                    .windows,
+            )?,
+            ledger: hash(&w.ledger)?,
+        })
+    }
+}
+/// Produced only by actual writer/current-store readback with a producer-owned
+/// model verifier. No serde/Clone or DATA/hash-only install constructor.
+pub(super) struct VerifiedContinuedSession {
+    model: Arc<TemporalModel>,
+    record: VerifiedFitRecordData,
+    store: Arc<ArtifactStore>,
+    rows: Vec<SharedRecord<CaptureCohort>>,
+    evidence: Vec<SharedRecord<WindowEvidence>>,
+    token: TemporalToken,
+}
+impl VerifiedContinuedSession {
+    pub(super) fn check_owner(
+        &self,
+        current: &TemporalWorkflow,
+        token: &TemporalToken,
+    ) -> Result<(), String> {
+        let mode = current
+            .full_run
+            .as_ref()
+            .ok_or("temporal_full_run_required")?;
+        let verified = mode
+            .verified
+            .as_ref()
+            .ok_or("temporal_verified_frozen_required")?;
+        if &self.token != token
+            || mode.owner.is_none()
+            || self.record != verified.record
+            || !Arc::ptr_eq(&self.model, &verified.model)
+            || self.rows.len() < 64
+            || self.rows.len() > 128
+            || self.rows.len() > current.session.rows.len()
+            || self
+                .rows
+                .iter()
+                .zip(&current.session.rows)
+                .any(|(a, b)| !a.same_record(b))
+            || self
+                .evidence
+                .iter()
+                .zip(&current.session.evidence)
+                .any(|(a, b)| !a.same_record(b))
+        {
+            return Err("temporal_continued_ack_owner_or_lineage".into());
+        }
+        Ok(())
+    }
+    pub(super) fn install_raw(&self, target: &mut TemporalWorkflow) -> Result<(), String> {
+        if target.session.fitted
+            || target.session.active
+            || target.session.failed
+            || target.session.rows.len() != self.rows.len()
+            || target
+                .session
+                .rows
+                .iter()
+                .zip(&self.rows)
+                .any(|(a, b)| !a.same_record(b))
+            || target
+                .session
+                .evidence
+                .iter()
+                .zip(&self.evidence)
+                .any(|(a, b)| !a.same_record(b))
+            || target.full_run.as_ref().and_then(|m| m.frozen.as_ref()) != Some(&self.record)
+        {
+            return Err("temporal_continued_raw_install_changed".into());
+        }
+        target.session.managed.as_mut().unwrap().frozen_sha256 =
+            Some(self.record.body.artifact_sha256.clone());
+        target.session.fitted = true;
+        let mode = target.full_run.as_mut().unwrap();
+        mode.verified = Some(VerifiedFrozenSession {
+            store: self.store.clone(),
+            model: self.model.clone(),
+            record: self.record.clone(),
+            rows: self.rows[..64].to_vec(),
+            evidence: self.evidence[..64].to_vec(),
+        });
+        Ok(())
+    }
+}
+impl FrozenModelVerifier {
+    pub(super) fn check_workflow_data(&self, w: &TemporalWorkflow) -> Result<(), String> {
+        if w.context() != &self.context
+            || w.full_run.as_ref().and_then(|m| m.frozen.as_ref()) != Some(&self.record)
+        {
+            return Err("temporal_current_model_recertification_binding".into());
+        }
+        Ok(())
+    }
+    pub(super) fn continued_witness(
+        &self,
+        w: &TemporalWorkflow,
+        token: &TemporalToken,
+    ) -> Result<Option<VerifiedContinuedSession>, String> {
+        let Some(mode) = &w.full_run else {
+            return Ok(None);
+        };
+        if mode.held_out.is_none() {
+            return Ok(None);
+        }
+        if mode.frozen.as_ref() != Some(&self.record)
+            || w.session.rows.len() < 64
+            || w.session.rows.len() > 128
+        {
+            return Err("temporal_continued_model_record_changed".into());
+        }
+        self.verify()?;
+        Ok(Some(VerifiedContinuedSession {
+            model: self.actual.clone(),
+            record: self.record.clone(),
+            store: self.store.clone(),
+            rows: w.session.rows.clone(),
+            evidence: w.session.evidence.clone(),
+            token: token.clone(),
+        }))
+    }
+}
+impl FullRunWriteGrant {
+    pub(super) fn continued_witness(
+        &self,
+        w: &TemporalWorkflow,
+        token: &TemporalToken,
+    ) -> Result<Option<VerifiedContinuedSession>, String> {
+        self.model
+            .as_ref()
+            .ok_or("temporal_continued_producer_model_required")?
+            .continued_witness(w, token)
+    }
+}
+struct PendingFullCompleteTransition {
+    record: held_out::FullCompleteRecordData,
+    predecessor: TemporalToken,
+    runtime_epoch: String,
+    generation: u64,
+}
+pub(super) struct VerifiedFullComplete {
+    token: TemporalToken,
+    record_sha256: String,
+}
+impl FullRunState {
+    pub(super) fn check_current_train_prefix(
+        &self,
+        session: &TemporalTrainingSession,
+    ) -> Result<(), String> {
+        if self.owner.is_none() {
+            return Err("temporal_full_run_owner_custody_required".into());
+        }
+        let verified = self
+            .verified
+            .as_ref()
+            .ok_or("temporal_verified_frozen_required")?;
+        if self.frozen.as_ref() != Some(&verified.record)
+            || verified.record.body.continuation_policy_sha256 != self.policy.sha256()
+        {
+            return Err("temporal_current_verified_fit_record_changed".into());
+        }
+        verified.check_current_train_prefix(session)
+    }
+    pub(super) fn model_verifier(&self) -> Option<FrozenModelVerifier> {
+        self.verified.as_ref().map(|v| v.verifier())
+    }
+    pub(super) fn is_complete(&self) -> bool {
+        self.completed.is_some()
+    }
+    pub(super) fn held_out_seals(&self) -> usize {
+        self.held_out.as_ref().map_or(0, |h| h.seals.len())
+    }
+}
+impl TemporalWorkflow {
+    pub(super) fn frozen_identity(
+        &self,
+    ) -> Result<Option<crate::room_learner::managed_schedule_contract::FrozenModelIdentity>, String>
+    {
+        let schedule = self.schedule()?;
+        if schedule
+            .episodes()
+            .get(self.episode)
+            .is_none_or(|e| e.role != DataRole::HeldOut)
+        {
+            return Ok(None);
+        }
+        let mode = self
+            .full_run
+            .as_ref()
+            .ok_or("temporal_verified_frozen_required")?;
+        mode.check_current_train_prefix(&self.session)?;
+        let fit = mode
+            .frozen
+            .as_ref()
+            .ok_or("temporal_frozen_record_required")?;
+        Ok(Some(crate::room_learner::managed_schedule_contract::FrozenModelIdentity::from_runtime_verified_artifact(&schedule,fit.body.artifact_sha256.clone())?))
+    }
+    pub(super) fn begin_held_out_role(&mut self, now: u64) -> Result<(), String> {
+        self.frozen_identity()?
+            .ok_or("temporal_heldout_role_required")?;
+        let mode = self.full_run.as_mut().unwrap();
+        if mode.completed.is_some() || mode.complete.is_some() {
+            return Err("temporal_full_run_already_complete".into());
+        }
+        let fit = mode.frozen.as_ref().unwrap();
+        if now <= fit.body.freeze_prepare_receiver_ns
+            || mode
+                .local_start_not_before_ns
+                .is_none_or(|floor| now <= floor)
+        {
+            return Err("temporal_heldout_start_before_frozen_admission".into());
+        }
+        if mode.held_out.is_none() {
+            if self.episode != 7
+                || self.durable_windows != 64
+                || self.session.rows.len() != 64
+                || self
+                    .async_state
+                    .as_ref()
+                    .is_none_or(|s| s.accepted_seals != 7 || s.accepted_held_out_seals != 0)
+            {
+                return Err("temporal_heldout_prior_seal_ack_required".into());
+            }
+            mode.held_out = Some(held_out::HeldOutBridgeState::new());
+        }
+        let held = mode.held_out.as_ref().unwrap();
+        if self.episode != 7 + held.seals.len()
+            || self
+                .async_state
+                .as_ref()
+                .is_none_or(|s| s.accepted_held_out_seals != held.seals.len())
+        {
+            return Err("temporal_heldout_prior_seal_ack_required".into());
+        }
+        if self.mapping.is_none()
+            && (self.session.rows.len() != 64 + held.seals.len() * 8 || !held.parts.is_empty())
+        {
+            return Err("temporal_heldout_initial_episode_not_confirmed".into());
+        }
+        Ok(())
+    }
+    pub(super) fn prepare_complete_from_actual_seal_ack(
+        &mut self,
+        now: u64,
+    ) -> Result<bool, String> {
+        let Some(mode) = &self.full_run else {
+            return Ok(false);
+        };
+        if mode.held_out_seals() != 8 || mode.complete.is_some() {
+            return Ok(false);
+        }
+        let state = self.async_state.as_ref().ok_or("temporal_async_required")?;
+        if state.pending.is_some()
+            || state.accepted_held_out_seals != 8
+            || self.durable_windows != 128
+            || self.session.rows.len() != 128
+            || self.episode != 15
+            || self.mapping.is_some()
+        {
+            return Ok(false);
+        }
+        mode.check_current_train_prefix(&self.session)?;
+        let hashes = state
+            .full_hashes
+            .as_ref()
+            .ok_or("temporal_complete_prefix_hashes_unconfirmed")?;
+        let predecessor = self
+            .commit_token
+            .clone()
+            .ok_or("temporal_complete_current_token_required")?;
+        let fit = mode.frozen.as_ref().unwrap();
+        let owner = mode.owner.as_ref().unwrap();
+        let body = held_out::FullCompleteBody {
+            context_sha256: self.context().digest(),
+            run: self.session.run_id.clone(),
+            descriptor_id: self.descriptor.id.clone(),
+            created_at_ms: self.descriptor.created_at_ms,
+            expires_at_ms: self.descriptor.expires_at_ms,
+            continuation_policy_sha256: mode.policy.sha256().into(),
+            verified_fit_sha256: fit.sha256.clone(),
+            artifact_kind: fit.body.artifact_kind.clone(),
+            artifact_sha256: fit.body.artifact_sha256.clone(),
+            held_out_chain_sha256: mode
+                .held_out
+                .as_ref()
+                .unwrap()
+                .seals
+                .last()
+                .unwrap()
+                .sha256
+                .clone(),
+            raw_sha256: hashes.raw.clone(),
+            evidence_sha256: hashes.evidence.clone(),
+            identity_sha256: hashes.identities.clone(),
+            ledger_sha256: hashes.ledger.clone(),
+            windows: 128,
+            held_out_windows: 64,
+            held_out_seals: 8,
+            accepted_held_out_commitment: predecessor.data(),
+            complete_prepare_receiver_ns: now,
+            source_floors: self.source_high.clone(),
+        };
+        let record = held_out::FullCompleteRecordData::from_body(body)?;
+        record.validate_binding_data(fit, &self.descriptor, now)?;
+        let pending = PendingFullCompleteTransition {
+            record: record.clone(),
+            predecessor,
+            runtime_epoch: owner.runtime_epoch.clone(),
+            generation: owner.generation,
+        };
+        self.check_clock(now)?;
+        self.descriptor.saved_at_ms = now / 1_000_000;
+        let mode = self.full_run.as_mut().unwrap();
+        mode.pending_complete = Some(pending);
+        mode.complete = Some(record);
+        self.submit_async_commit(false)?;
+        Ok(true)
+    }
+    pub(super) fn prepare_complete_ack(
+        &self,
+        candidate: &TemporalWorkflow,
+        token: &TemporalToken,
+    ) -> Result<Option<VerifiedFullComplete>, String> {
+        let Some(mode) = self.full_run.as_ref() else {
+            return Ok(None);
+        };
+        let Some(pending) = mode.pending_complete.as_ref() else {
+            return Ok(None);
+        };
+        let owner = mode
+            .owner
+            .as_ref()
+            .ok_or("temporal_full_run_owner_custody_required")?;
+        if candidate
+            .full_run
+            .as_ref()
+            .and_then(|m| m.complete.as_ref())
+            != Some(&pending.record)
+            || owner.runtime_epoch != pending.runtime_epoch
+            || owner.generation != pending.generation
+            || self.commit_token.as_ref() != Some(&pending.predecessor)
+        {
+            return Err("temporal_complete_ack_operation_changed".into());
+        }
+        Ok(Some(VerifiedFullComplete {
+            token: token.clone(),
+            record_sha256: pending.record.sha256.clone(),
+        }))
+    }
+    pub(super) fn apply_complete_ack(&mut self, complete: VerifiedFullComplete) {
+        let mode = self.full_run.as_mut().unwrap();
+        mode.completed = Some(complete);
+        mode.pending_complete = None;
+    }
+}
+
+/// Structural resource budget derived from the canonical Full2 contract only.
+/// Not serde, a capture/write permission, or a caller-supplied frame number.
+pub(crate) struct ReplayFenceBudget { max_frames:usize,native_policy_sha256:String }
+impl ReplayFenceBudget {
+    pub(crate) fn matches_native_policy(&self,policy:&WindowInputPolicy)->Result<(),String>{
+        if self.native_policy_sha256!=hash(policy)?{return Err("temporal_full2_fence_policy_changed".into());}Ok(())
+    }
+    pub(crate) fn max_frames(&self)->usize{self.max_frames}
+}
+impl ContinuationPolicy {
+    pub(super) fn replay_fence_budget(&self,binding:&ManagedBinding)->Result<ReplayFenceBudget,String>{
+        self.validate(binding)?;
+        // Current asynchronous Full2 actor adopts/SAME-repairs its queued
+        // reservation before resuming, with at most ONE consumed next tail.
+        // R<=128 and D<=128+current; at R128 no new window exists, so R+D<=256.
+        // Generic abort-to-parent is explicitly denied for Full2 below.
+        let attempts=self.body.max_total_windows.checked_add(self.body.max_global_gaps).ok_or("temporal_full2_fence_capacity")?;
+        let per_attempt=binding.native.source_policies().iter().try_fold(0usize,|n,s|n.checked_add(s.max_rows)).ok_or("temporal_full2_fence_capacity")?;
+        let max_frames=attempts.checked_mul(per_attempt).ok_or("temporal_full2_fence_capacity")?;
+        if attempts!=256||per_attempt!=231||max_frames!=59_136{return Err("temporal_full2_fence_capacity".into());}
+        Ok(ReplayFenceBudget{max_frames,native_policy_sha256:hash(&binding.native)?})
     }
 }

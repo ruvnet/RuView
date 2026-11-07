@@ -160,6 +160,12 @@ pub(super) fn decode(
     decode_old(bytes,descriptor,now)
 }
 fn decode_old(bytes:&[u8],descriptor:&RecoveryDescriptor,now:u64)->Result<TemporalWorkflow,String>{
+    decode_old_contract(bytes,descriptor,now,StructuralDecode::OldTrain)
+}
+pub(super) fn decode_full_train_projection(bytes:&[u8],descriptor:&RecoveryDescriptor,now:u64,budget:&full_run::ReplayFenceBudget)->Result<TemporalWorkflow,String>{
+    decode_old_contract(bytes,descriptor,now,StructuralDecode::FullTrain{budget})
+}
+fn decode_old_contract(bytes:&[u8],descriptor:&RecoveryDescriptor,now:u64,contract:StructuralDecode<'_>)->Result<TemporalWorkflow,String>{
     if bytes.len() > crate::room_learner::recovery_store::MAX_RECOVERY_BYTES {
         return Err("temporal_checkpoint_budget".into());
     }
@@ -172,8 +178,30 @@ fn decode_old(bytes:&[u8],descriptor:&RecoveryDescriptor,now:u64)->Result<Tempor
     {
         return Err("temporal_checkpoint_integrity".into());
     }
-    let p = e.payload;
+    decode_prefix(e.payload,descriptor,now,contract)
+}
+/// DATA validation contract only; this never installs fitted/owner/write state.
+enum StructuralDecode<'a> {
+    OldTrain,
+    FullTrain { budget:&'a full_run::ReplayFenceBudget },
+    FullPostFrozen { fit:&'a full_run::VerifiedFitRecordData, held_out_seals:usize, budget:&'a full_run::ReplayFenceBudget },
+}
+pub(super) fn decode_full_post_frozen(
+    prefix:Prefix,descriptor:&RecoveryDescriptor,now:u64,
+    fit:&full_run::VerifiedFitRecordData,held_out_seals:usize,budget:&full_run::ReplayFenceBudget,
+)->Result<TemporalWorkflow,String>{
+    decode_prefix(prefix,descriptor,now,StructuralDecode::FullPostFrozen{fit,held_out_seals,budget})
+}
+fn decode_prefix(p:Prefix,descriptor:&RecoveryDescriptor,now:u64,contract:StructuralDecode<'_>)->Result<TemporalWorkflow,String>{
     let schedule = p.binding.contract()?;
+    let full=matches!(&contract,StructuralDecode::FullPostFrozen{..});
+    let frozen=match &contract{
+        StructuralDecode::OldTrain|StructuralDecode::FullTrain{..}=>None,
+        StructuralDecode::FullPostFrozen{fit,..}=>Some(crate::room_learner::managed_schedule_contract::FrozenModelIdentity::from_runtime_verified_artifact(&schedule,fit.body.artifact_sha256.clone())?),
+    };
+    let frozen_for=|episode:usize| -> Option<&crate::room_learner::managed_schedule_contract::FrozenModelIdentity>{
+        if schedule.episodes().get(episode).is_some_and(|e|e.role==DataRole::HeldOut){frozen.as_ref()}else{None}
+    };
     let context = schedule.context();
     if &p.descriptor != descriptor
         || p.descriptor.owner_scope != context.owner_scope
@@ -189,8 +217,8 @@ fn decode_old(bytes:&[u8],descriptor:&RecoveryDescriptor,now:u64)->Result<Tempor
         || p.frozen_model.is_some()
         || p.quality_issued
         || p.confirmation_issued
-        || p.episode >= schedule.episodes().len()
-        || p.rows.len() > schedule.counts().train_windows
+        || if full {p.episode>schedule.episodes().len()}else{p.episode>=schedule.episodes().len()}
+        || p.rows.len() > if full {schedule.counts().total_windows}else{schedule.counts().train_windows}
         || p.rows.len() != p.evidence.len()
         || p.rows.len() != p.identities.len()
         || p.rows.len() != p.ledger.spans.len()
@@ -205,7 +233,7 @@ fn decode_old(bytes:&[u8],descriptor:&RecoveryDescriptor,now:u64)->Result<Tempor
             return Err("temporal_checkpoint_mapping".into());
         }
         let bound =
-            schedule.bind_episode_start(&p.run, p.episode, 0, mapping.segment_ordinal, None)?;
+            schedule.bind_episode_start(&p.run, p.episode, 0, mapping.segment_ordinal, frozen_for(p.episode))?;
         let slot = schedule.episodes()[p.episode]
             .slots
             .iter()
@@ -226,8 +254,12 @@ fn decode_old(bytes:&[u8],descriptor:&RecoveryDescriptor,now:u64)->Result<Tempor
         if mapping.observed_start_ns != expected_start {
             return Err("temporal_checkpoint_mapping_start".into());
         }
-    } else if !p.rows.is_empty() && p.bridge.as_ref().is_none_or(|b| b.seals.len() != p.episode) {
-        return Err("temporal_checkpoint_mapping_missing".into());
+    } else if !p.rows.is_empty() {
+        let valid=match &contract{
+            StructuralDecode::OldTrain|StructuralDecode::FullTrain{..}=>p.bridge.as_ref().is_some_and(|b|b.seals.len()==p.episode),
+            StructuralDecode::FullPostFrozen{held_out_seals,..}=>*held_out_seals<=8 && p.episode==7+held_out_seals && p.rows.len()==64+8*held_out_seals,
+        };
+        if !valid{return Err("temporal_checkpoint_mapping_missing".into());}
     }
     validate_records(
         &schedule,
@@ -235,7 +267,7 @@ fn decode_old(bytes:&[u8],descriptor:&RecoveryDescriptor,now:u64)->Result<Tempor
         &p.evidence,
         &p.identities,
         &p.binding.validation_binding()?,
-        true,
+        !full,
     )?;
     let mut retained = Vec::new();
     let mut prior: Option<String> = None;
@@ -273,7 +305,11 @@ fn decode_old(bytes:&[u8],descriptor:&RecoveryDescriptor,now:u64)->Result<Tempor
             || row.id != evidence.cohort_id
             || row.trial_id != evidence.trial_id
             || row.session_id != evidence.session_id
-            || row.role != DataRole::Train
+            || row.role != if full {episode.role}else{DataRole::Train}
+            || if let StructuralDecode::FullPostFrozen{fit,..}=&contract {
+                if i<64 {record.role!=DataRole::Train || record.frozen_artifact_sha256.is_some()}
+                else {record.role!=DataRole::HeldOut || record.frozen_artifact_sha256.as_ref()!=Some(&fit.body.artifact_sha256)}
+            }else{false}
             || row.label != evidence.label
             || span.previous_sha256 != prior
             || span.window_sha256 != hash(row)?
@@ -322,7 +358,7 @@ fn decode_old(bytes:&[u8],descriptor:&RecoveryDescriptor,now:u64)->Result<Tempor
             gap.episode,
             0,
             gap.new_mapping.segment_ordinal,
-            None,
+            frozen_for(gap.episode),
         )?;
         let next_slot = schedule.episodes()[gap.episode]
             .slots
@@ -375,7 +411,7 @@ fn decode_old(bytes:&[u8],descriptor:&RecoveryDescriptor,now:u64)->Result<Tempor
                 gap.episode,
                 0,
                 previous.segment_ordinal,
-                None,
+                frozen_for(gap.episode),
             )?;
             let first = &schedule.episodes()[gap.episode].slots[0];
             previous.slot_bounds(
@@ -421,16 +457,14 @@ fn decode_old(bytes:&[u8],descriptor:&RecoveryDescriptor,now:u64)->Result<Tempor
         }
     }
     if let Some(bridge) = &p.bridge {
-        bridge.validate(
-            &schedule,
-            &p.run,
-            &p.rows,
-            &p.evidence,
-            &p.ledger,
-            p.episode,
-            p.mapping.as_ref(),
-            p.last_now_ns,
-        )?;
+        if !full {
+            if matches!(contract,StructuralDecode::FullTrain{..}){
+                if bridge.seals.len()>schedule.counts().train_episodes{return Err("temporal_bridge_phase_order".into());}
+                let mut count=0;let cuts=bridge.seals.iter().enumerate().map(|(i,_)|{count+=schedule.episodes()[i].slots.len();count}).collect::<Vec<_>>();
+                let digests=prefix_digests::canonical_tuple_prefixes(&p.rows,&p.evidence,&p.ledger.spans,&cuts)?;
+                bridge.validate_full_run_with_prefixes(&schedule,&p.run,&p.rows,&p.evidence,&p.ledger,p.episode,p.mapping.as_ref(),p.last_now_ns,&digests)?;
+            }else{bridge.validate(&schedule,&p.run,&p.rows,&p.evidence,&p.ledger,p.episode,p.mapping.as_ref(),p.last_now_ns)?;}
+        }
         // Whole-period quality also observes the reservation tail and packets
         // between retained strata. Those durably acknowledged observations
         // must not disappear from the replay floors merely because they are
@@ -457,9 +491,10 @@ fn decode_old(bytes:&[u8],descriptor:&RecoveryDescriptor,now:u64)->Result<Tempor
     session.rows = p.rows.into_iter().map(SharedRecord::new).collect();
     session.evidence = p.evidence.into_iter().map(SharedRecord::new).collect();
     session.managed.as_mut().unwrap().windows = p.identities;
-    session
-        .assembler
-        .restore_prefix_fences(p.fences, session.rows.len())?;
+    match &contract{
+        StructuralDecode::OldTrain=>session.assembler.restore_prefix_fences(p.fences,session.rows.len())?,
+        StructuralDecode::FullTrain{budget}|StructuralDecode::FullPostFrozen{budget,..}=>session.assembler.restore_full_run_prefix_fences(p.fences,session.rows.len(),budget)?,
+    }
     if !session.assembler.retained_fences_cover(&retained) {
         return Err("temporal_checkpoint_fences_regressed".into());
     }
@@ -511,6 +546,17 @@ mod tests;
 
 /// Opaque, crate-local storage input; generic JSON cannot claim validity/proof.
 #[derive(Clone)]
+pub(super) enum ValidatedFullStage {
+    Train,
+    Frozen(crate::room_learner::recovery_store::temporal_commitment::TemporalCommitmentData),
+    HeldOut,
+    Complete(crate::room_learner::recovery_store::temporal_commitment::TemporalCommitmentData),
+}
+impl ValidatedFullStage{
+    fn predecessor(&self)->Option<&crate::room_learner::recovery_store::temporal_commitment::TemporalCommitmentData>{match self{Self::Frozen(p)|Self::Complete(p)=>Some(p),_=>None}}
+    fn requires_model(&self)->bool{!matches!(self,Self::Train)}
+}
+#[derive(Clone)]
 pub(crate) struct ValidatedTemporalPrefix {
     bytes: Vec<u8>,
     descriptor: RecoveryDescriptor,
@@ -521,7 +567,8 @@ pub(crate) struct ValidatedTemporalPrefix {
     saved_receiver_ns: u64,
     metadata_kind: &'static str,
     full_write_grant: Option<full_run::FullRunWriteGrant>,
-    full_frozen_predecessor: Option<crate::room_learner::recovery_store::temporal_commitment::TemporalCommitmentData>,
+    full_stage: Option<ValidatedFullStage>,
+    full_fit_record_sha256:Option<String>,
 }
 pub(crate) fn validated_prefix(
     bytes: &[u8],
@@ -530,21 +577,18 @@ pub(crate) fn validated_prefix(
 ) -> Result<ValidatedTemporalPrefix, String> {
     if full_checkpoint::is_full(bytes)?{return full_checkpoint::validated_structural(bytes,descriptor,now_ns);}
     let v = decode(bytes, descriptor, now_ns)?;
+    validated_old_from_workflow(bytes,descriptor,v)
+}
+pub(super) fn validated_full_train_projection(bytes:&[u8],descriptor:&RecoveryDescriptor,now:u64,budget:&full_run::ReplayFenceBudget)->Result<ValidatedTemporalPrefix,String>{
+    let v=decode_full_train_projection(bytes,descriptor,now,budget)?;
+    validated_old_from_workflow(bytes,descriptor,v)
+}
+fn validated_old_from_workflow(bytes:&[u8],descriptor:&RecoveryDescriptor,v:TemporalWorkflow)->Result<ValidatedTemporalPrefix,String>{
     let schedule = v.schedule()?;
-    let train_episodes = schedule
-        .episodes()
-        .iter()
-        .filter(|e| e.role == DataRole::Train)
-        .count();
-    // Each64 native Train window +2x128 run-global pause/resume gap barriers +7 Train segment
-    // boundaries + genesis/terminal states. Identical retries consume none.
-    let transition_limit = schedule
-        .counts()
-        .train_windows
-        .checked_add(2 * 128)
-        .and_then(|n| n.checked_add(train_episodes))
-        .and_then(|n| n.checked_add(2))
-        .ok_or("temporal_transition_capacity")?;
+    // Historical profiles retain their ORIGINAL limit/hash; only an explicit
+    // fresh-Train genesis can select the recognized343 budget profile.
+    let profile=match &v.bridge{Some(bridge)=>bridge.profile()?,None=>bridge::TrainBudgetProfile::Historical329};
+    let transition_limit=profile.transition_limit(&schedule)?;
     if transition_limit > 512 {
         return Err("temporal_transition_capacity".into());
     }
@@ -553,7 +597,7 @@ pub(crate) fn validated_prefix(
         descriptor: descriptor.clone(),
         run: v.session.run_id.clone(),
         policy_sha256: if v.bridge.is_some() {
-            hash(&(v.session.plan_sha256(), bridge::BRIDGE_POLICY))?
+            hash(&(v.session.plan_sha256(), profile.policy()))?
         } else {
             v.session.plan_sha256().into()
         },
@@ -562,7 +606,7 @@ pub(crate) fn validated_prefix(
         saved_receiver_ns: v.last_now_ns,
         metadata_kind:"temporal-prefix-commitment-v1",
         full_write_grant:None,
-        full_frozen_predecessor:None,
+        full_stage:None,full_fit_record_sha256:None,
     })
 }
 pub(crate) fn validate_extension(
@@ -704,16 +748,21 @@ impl ValidatedTemporalPrefix {
     pub(crate) fn metadata_kind(&self)->&str{self.metadata_kind}
     pub(crate) fn authorizes_write(&self,expected:Option<&TemporalToken>)->bool{
         self.metadata_kind!=full_run::META_KIND||(self.full_write_grant.as_ref().is_some_and(|g|g.permits(&self.bytes,expected))
-            &&self.full_frozen_predecessor.as_ref().is_none_or(|p|expected.is_some_and(|e|e.data()==*p)))
+            &&self.full_stage.as_ref().and_then(|s|s.predecessor()).is_none_or(|p|expected.is_some_and(|e|e.data()==*p)))
     }
     pub(super) fn verify_full_artifact(&self)->Result<(),String>{
-        if self.metadata_kind==full_run::META_KIND&&self.full_frozen_predecessor.is_some(){
+        if self.metadata_kind==full_run::META_KIND&&self.full_stage.as_ref().is_some_and(|s|s.requires_model()){
             return self.full_write_grant.as_ref().ok_or("temporal_frozen_producer_model_required")?.verify_frozen_model();
         }
         Ok(())
     }
+    pub(super) fn continued_witness(&self,w:&TemporalWorkflow,token:&TemporalToken)->Result<Option<full_run::VerifiedContinuedSession>,String>{
+        if !matches!(self.full_stage,Some(ValidatedFullStage::HeldOut|ValidatedFullStage::Complete(_))){return Ok(None);}
+        self.full_write_grant.as_ref().ok_or("temporal_continued_producer_required")?.continued_witness(w,token)
+    }
     pub(super) fn attach_full_grant(&mut self,grant:full_run::FullRunWriteGrant)->Result<(),String>{
         if self.metadata_kind!=full_run::META_KIND{return Err("temporal_full_run_grant_kind".into());}
+        if !grant.matches_fit_record(self.full_fit_record_sha256.as_deref()){return Err("temporal_full_run_grant_model_record_changed".into());}
         self.full_write_grant=Some(grant);Ok(())
     }
     pub(crate) fn saved_receiver_ns(&self) -> u64 {
@@ -853,3 +902,21 @@ pub(crate) fn synthetic_floor_regression(
     let b = serde_json::to_vec(&e).unwrap();
     validated_prefix(&b, &e.payload.descriptor, e.payload.last_now_ns).unwrap()
 }
+
+// Test-only typed fixture: create a NEW empty run and encode its explicit
+// profile through the same strict codec; never upgrades an existing prefix.
+#[cfg(test)]
+pub(crate) fn synthetic_fresh_train343_empty_run(input:&ValidatedTemporalPrefix,created:u64)->ValidatedTemporalPrefix{
+    let empty=synthetic_new_empty_run(input,created);
+    let mut workflow=decode(empty.bytes(),empty.descriptor(),empty.saved_receiver_ns()).unwrap();
+    workflow.bridge=Some(super::bridge::BridgeState::fresh_train_343());
+    let bytes=encode(&workflow).unwrap();validated_prefix(&bytes,&workflow.descriptor,workflow.last_now_ns).unwrap()
+}
+
+#[cfg(test)]
+pub(crate) fn c4b_reference_batch_and_stale_seal_probe(bytes:&[u8],descriptor:&RecoveryDescriptor,now:u64)->Result<serde_json::Value,String>{
+    full_checkpoint::c4b_reference_batch_and_stale_seal_probe(bytes,descriptor,now)
+}
+
+#[cfg(test)]
+pub(crate) fn c4b_complete_fault_matrix(bytes:&[u8],descriptor:&RecoveryDescriptor,now:u64)->Result<serde_json::Value,String>{full_checkpoint::c4b_complete_fault_matrix(bytes,descriptor,now)}

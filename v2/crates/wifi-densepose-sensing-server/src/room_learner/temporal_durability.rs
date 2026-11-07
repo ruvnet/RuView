@@ -32,6 +32,8 @@ pub(super) struct Committed {
     pub rows_sha256: String,
     pub row_prefix_sha256: String,
     pub restored: Option<Box<TemporalWorkflow>>,
+    pub continued:Option<full_run::VerifiedContinuedSession>,
+    pub full_hashes:Option<full_run::FullPrefixHashes>,
 }
 #[cfg(test)]
 #[derive(Clone, Copy, Default)]
@@ -93,6 +95,7 @@ enum Work {
         seals: usize,
         start_ticket: bool,
         records: checkpoint::SharedRecords,
+        model:Option<full_run::FrozenModelVerifier>,
     },
     Repair {
         id: u64,
@@ -254,7 +257,7 @@ impl Writer {
                             rows,
                             seals,
                             start_ticket,
-                            records,
+                            records,model,
                         } => {
                             let result = (|| {
                                 state.allowed(&descriptor)?;
@@ -271,6 +274,7 @@ impl Writer {
                                 if pending.is_some() {
                                     return Err("temporal_writer_exact_repair_required".into());
                                 }
+                                if let Some(model)=&model{model.verify()?;}
                                 let recertified = store
                                     .recertify_temporal(&expected, state.allowed(&descriptor)?)?;
                                 let restored = checkpoint::decode_shared(
@@ -279,6 +283,9 @@ impl Writer {
                                     state.allowed(&descriptor)?,
                                     &records,
                                 )?;
+                                if restored.full_run.as_ref().is_some_and(|m|m.frozen.is_some())&&model.is_none(){return Err("temporal_current_model_recertification_required".into());}
+                                let continued=match &model{Some(m)=>{m.check_workflow_data(&restored)?;m.verify()?;m.continued_witness(&restored,&recertified.token)?},None=>None};
+                                let full_hashes=if restored.full_run.is_some(){Some(full_run::FullPrefixHashes::from_workflow(&restored)?)}else{None};
                                 let rows_sha256 = hash(&restored.session.rows)?;
                                 let row_prefix_sha256 = hash(&(
                                     &restored.session.rows,
@@ -291,7 +298,7 @@ impl Writer {
                                     durable_sha256: bytes_hash(recertified.prefix.bytes()),
                                     bytes: Arc::new(recertified.prefix.bytes().to_vec()),
                                     rows_sha256,
-                                    row_prefix_sha256,
+                                    row_prefix_sha256,continued,full_hashes,
                                     restored: Some(Box::new(restored)),
                                 })
                             })();
@@ -397,6 +404,7 @@ impl Writer {
         seals: usize,
         start_ticket: bool,
         records: checkpoint::SharedRecords,
+        model:Option<full_run::FrozenModelVerifier>,
     ) -> Result<(), String> {
         if self.shared.cancelled.load(Ordering::Acquire)
             || self
@@ -418,7 +426,7 @@ impl Writer {
                 rows,
                 seals,
                 start_ticket,
-                records,
+                records,model,
             })
             .is_err()
         {
@@ -532,6 +540,8 @@ fn readback(
     let restored =
         checkpoint::decode_shared(p.prefix.bytes(), p.prefix.descriptor(), now, &p.records)?;
     p.prefix.verify_full_artifact()?;
+    let continued=p.prefix.continued_witness(&restored,&token)?;
+    let full_hashes=if restored.full_run.is_some(){Some(full_run::FullPrefixHashes::from_workflow(&restored)?)}else{None};
     let rows_sha256 = hash(&restored.session.rows)?;
     let row_prefix_sha256 = hash(&(
         &restored.session.rows,
@@ -544,7 +554,7 @@ fn readback(
         durable_sha256: bytes_hash(p.prefix.bytes()),
         bytes: Arc::new(p.prefix.bytes().to_vec()),
         rows_sha256,
-        row_prefix_sha256,
+        row_prefix_sha256,continued,full_hashes,
         restored: Some(Box::new(restored)),
     })
 }
@@ -571,6 +581,8 @@ pub(super) struct AsyncState {
     pub row_prefix_sha256: Option<String>,
     pub error: Option<String>,
     pub accepted_seals: usize,
+    pub accepted_held_out_seals:usize,
+    pub full_hashes:Option<full_run::FullPrefixHashes>,
     // At most the same ONE completion, awaiting an actually fresh receiver
     // timestamp for new full-run authority. Never a packet or work queue.
     deferred_ack:Option<CommitAck>,
@@ -587,7 +599,7 @@ impl AsyncState {
             rows_sha256: None,
             row_prefix_sha256: None,
             error: None,
-            accepted_seals: 0,
+            accepted_seals: 0,accepted_held_out_seals:0,full_hashes:None,
             deferred_ack:None,
         }
     }
@@ -600,6 +612,8 @@ impl AsyncState {
             &w.ledger.spans,
         ))?);
         self.accepted_seals = w.bridge.as_ref().map_or(0, |b| b.seals.len());
+        self.accepted_held_out_seals=w.full_run.as_ref().map_or(0,|m|m.held_out_seals());
+        self.full_hashes=if w.full_run.is_some(){Some(full_run::FullPrefixHashes::from_workflow(w)?)}else{None};
         Ok(())
     }
     fn id(&mut self) -> Result<u64, String> {
@@ -662,6 +676,7 @@ impl TemporalWorkflow {
             return Err("temporal_unconfirmed_rows".into());
         }
         let records = checkpoint::workflow_records(self);
+        let model=self.full_run.as_ref().and_then(|m|m.model_verifier());
         let state = self.async_state.as_mut().ok_or("temporal_async_required")?;
         if state.pending.is_some() || state.busy_pause {
             return Err("temporal_storage_busy".into());
@@ -681,7 +696,7 @@ impl TemporalWorkflow {
             rows,
             seals,
             true,
-            records,
+            records,model,
         )?;
         state.pending = Some(PendingMeta {
             id,
@@ -702,6 +717,7 @@ impl TemporalWorkflow {
             return Err("temporal_pause_state".into());
         }
         let records = checkpoint::workflow_record_prefix(self, self.durable_windows)?;
+        let model=self.full_run.as_ref().and_then(|m|m.model_verifier());
         let state = self.async_state.as_mut().ok_or("temporal_async_required")?;
         state.busy_pause = true;
         state.error = Some("temporal_pause_pending_durability".into());
@@ -721,7 +737,7 @@ impl TemporalWorkflow {
                 rows,
                 seals,
                 false,
-                records,
+                records,model,
             )?;
             state.pending = Some(PendingMeta {
                 id,
@@ -832,32 +848,28 @@ impl TemporalWorkflow {
             _=>true,
         } {return Err("temporal_writer_ack_continuation_changed".into());}
         let frozen_transition=self.prepare_frozen_ack(candidate,now)?;
+        if let Some(continued)=&committed.continued{continued.check_owner(self,&committed.token)?;}
+        let complete_transition=self.prepare_complete_ack(candidate,&committed.token)?;
+        let candidate_held_out_seals=candidate.full_run.as_ref().map_or(0,|m|m.held_out_seals());
         let must_restore = self
             .async_state
             .as_ref()
-            .is_some_and(|s| s.busy_pause || s.repairing) && frozen_transition.is_none();
+            .is_some_and(|s| s.busy_pause || s.repairing) && frozen_transition.is_none() && complete_transition.is_none();
         if must_restore {
             retired.fences = Some(self.session.assembler.fence_checkpoint()?);
             let restored = committed.restored.as_mut().unwrap();
-            restored.session.assembler.restore_prefix_fences(
-                retired
-                    .fences
-                    .as_ref()
-                    .unwrap()
-                    .clone()
-                    .for_prefix(pending.rows)?,
-                pending.rows,
-            )?;
+            let fences=retired.fences.as_ref().unwrap().clone().for_prefix(pending.rows)?;
+            if let Some(mode)=&self.full_run{
+                let budget=mode.policy.replay_fence_budget(&self.session.managed.as_ref().ok_or("managed_session_required")?.binding)?;
+                restored.session.assembler.restore_full_run_prefix_fences(fences,pending.rows,&budget)?;
+            }else{restored.session.assembler.restore_prefix_fences(fences,pending.rows)?;}
             restored.source_high = self.source_high.clone();
             restored.mapping = self.mapping.clone();
             restored.live_observed_ns = self.live_observed_ns;
             restored.last_now_ns = now;
+            if let Some(continued)=&committed.continued{continued.install_raw(restored)?;}
             restored.stage = Stage::PausedNeedsReconfirmation;
-            restored
-                .bridge
-                .as_mut()
-                .ok_or("temporal_bridge_required")?
-                .disposition = bridge::Disposition::Paused;
+            restored.set_current_disposition(bridge::Disposition::Paused)?;
         }
         // All fallible candidate checks finished while its ownership remained
         // in retired. From here transfer old owners, never destroy them here.
@@ -866,9 +878,11 @@ impl TemporalWorkflow {
         state.error = None;
         state.durable_sha256 = Some(committed.durable_sha256.clone());
         state.accepted_seals = pending.seals;
+        state.accepted_held_out_seals=candidate_held_out_seals;
+        state.full_hashes=committed.full_hashes.clone();
         state.rows_sha256 = Some(committed.rows_sha256.clone());
         state.row_prefix_sha256 = Some(committed.row_prefix_sha256.clone());
-        if frozen_transition.is_some(){state.busy_pause=false;state.repairing=false;}
+        if frozen_transition.is_some()||complete_transition.is_some(){state.busy_pause=false;state.repairing=false;}
         retired.previous_bytes = self.durable.take();
         self.commit_token = Some(committed.token.clone());
         self.durable = Some(committed.bytes.clone());
@@ -898,6 +912,8 @@ impl TemporalWorkflow {
             self.async_state = Some(state);
         }
         if let Some(transition)=frozen_transition{self.apply_frozen_ack(transition);}
+        if let Some(transition)=complete_transition{self.apply_complete_ack(transition);}
+        if pending.start_ticket{if let Some(mode)=self.full_run.as_mut(){mode.local_start_not_before_ns=Some(now);}}
         self.last_now_ns = self.last_now_ns.max(now);
         Ok(Some((pending.start_ticket, now)))
     }
