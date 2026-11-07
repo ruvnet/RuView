@@ -382,6 +382,9 @@ static uint8_t  s_presence_below_count;  /**< Consecutive frames below low thres
 static bool     s_fall_detected;
 static int8_t   s_latest_rssi;
 static uint32_t s_frame_count;
+/* Frames rejected by the subcarrier-grid guard in process_frame(). See the
+ * comment at that return. Monotonic since boot; the sink differences it. */
+static uint32_t s_frame_rejected;
 
 /** Previous phase velocity for fall detection (acceleration). */
 static float s_prev_phase_velocity;
@@ -1062,7 +1065,13 @@ static void send_feature_vector(void)
 static void process_frame(const edge_ring_slot_t *slot)
 {
     uint16_t n_subcarriers = slot->iq_len / 2;
-    if (n_subcarriers == 0) return;
+    if (n_subcarriers == 0) {
+        /* Counted, not silent: an empty frame leaves the node in the sync
+         * packet via the rejected counter (`rejected > 0 && processed == 0`
+         * names a dead edge pipeline from the server, with no cable). */
+        s_frame_rejected++;
+        return;
+    }
     /* S3 STBC frames append a second HT-LTF block (192 entries total).
      * Process the bounded LLTF + HT-LTF prefix instead of starving edge
      * output (#2286). Raw CSI streaming retains the complete payload. */
@@ -1395,6 +1404,16 @@ void edge_get_variances(float *out_variances, uint16_t n_subcarriers)
     }
 }
 
+uint32_t edge_processing_get_frames_processed(void)
+{
+    return s_frame_count;
+}
+
+uint32_t edge_processing_get_frames_rejected(void)
+{
+    return s_frame_rejected;
+}
+
 esp_err_t edge_processing_init(const edge_config_t *cfg)
 {
     if (cfg == NULL) {
@@ -1427,6 +1446,7 @@ esp_err_t edge_processing_init(const edge_config_t *cfg)
     s_fall_detected = false;
     s_latest_rssi = 0;
     s_frame_count = 0;
+    s_frame_rejected = 0;
     s_sample_rate_hz = EDGE_CONFIGURED_SAMPLE_RATE_HZ;
     s_filter_design_fs = EDGE_CONFIGURED_SAMPLE_RATE_HZ;
     s_rate_window_start_us = 0;
