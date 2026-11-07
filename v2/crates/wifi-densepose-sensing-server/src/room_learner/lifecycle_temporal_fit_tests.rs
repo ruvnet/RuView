@@ -56,6 +56,7 @@ fn packet(source: u8, sequence: u32, at: u64, label: RoomLabel) -> CanonicalPack
     .unwrap()
 }
 fn record_train(root: &Path) -> (Arc<RoomLearningRuntime>, u64) {
+    assert!(!cfg!(debug_assertions), "complete native-persistence fixture requires Release; classify the caller");
     let (runtime, mut now) = configured(root);
     let schedule = ManagedScheduleContract::build(
         capture_fixture::context(),
@@ -240,6 +241,7 @@ async fn c3_incomplete_real_capture_cannot_issue_fit_or_weaken_public_legacy_gua
         .unwrap();
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[cfg_attr(debug_assertions, ignore = "native-persistence journey requires Release; CI explicitly executes and counts this test")]
 async fn c3_actual_native_train_fit_and_same_store_cold_report_keep_whole_model_diagnostic() {
     let directory = tempfile::tempdir().unwrap();
     let (runtime, now) = complete_train(directory.path());
@@ -315,6 +317,7 @@ async fn c3_actual_native_train_fit_and_same_store_cold_report_keep_whole_model_
     );
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[cfg_attr(debug_assertions, ignore = "native-persistence journey requires Release; CI explicitly executes and counts this test")]
 async fn c3_cancel_before_validation_drains_same_job_without_candidate_or_legacy_changes() {
     let directory = tempfile::tempdir().unwrap();
     let (runtime, now) = complete_train(directory.path());
@@ -362,6 +365,7 @@ async fn c3_cancel_before_validation_drains_same_job_without_candidate_or_legacy
         .unwrap();
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[cfg_attr(debug_assertions, ignore = "native-persistence journey requires Release; CI explicitly executes and counts this test")]
 async fn c3_exact_store_recertification_rejects_tampered_head_before_any_fit_save() {
     let directory = tempfile::tempdir().unwrap();
     let (runtime, now) = complete_train(directory.path());
@@ -392,6 +396,7 @@ async fn c3_exact_store_recertification_rejects_tampered_head_before_any_fit_sav
         .unwrap();
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[cfg_attr(debug_assertions, ignore = "native-persistence journey requires Release; CI explicitly executes and counts this test")]
 async fn c3_real_model_save_is_drained_before_synthetic_owner_erase_ack_and_never_recreated() {
     let directory = tempfile::tempdir().unwrap();
     let (runtime, now) = complete_train(directory.path());
@@ -451,6 +456,7 @@ async fn c3_real_model_save_is_drained_before_synthetic_owner_erase_ack_and_neve
     assert!(!owner.exists());
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[cfg_attr(debug_assertions, ignore = "native-persistence journey requires Release; CI explicitly executes and counts this test")]
 async fn c3_last_external_owner_drop_drains_real_store_before_return_and_synthetic_erase() {
     let directory = tempfile::tempdir().unwrap();
     let (runtime, now) = complete_train(directory.path());
@@ -492,6 +498,7 @@ async fn c3_last_external_owner_drop_drains_real_store_before_return_and_synthet
     assert!(!owner.exists());
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[cfg_attr(debug_assertions, ignore = "native-persistence journey requires Release; CI explicitly executes and counts this test")]
 async fn c3_last_completion_owner_releases_after_signal_on_normal_and_unwind_paths() {
     for unwind in [false, true] {
         let directory = tempfile::tempdir().unwrap();
@@ -537,6 +544,7 @@ async fn c3_last_completion_owner_releases_after_signal_on_normal_and_unwind_pat
     }
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[cfg_attr(debug_assertions, ignore = "native-persistence journey requires Release; CI explicitly executes and counts this test")]
 async fn c3_original_expiry_during_fitting_withdraws_publication_without_renewal() {
     let directory = tempfile::tempdir().unwrap();
     let (runtime, now) = complete_train(directory.path());
@@ -567,6 +575,7 @@ async fn c3_original_expiry_during_fitting_withdraws_publication_without_renewal
         .unwrap();
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[cfg_attr(debug_assertions, ignore = "native-persistence journey requires Release; CI explicitly executes and counts this test")]
 async fn c3_stale_generation_after_real_save_cannot_adopt_or_strand_job() {
     for change in ["generation", "room", "revision", "owner"] {
         let directory = tempfile::tempdir().unwrap();
@@ -614,6 +623,7 @@ async fn c3_stale_generation_after_real_save_cannot_adopt_or_strand_job() {
     }
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[cfg_attr(debug_assertions, ignore = "native-persistence journey requires Release; CI explicitly executes and counts this test")]
 async fn c3_old_completion_cannot_fail_a_replacement_job_with_different_cancel_identity() {
     let directory = tempfile::tempdir().unwrap();
     let (runtime, now) = complete_train(directory.path());
@@ -656,6 +666,7 @@ async fn c3_old_completion_cannot_fail_a_replacement_job_with_different_cancel_i
         .unwrap();
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[cfg_attr(debug_assertions, ignore = "native-persistence journey requires Release; CI explicitly executes and counts this test")]
 async fn c3_optional_actual_summary_failure_keeps_durable_diagnostic_model() {
     let directory = tempfile::tempdir().unwrap();
     let (runtime, now) = complete_train(directory.path());
@@ -702,6 +713,7 @@ async fn c3_optional_actual_summary_failure_keeps_durable_diagnostic_model() {
         .unwrap();
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[cfg_attr(debug_assertions, ignore = "native-persistence journey requires Release; CI explicitly executes and counts this test")]
 async fn c3_worker_unwind_keeps_saved_history_but_never_adopts_current_candidate() {
     let directory = tempfile::tempdir().unwrap();
     let (runtime, now) = complete_train(directory.path());

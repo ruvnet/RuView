@@ -904,7 +904,9 @@ fn c2_reverse_clock_and_expiry_while_start_ack_pending_never_authorize_observati
 }
 
 #[test]
+#[cfg_attr(debug_assertions, ignore = "native-persistence journey requires Release; CI explicitly executes and counts this test")]
 fn c2_all_seven_train_phases_use_actual_async_runtime_and_durable_seals_without_fit(){
+    assert!(!cfg!(debug_assertions), "execute this native-persistence journey in the explicit Release batch");
     // Synthetic receiver time accelerates only when no write is pending. While
     // a writer is pending we pace packets, preserving the declared cadence and
     // allowing explicit busy/pause+fresh-start rather than inventing credit.
