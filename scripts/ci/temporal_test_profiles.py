@@ -5,6 +5,8 @@ import argparse, hashlib, json, os, pathlib, re, stat, subprocess, sys
 PREFIX = 'room_learner::lifecycle::temporal_control::'
 C1 = PREFIX + 'tests::full_seven_train_phases_require_fresh_confirmation_and_never_issue_fit_authority'
 C2 = PREFIX + 'tests::c2_all_seven_train_phases_use_actual_async_runtime_and_durable_seals_without_fit'
+# Exact C4C declaration; the author must verify this name in the actual Rust registry.
+C4C = PREFIX + 'public_workflow::acceptance::c4c_default48_public_operator_workflow_native128_and_cold_selection'
 BUDGET = [PREFIX + 'tests::legacy_329_actual_runtime_saturation_retires_and_explicit_fresh_train_chains_343', PREFIX + 'tests::fresh_343_actual_runtime_all_128_gaps_seven_terminal_pauses_and_retirement_fit_budget']
 # This initial policy is populated below from reviewed source call sites.
 C3 = ['room_learner::lifecycle::temporal_control::fit_control::tests::c3_actual_native_train_fit_and_same_store_cold_report_keep_whole_model_diagnostic',
@@ -37,6 +39,10 @@ def policy(root):
     if not b_marker.is_file():
         raise ValueError('C4B source marker is required; missing source is not coverage')
     components += [('C4B', b_marker, C4B, [(C4B_PREFIX, False, 11)])]
+    c_marker = source / 'lifecycle_temporal_public_acceptance_tests.rs'
+    if not c_marker.is_file():
+        raise ValueError('C4C acceptance source marker is required; missing source is not coverage')
+    components += [('C4C', c_marker, [C4C], [(C4C, True, 1)])]
     active = [item for item in components if item[1].is_file()]
     if not active or active[0][0] != 'C2':
         raise ValueError('C2 classification/source must exist; zero selected tests is not coverage')

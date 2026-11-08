@@ -570,3 +570,29 @@ mod tests;
 #[cfg(test)]
 #[path="temporal_fit_summary_managed_tests.rs"]
 mod fit_summary_tests;
+
+impl TemporalModel {
+    /// Whole-model evaluation only. The protected snapshot has authenticated
+    /// original native/HeldOut lineage; no imported diagnostic or inner model
+    /// accessor can enter this boundary. Existing infer/tokens/math is reused.
+    pub(crate) fn evaluate_managed_held_out(
+        &self,
+        source:&execution::full_run::VerifiedTemporalEvaluationSnapshot,
+    )->Result<crate::room_learner::training::EvaluationReport,String>{
+        source.require_same_model(self)?;
+        self.validate_managed()?;
+        source.held_out().validate_data_links(source.proof())?;
+        let binding=self.fit_diagnostic_binding()?;
+        let identity=&source.proof().body.identity;
+        if binding.artifact_kind!=SCHEMA_V3||binding.artifact_sha256!=identity.artifact_sha256
+            ||binding.context_digest!=identity.context_digest
+            ||binding.training_data_sha256!=source.proof().body.training_data_sha256
+            ||binding.input_evidence_sha256!=source.proof().body.training_evidence_sha256
+            ||binding.identity_evidence_sha256.as_ref()!=Some(&source.proof().body.training_identities_sha256)
+        {return Err("temporal_evaluation_whole_model_lineage_changed".into());}
+        // This bounded64-row temporary copy exists only off ingress lock and
+        // is not retained in another datastore or used for fitting/normalizing.
+        let rows=source.evaluation_rows();
+        crate::room_learner::training::EvaluationReport::compute(&self.model,&rows)
+    }
+}

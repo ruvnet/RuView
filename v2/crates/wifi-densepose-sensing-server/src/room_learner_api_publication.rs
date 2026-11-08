@@ -21,7 +21,60 @@ fn unavailable(evidence: SelectedBinaryEvidence, reason: &str) -> SelectedBinary
     }
 }
 
+fn temporal_current(state: &AppStateInner) -> Option<serde_json::Value> {
+    let rt = state.room_learning.as_ref()?;
+    if !rt.temporal_v2_state_present() {
+        return None;
+    }
+    let unavailable = |reason: &str| serde_json::json!({"schema":"ruview.room-learner.selected-binary-evidence.v2","status":"unavailable","identity":null,"reason":reason,"boot_epoch":null,"receiver_epoch":null});
+    if state.privacy_mode {
+        return Some(unavailable("selected_learning_unavailable_in_privacy_mode"));
+    }
+    let now = now_ns(rt);
+    let value = match state.current_room_store.as_ref() {
+        Some(room) => room
+            .with_current_binding(|binding| {
+                rt.temporal_selected_binary_v2(now, binding, Some(&state.calibration_boot_epoch))
+            })
+            .unwrap_or_else(|_| {
+                rt.temporal_selected_binary_v2(now, None, Some(&state.calibration_boot_epoch))
+            }),
+        None => rt.temporal_selected_binary_v2(now, None, Some(&state.calibration_boot_epoch)),
+    }
+    .unwrap_or_else(|_| unavailable("selected_projection_unavailable"));
+    if value["status"] == "none" {
+        None
+    } else {
+        Some(value)
+    }
+}
+fn temporal_unavailable(mut value: serde_json::Value, reason: &str) -> serde_json::Value {
+    let identity = value
+        .get("identity")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let boot = value
+        .get("boot_epoch")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let receiver = value
+        .get("receiver_epoch")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    value = serde_json::json!({"schema":"ruview.room-learner.selected-binary-evidence.v2","status":"unavailable","identity":identity,"reason":reason,"boot_epoch":boot,"receiver_epoch":receiver});
+    value
+}
+fn temporal_dispatch(state: &AppStateInner) -> bool {
+    state
+        .room_learning
+        .as_ref()
+        .is_some_and(|rt| rt.temporal_v2_state_present())
+}
+
 pub(crate) fn selection_owns_output(state: &AppStateInner) -> bool {
+    if temporal_dispatch(state) {
+        return temporal_current(state).is_some();
+    }
     state.room_learning.as_ref().is_some_and(|runtime| {
         !matches!(
             runtime.selected_binary_evidence(now_ns(runtime), None),
@@ -112,6 +165,17 @@ fn apply(update: &mut SensingUpdate, proof: Option<serde_json::Value>) {
 }
 
 pub(crate) fn project_live_selection(state: &AppStateInner, update: &mut SensingUpdate) {
+    if temporal_dispatch(state) {
+        let proof = temporal_current(state).map(|value| {
+            if update.source == "esp32" {
+                value
+            } else {
+                temporal_unavailable(value, "selected_native_source_update_required")
+            }
+        });
+        apply(update, proof);
+        return;
+    }
     let mut evidence = current(state);
     if update.source != "esp32" {
         evidence = unavailable(evidence, "selected_native_source_update_required");
@@ -120,6 +184,39 @@ pub(crate) fn project_live_selection(state: &AppStateInner, update: &mut Sensing
 }
 
 pub(crate) fn project_cached_selection(state: &AppStateInner, update: &mut SensingUpdate) {
+    if temporal_dispatch(state) {
+        let proof = temporal_current(state).map(|value| {
+            if value["status"] != "ready" {
+                return value;
+            }
+            let now = state
+                .room_learning
+                .as_ref()
+                .map(|rt| now_ns(rt) / 1_000_000);
+            let cached = update.selected_binary_evidence.as_ref();
+            let valid = update.source == "esp32"
+                && cached == Some(&value)
+                && value["observed_at_unix_ms"]
+                    .as_u64()
+                    .zip(now)
+                    .and_then(|(observed, now)| now.checked_sub(observed))
+                    .is_some_and(|age| {
+                        age <= wifi_densepose_sensing_server::room_learner::observation::MAX_AGE_NS
+                            / 1_000_000
+                    })
+                && value["valid_until_unix_ms"]
+                    .as_u64()
+                    .zip(now)
+                    .is_some_and(|(until, now)| now < until);
+            if valid {
+                cached.cloned().expect("matched admitted proof")
+            } else {
+                temporal_unavailable(value, "selected_cached_observation_unavailable")
+            }
+        });
+        apply(update, proof);
+        return;
+    }
     let mut evidence = current(state);
     if let SelectedBinaryEvidence::Ready { identity, .. } = &evidence {
         let cached = update.selected_binary_evidence.as_ref();

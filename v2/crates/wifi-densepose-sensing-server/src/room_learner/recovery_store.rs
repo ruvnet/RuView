@@ -229,6 +229,19 @@ impl RecoveryStore {
         }
         private_directory(&self.directory)
     }
+    /// Non-repairing owner validation for read-scoped status discovery.
+    /// Unlike prepare_directory this never creates directories or chmods them.
+    fn verify_directory_read_only(&self)->Result<(),String>{
+        let owned=self.directory.parent().ok_or("recovery_owner_mismatch")?;
+        if !hex(&self.owner)||owned.file_name().and_then(|v|v.to_str())!=Some("SensingServer")||owned.parent().and_then(Path::file_name).and_then(|v|v.to_str())!=Some(self.owner.as_str())||owned.canonicalize().map_err(|_|"recovery_owner_mismatch")?!=owned{return Err("recovery_owner_mismatch".into());}
+        for(path,directory)in[(owned.to_path_buf(),true),(owned.join("account-owner-v1.json"),false),(self.directory.clone(),true)]{
+            let m=fs::symlink_metadata(&path).map_err(|_|"recovery_owner_mismatch")?;
+            if m.file_type().is_symlink()||(directory&&!m.is_dir())||(!directory&&!m.is_file()){return Err("recovery_unsafe_owner_path".into());}private_metadata(&m,directory)?;
+        }
+        let witness=crate::companion::private_read(&owned.join("account-owner-v1.json")).map_err(|_|"recovery_owner_mismatch")?;
+        let value:serde_json::Value=serde_json::from_slice(&witness).map_err(|_|"recovery_owner_mismatch")?;
+        if value.get("schema").and_then(|v|v.as_str())!=Some("ruview.account-owner.v1")||value.get("scope_key").and_then(|v|v.as_str())!=Some(self.owner.as_str()){return Err("recovery_owner_mismatch".into());}Ok(())
+    }
     fn descriptor(&self, d: &RecoveryDescriptor, now: Option<u64>) -> Result<(), String> {
         if d.schema != RECOVERY_SCHEMA
             || !id(&d.id)

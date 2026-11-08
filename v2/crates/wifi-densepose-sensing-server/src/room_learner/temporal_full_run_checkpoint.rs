@@ -716,7 +716,7 @@ fn decode_continued(
     workflow.full_run = Some(mode);
     Ok(workflow)
 }
-fn validate_immutable_train(
+pub(super) fn validate_immutable_train(
     w: &TemporalWorkflow,
     record: &VerifiedFitRecordData,
 ) -> Result<(), String> {

@@ -42,20 +42,27 @@ impl AcceptedTemporalFit {
 }
 /// One lifetime barrier for the SAME existing Job/executor, not a new queue or
 /// trainer. Cancellation is atomic; waiting/publication never holds inner.
-struct FitLifetime {
-    cancel: Arc<AtomicBool>,
-    publication: Mutex<()>,
-    completed: Mutex<bool>,
-    completion: Condvar,
-    anchor: u64,
-    origin: Instant,
-    observed: AtomicU64,
-    expires_at_ms: u64,
+pub(super) struct FitLifetime {
+    pub(super) cancel: Arc<AtomicBool>,
+    pub(super) publication: Mutex<()>,
+    pub(super) completed: Mutex<bool>,
+    pub(super) completion: Condvar,
+    pub(super) anchor: u64,
+    pub(super) origin: Instant,
+    pub(super) observed: AtomicU64,
+    pub(super) expires_at_ms: u64,
     #[cfg(test)]
-    hook: Option<Arc<dyn Fn(&'static str) + Send + Sync>>,
+    pub(super) hook: Option<Arc<dyn Fn(&'static str) + Send + Sync>>,
+    #[cfg(test)]
+    pub(super) io_hook: Option<Arc<dyn Fn(&'static str)->Result<(),String>+Send+Sync>>,
 }
 impl FitLifetime {
-    fn now(&self) -> Result<u64, String> {
+    pub(super) fn io(&self,stage:&'static str)->Result<(),String>{
+        #[cfg(test)] if let Some(hook)=&self.io_hook{return hook(stage);}
+        #[cfg(not(test))] let _=stage;
+        Ok(())
+    }
+    pub(super) fn now(&self) -> Result<u64, String> {
         let elapsed: u64 = self
             .origin
             .elapsed()
@@ -68,7 +75,7 @@ impl FitLifetime {
                 .ok_or("temporal_fit_clock_overflow")?,
         ))
     }
-    fn allowed(&self) -> Result<u64, String> {
+    pub(super) fn allowed(&self) -> Result<u64, String> {
         if self.cancel.load(Ordering::Acquire) {
             return Err("temporal_fit_cancelled".into());
         }
@@ -78,13 +85,13 @@ impl FitLifetime {
         }
         Ok(now)
     }
-    fn cancel(&self) {
+    pub(super) fn cancel(&self) {
         self.cancel.store(true, Ordering::Release);
     }
-    fn done(&self) -> bool {
+    pub(super) fn done(&self) -> bool {
         *self.completed.lock().unwrap_or_else(|e| e.into_inner())
     }
-    fn drain(&self) {
+    pub(super) fn drain(&self) {
         self.cancel();
         let mut complete = self.completed.lock().unwrap_or_else(|e| e.into_inner());
         while !*complete {
@@ -94,7 +101,7 @@ impl FitLifetime {
                 .unwrap_or_else(|e| e.into_inner());
         }
     }
-    fn at(&self, stage: &'static str) {
+    pub(super) fn at(&self, stage: &'static str) {
         #[cfg(test)]
         if let Some(hook) = &self.hook {
             hook(stage);
@@ -109,6 +116,9 @@ pub(super) struct TemporalFitJob {
     lifetime: Arc<FitLifetime>,
 }
 impl TemporalFitJob {
+    pub(super) fn uncancelled_completed(&self)->bool{self.done()&&!self.lifetime.cancel.load(Ordering::Acquire)}
+    pub(super) fn attempt_matches(&self,attempt:u64,cancel:&Arc<AtomicBool>)->bool{self.identity.attempt==attempt&&self.uses_cancel(cancel)&&!self.lifetime.cancel.load(Ordering::Acquire)}
+    pub(super) fn uses_cancel(&self,cancel:&Arc<AtomicBool>)->bool{Arc::ptr_eq(cancel,&self.lifetime.cancel)}
     pub(super) fn observe_now(&self, now: u64) {
         self.lifetime.observed.fetch_max(now, Ordering::AcqRel);
     }
@@ -118,9 +128,7 @@ impl TemporalFitJob {
     pub(super) fn drain(&self) {
         self.lifetime.drain();
     }
-    fn done(&self) -> bool {
-        self.lifetime.done()
-    }
+    pub(super) fn done(&self) -> bool { self.lifetime.done() }
 }
 /// Created before scheduling. Dropping an unstarted/discarded closure also
 /// releases waiters. Worker outcome/raw ownership is destroyed before this.
@@ -173,9 +181,8 @@ impl Drop for FitCompletion {
 }
 impl RuntimeTemporalCapture {
     pub(super) fn cancel_fit(&self) {
-        if let Some(job) = &self.fit_job {
-            job.cancel();
-        }
+        if let Some(job) = &self.fit_job { job.cancel(); }
+        if let Some(job) = &self.evidence_job { job.cancel(); }
     }
     pub(super) fn take_current_accepted_fit(&mut self,epoch:&str,generation:u64,now:u64)->Result<AcceptedTemporalFit,String>{
         if self.owner_generation!=generation||self.failure.is_some(){return Err("temporal_accepted_fit_owner_changed".into());}
@@ -287,6 +294,8 @@ impl RoomLearningRuntime {
                 origin: Instant::now(),
                 observed: AtomicU64::new(now),
                 expires_at_ms: binding.expires_at_ms(),
+                #[cfg(test)]
+                io_hook:None,
                 #[cfg(test)]
                 hook: self
                     .temporal_fit_hook

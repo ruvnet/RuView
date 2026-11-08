@@ -79,7 +79,7 @@ fn configured(root: &Path) -> (Arc<RoomLearningRuntime>, u64) {
     let now = fixture::settle_async_boundary(&runtime, fixture::START);
     (runtime, now)
 }
-fn packet(source: u8, sequence: u32, at: u64, label: RoomLabel) -> CanonicalPacket {
+pub(super) fn packet(source: u8, sequence: u32, at: u64, label: RoomLabel) -> CanonicalPacket {
     let gain = match label {
         RoomLabel::Empty => 3,
         RoomLabel::AdjacentOnly => 4,
@@ -179,7 +179,7 @@ fn record_train_uncached(root: &Path) -> (Arc<RoomLearningRuntime>, u64) {
     (runtime, now)
 }
 
-fn copy_private(from: &Path, to: &Path) {
+pub(super) fn copy_private(from: &Path, to: &Path) {
     use std::os::unix::fs::PermissionsExt;
     assert!(!std::fs::symlink_metadata(from)
         .unwrap()
@@ -215,7 +215,7 @@ fn record_train(root: &Path) -> (Arc<RoomLearningRuntime>, u64) {
     assert_eq!(fixture::snapshot(&rt, now)["stage"], "complete");
     (rt, now)
 }
-fn assert_original_lifetime(value: &serde_json::Value, original: &serde_json::Value) {
+pub(super) fn assert_original_lifetime(value: &serde_json::Value, original: &serde_json::Value) {
     for field in [
         "schema",
         "id",
@@ -264,14 +264,14 @@ async fn prepare_frozen(rt: &Arc<RoomLearningRuntime>, at: u64) -> u64 {
     }
 }
 
-fn phase_target(rt: &RoomLearningRuntime) -> Option<(u64, u64)> {
+pub(super) fn phase_target(rt: &RoomLearningRuntime) -> Option<(u64, u64)> {
     let state = rt.inner.lock().unwrap();
     let Some(CaptureWorkflow::Temporal(c)) = &state.capture else {
         panic!()
     };
     c.core.as_ref().unwrap().c4b_test_target()
 }
-fn receiver_floor(rt: &RoomLearningRuntime) -> u32 {
+pub(super) fn receiver_floor(rt: &RoomLearningRuntime) -> u32 {
     let state = rt.inner.lock().unwrap();
     let Some(CaptureWorkflow::Temporal(c)) = &state.capture else {
         panic!()
@@ -286,7 +286,7 @@ fn receiver_floor(rt: &RoomLearningRuntime) -> u32 {
         .max()
         .unwrap()
 }
-fn prefix_value(rt: &RoomLearningRuntime, now: u64) -> serde_json::Value {
+pub(super) fn prefix_value(rt: &RoomLearningRuntime, now: u64) -> serde_json::Value {
     let loaded = rt
         .temporal_store()
         .unwrap()
@@ -295,7 +295,7 @@ fn prefix_value(rt: &RoomLearningRuntime, now: u64) -> serde_json::Value {
         .unwrap();
     serde_json::from_slice(loaded.prefix.unwrap().bytes()).unwrap()
 }
-fn same_train_and_frozen(before: &serde_json::Value, after: &serde_json::Value) {
+pub(super) fn same_train_and_frozen(before: &serde_json::Value, after: &serde_json::Value) {
     for field in ["rows", "evidence", "identities"] {
         assert_eq!(
             &before["payload"]["accepted"][field].as_array().unwrap()[..64],

@@ -124,6 +124,7 @@ pub struct ContinuousTemporalInput {
     counts: HashMap<u8, WindowCount>,
     last_now: Option<u64>,
     observation: Option<CompletedObservation>,
+    #[cfg(test)] last_input_error:Option<String>,
 }
 impl ContinuousTemporalInput {
     pub fn new(model: TemporalModel) -> Result<Self, String> {
@@ -159,6 +160,7 @@ impl ContinuousTemporalInput {
             counts: HashMap::new(),
             last_now: None,
             observation: None,
+            #[cfg(test)] last_input_error:None,
         })
     }
     pub fn activate(&mut self) {
@@ -355,7 +357,9 @@ impl ContinuousTemporalInput {
         self.status.reason = Some("collecting_full_horizon");
         let admission = match self.input.as_mut().unwrap().ingest(p) {
             Ok(v) => v,
-            Err(_) => {
+            Err(error) => {
+                #[cfg(test)]{self.last_input_error=Some(error.clone());}
+                #[cfg(not(test))]let _=error;
                 self.withdraw("source_or_window_invalid");
                 return self.status.clone();
             }
@@ -485,3 +489,39 @@ impl ContinuousTemporalInput {
 #[cfg(test)]
 #[path = "temporal_live_driver_tests.rs"]
 mod tests;
+
+/// Bounded current observation projection. This never changes inference time.
+pub(crate) struct SelectedTemporalObservation {
+    pub prediction:RoomPrediction,pub digest:String,pub first_ns:u64,pub end_ns:u64,pub expires_ns:u64,pub source_latest_ns:u64,
+}
+impl ContinuousTemporalInput {
+    pub(crate) fn from_selected(selected:&crate::room_learner::artifact::StoredTemporalSelection)->Result<Self,String>{
+        let mut driver=Self::new(selected.model().clone())?;
+        let held=selected.held();held.validate_data()?;
+        for floor in &held.body.final_source_fences {
+            driver.fences.insert(floor.source_id,Fence{sequence:floor.sequence.try_into().map_err(|_|"selected_sequence_overflow")?,time_ns:floor.receiver_ns.parse().map_err(|_|"selected_receiver_clock")?,frame_id:floor.native_frame_id.parse().map_err(|_|"selected_native_frame")?});
+        }
+        driver.last_now=Some(held.body.complete_persisted_receiver_ns.parse().map_err(|_|"selected_receiver_clock")?);
+        driver.activate();Ok(driver)
+    }
+    pub(crate) fn advance_selected_floors(&mut self,floors:&[(u8,u64,u64)],receiver_floor:u64)->Result<(),String>{
+        if floors.len()!=3||floors.iter().any(|(id,seq,_)|*seq>u32::MAX as u64||!self.policy.context().sources.iter().any(|s|s.source_id==*id)){return Err("selected_source_floor_identity".into());}
+        for(id,seq,time)in floors{let frame=(u128::from(*time)<<40)|(u128::from(*id)<<32)|u128::from(*seq);if let Some(old)=self.fences.get(id){if *seq<u64::from(old.sequence)||*time<old.time_ns{return Err("selected_source_floor_regression".into());}}
+            self.fences.insert(*id,Fence{sequence:*seq as u32,time_ns:*time,frame_id:frame});}
+        if self.last_now.is_some_and(|old|receiver_floor<old){return Err("selected_receiver_floor_regression".into());}self.last_now=Some(receiver_floor);Ok(())
+    }
+    pub(crate) fn selected_observation(&mut self,now:u64)->Result<SelectedTemporalObservation,String>{
+        self.poll(now);
+        if self.status.observation.availability!=ObservationAvailability::Available{return Err(self.status.observation.reason.unwrap_or("selected_native_input_unavailable").into());}
+        let o=self.observation.as_ref().ok_or("selected_native_input_unavailable")?;
+        if o.prediction.decision==super::model::PresenceDecision::Abstain{return Err("selected_model_abstained".into());}
+        let source_latest_ns=self.policy.context().sources.iter().map(|s|self.continuity.get(&s.source_id).copied().ok_or("selected_source_missing")).collect::<Result<Vec<_>,_>>()?.into_iter().min().ok_or("selected_source_missing")?;
+        if now<source_latest_ns||now-source_latest_ns>1_000_000_000{return Err("selected_source_stale".into());}
+        Ok(SelectedTemporalObservation{prediction:o.prediction.clone(),digest:o.digest.clone(),first_ns:o.first_ns,end_ns:o.source_bounds.iter().map(|s|s.last_ns).max().ok_or("selected_source_missing")?,expires_ns:o.expires_ns,source_latest_ns})
+    }
+}
+
+#[cfg(test)]
+impl ContinuousTemporalInput{pub(crate) fn c4c_replay_floor_probe(&self)->Vec<(u8,u32,u64,u128)>{let mut out=self.fences.iter().map(|(id,f)|(*id,f.sequence,f.time_ns,f.frame_id)).collect::<Vec<_>>();out.sort_by_key(|v|v.0);out}}
+
+#[cfg(test)]impl ContinuousTemporalInput{pub(crate) fn c4c_last_input_failure(&self)->Option<&str>{self.last_input_error.as_deref()}}

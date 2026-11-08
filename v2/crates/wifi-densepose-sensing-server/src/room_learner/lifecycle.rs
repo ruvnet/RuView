@@ -80,7 +80,7 @@ impl Inner {
         })
     }
     fn require_legacy_kind(&self) -> Result<(), String> {
-        if matches!(self.capture, Some(CaptureWorkflow::Temporal(_))) {
+        if matches!(self.capture, Some(CaptureWorkflow::Temporal(_)))||self.selection.temporal.is_some() {
             Err("learner_temporal_capture_private_unsupported_command".into())
         } else { Ok(()) }
     }
@@ -98,6 +98,8 @@ pub struct RoomLearningRuntime {
     panic_after_reclamation_ack:AtomicBool,
     #[cfg(test)]
     temporal_fit_hook: Mutex<Option<Arc<dyn Fn(&'static str) + Send + Sync>>>,
+    #[cfg(test)]
+    temporal_evidence_io_hook: Mutex<Option<Arc<dyn Fn(&'static str)->Result<(),String> + Send + Sync>>>,
     clock_origin: std::time::Instant,
     clock_epoch_ns: u64,
 }
@@ -195,6 +197,7 @@ impl RoomLearningRuntime {
             #[cfg(test)] reclamation_probe:Mutex::new(None),
             #[cfg(test)] panic_after_reclamation_ack:AtomicBool::new(false),
             #[cfg(test)] temporal_fit_hook:Mutex::new(None),
+            #[cfg(test)] temporal_evidence_io_hook:Mutex::new(None),
             inner: Mutex::new(Inner {
                 generation: 0,
                 workflow_revision: 0,
@@ -213,12 +216,13 @@ impl RoomLearningRuntime {
                 qualification_error: None,
             }),
         };
+        let temporal_selected=runtime.store.load_temporal_selection().and_then(|stored|stored.map(temporal_control::selected_control::TemporalSelectedRuntime::new).transpose());
         {
             let mut state = runtime
                 .inner
                 .lock()
                 .map_err(|_| "learner state unavailable")?;
-            runtime.restore_selection(&mut state);
+            match temporal_selected{Ok(Some(selected))=>{state.selection.temporal=Some(Arc::new(selected));},Ok(None)=>runtime.restore_selection(&mut state),Err(error)=>state.selection.error=Some(bounded(error))}
             runtime.inspect_recovery(&mut state, runtime.receiver_now_ns());
         }
         Ok(runtime)
@@ -451,14 +455,16 @@ impl RoomLearningRuntime {
             .live_cohort(now_ns)?;
         Ok((self.guard_for(&state), model.infer(&cohort)))
     }
-    pub fn status(&self, now_ns: u64) -> Value {
+    pub fn status(&self,now_ns:u64)->Value{self.status_with_checkpoint(now_ns,true)}
+    pub(super) fn status_without_checkpoint(&self,now_ns:u64)->Value{self.status_with_checkpoint(now_ns,false)}
+    fn status_with_checkpoint(&self,now_ns:u64,checkpoint:bool)->Value{
         let Ok(mut state) = self.inner.lock() else {
             return json!({"enabled":true,"state":"unavailable"});
         };
         if state.require_legacy_kind().is_err() {
             return json!({"schema":"ruview.room-learner.status.v1","enabled":true,"success":false,"error_code":"learner_temporal_capture_private_unsupported_command"});
         }
-        let _ = self.checkpoint_recovery(&mut state, now_ns, false);
+        if checkpoint{let _ = self.checkpoint_recovery(&mut state, now_ns, false);}
         let required_ids: Vec<_> = state.legacy_capture()
             .map(|c| c.context().sources.iter().map(|s| s.source_id).collect())
             .unwrap_or_default();
