@@ -3,6 +3,7 @@
 import argparse, hashlib, json, os, pathlib, re, stat, subprocess, sys
 
 PREFIX = 'room_learner::lifecycle::temporal_control::'
+C1 = PREFIX + 'tests::full_seven_train_phases_require_fresh_confirmation_and_never_issue_fit_authority'
 C2 = PREFIX + 'tests::c2_all_seven_train_phases_use_actual_async_runtime_and_durable_seals_without_fit'
 BUDGET = [PREFIX + 'tests::legacy_329_actual_runtime_saturation_retires_and_explicit_fresh_train_chains_343', PREFIX + 'tests::fresh_343_actual_runtime_all_128_gaps_seven_terminal_pauses_and_retirement_fit_budget']
 # This initial policy is populated below from reviewed source call sites.
@@ -26,6 +27,7 @@ C4 = ['room_learner::lifecycle::temporal_control::full_run_tests::c4a_actual_sev
 def policy(root):
     source = root / 'v2/crates/wifi-densepose-sensing-server/src/room_learner'
     components = [('C2', source / 'lifecycle_temporal_tests.rs', [C2], [(C2, True, 1)])]
+    components += [('C1', source / 'lifecycle_temporal_tests.rs', [C1], [(C1, True, 1)])]
     components += [('C3', source / 'lifecycle_temporal_fit_tests.rs', C3, [(PREFIX + 'fit_control::tests::', False, 12)]), ('C4', source / 'lifecycle_temporal_full_run_tests.rs', C4, [(PREFIX + 'full_run_tests::', False, 8)]), ('budget343', source / 'temporal_budget_profile_tests.rs', BUDGET, [(name, True, 1) for name in BUDGET])]
     active = [item for item in components if item[1].is_file()]
     if not active or active[0][0] != 'C2':
