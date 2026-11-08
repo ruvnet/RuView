@@ -456,3 +456,59 @@ async fn concurrent_actual_owner_status_requests_keep_unstarted_full_run_ready()
     assert!(errors.is_empty(),"actual concurrent owner GETs failed an unstarted run: {errors:?}");
     let last=decoded(app,&format!("/status?schema={STATUS_SCHEMA}"),None).await;assert_eq!(last["status"]["capture"]["retained_windows"],0);assert_eq!(last["status"]["capture"]["durable_windows"],0);assert_eq!(last["status"]["capture"]["observed_ms"],0);
 }
+
+#[tokio::test]
+async fn actual_client_publication_and_learner_revision_domains_pair_without_rewriting_context() {
+    use wifi_densepose_sensing_server::room_learner::recovery_store::RecoveryStore;
+    let client:serde_json::Value=serde_json::from_str(include_str!("testdata/paired_temporal_client_revision.json")).unwrap();
+    let (dir,state)=fixture();let owner="a".repeat(64);let installation=client["installation_id"].as_str().unwrap();
+    let path=dir.path().join(&owner).join("SensingServer");let recovery=RecoveryStore::new(&path,&owner,installation,Some(&[7;32])).unwrap();
+    let rt=Arc::new(RoomLearningRuntime::new_with_recovery(&path,&owner,installation,recovery).unwrap());
+    let publication=crate::companion_room::SharedRoomStore::load(&dir.path().join("publication"),installation).unwrap();
+    let publish=|body:serde_json::Value|{let router=crate::companion_room::owner_router(publication.clone());async move{
+        let reply=router.oneshot(Request::builder().method(Method::PUT).uri("/api/v1/companion/room").header("content-type","application/json").body(Body::from(body.to_string())).unwrap()).await.unwrap();assert_eq!(reply.status(),StatusCode::OK);let bytes=axum::body::to_bytes(reply.into_body(),65536).await.unwrap();serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()
+    }};
+    let initial=publish(client["publication_request"]["body"].clone()).await;
+    assert_eq!(initial["binding_digest"],client["binding_digest"]);assert_eq!(initial["revision"],1);
+    {let mut s=state.write().await;s.room_learning=Some(rt.clone());s.current_room_store=Some(publication.clone());s.installation_id=Some(installation.into());s.calibration_boot_epoch="synthetic-paired-domain-boot".into();}
+    let mut command=client["configure_request"]["body"].clone();command["expected"]=serde_json::to_value(rt.mutation_guard().unwrap()).unwrap();
+    assert_eq!(command["revision"],211247076768791u64);
+    let app=temporal_app(state.clone());let configured=decoded(app.clone(),"/configure",Some(command)).await;assert_eq!(configured["success"],true,"{configured}");
+    let mut ready=false;for _ in 0..100{let s=decoded(app.clone(),&format!("/status?schema={STATUS_SCHEMA}"),None).await;if s["status"]["capture"]["stage"]=="ready"{ready=true;break;}tokio::time::sleep(std::time::Duration::from_millis(2)).await;}assert!(ready);
+    let context=rt.context().unwrap();assert_eq!(context.revision,211247076768791);assert_eq!(context.room_digest,client["binding_digest"].as_str().unwrap());
+    let before_guard=rt.mutation_guard().unwrap();let before=decoded(app.clone(),&format!("/status?schema={STATUS_SCHEMA}"),None).await;
+    let progress=Router::new().route("/progress",get(super::super::paired_progress::progress_dispatch)).with_state(state.clone());
+    let current=decoded(progress.clone(),"/progress",None).await;
+    println!("SYNTHETIC_ACTUAL_CLIENT_PAIRED_REVISION_SEAM={current}");
+    assert_eq!(current["context_match"],true,"{current}");assert_eq!(current["room"]["revision"],1);assert_eq!(current["room"]["binding_digest"],client["binding_digest"]);
+    assert_eq!(current["sources"]["ready"],3);assert_eq!(current["capture"]["retained_windows"],0);assert_eq!(current["capture"]["durable_windows"],0);
+    assert_eq!(rt.mutation_guard().unwrap(),before_guard);assert_eq!(rt.context().unwrap(),context);
+    let after=decoded(app.clone(),&format!("/status?schema={STATUS_SCHEMA}"),None).await;
+    assert_eq!(before["status"]["capture"]["capture_generation_id"],after["status"]["capture"]["capture_generation_id"]);assert_eq!(before["status"]["capture"]["original_deadline"],after["status"]["capture"]["original_deadline"]);
+    let mut old_learner_context=context.clone();old_learner_context.revision=1;
+    assert_ne!(old_learner_context.digest(),context.digest(),"exact selected/capture context digest must retain the learner revision binding");
+    let wrong_ready=rt.paired_temporal_progress_snapshot(installation,"synthetic-paired-domain-boot",Some(wifi_densepose_sensing_server::room_learner::lifecycle::PublishedProgressRoom{binding_digest:context.room_digest.clone(),revision:1}),&[15,16,17],Some(&"f".repeat(64)),rt.receiver_now_ns());
+    assert_eq!(wrong_ready.unwrap_err(),"progress_context_changed");
+    {state.write().await.privacy_mode=true;}
+    assert_eq!(request_raw(progress.clone(),"/progress",None).await.0,StatusCode::FORBIDDEN);
+    {let mut s=state.write().await;s.privacy_mode=false;s.installation_id=Some("foreign-installation".into());}
+    assert_eq!(request_raw(progress.clone(),"/progress",None).await.0,StatusCode::SERVICE_UNAVAILABLE);
+    {state.write().await.installation_id=Some(installation.into());}
+    let source_cache={let mut s=state.write().await;let old=s.room_learning_sources.clone();s.room_learning_sources.retain(|key,_|key.node_id!=17);old};
+    let missing_source=decoded(progress.clone(),"/progress",None).await;assert_eq!(missing_source["context_match"],true);assert_eq!(missing_source["sources"]["ready"],2);
+    {state.write().await.room_learning_sources=source_cache;}
+    let (revoked,rx)=tokio::sync::watch::channel(false);let expiry=chrono::Utc::now().timestamp().max(0)as u64+8;
+    let grant=wifi_densepose_sensing_server::companion::Grant{device_id:"synthetic-paired-reader".into(),expires_at:expiry,revoked:rx};
+    let guarded=Router::new().route("/progress",get(super::super::paired_progress::progress_dispatch)).with_state(state.clone()).layer(axum::Extension(grant));
+    let authorized=decoded(guarded.clone(),"/progress",None).await;assert!(authorized["expires_at_unix_ms"].as_u64().unwrap()<=expiry*1000);
+    revoked.send(true).unwrap();assert_eq!(request_raw(guarded,"/progress",None).await.0,StatusCode::UNAUTHORIZED);
+    let mut revision=1;
+    for change in ["same_geometry_new_publication","dimensions","nodes","access_point"] {
+        let mut room=client["canonical_room"].clone();
+        match change{"dimensions"=>room["widthM"]=serde_json::json!(2.6),"nodes"=>room["nodes"][0]["xM"]=serde_json::json!(0.5),"access_point"=>room["accessPoint"]=serde_json::json!({"slot":"north_center","xM":1.25,"yM":0.4,"provenance":"operator_entered","confirmedAtUnixMs":1}),_=>{}}
+        let changed=publish(serde_json::json!({"expected_revision":revision,"room":room})).await;revision+=1;assert_ne!(changed["binding_digest"],client["binding_digest"]);
+        let blocked=decoded(progress.clone(),"/progress",None).await;assert_eq!(blocked["context_match"],false,"{change}:{blocked}");assert_eq!(blocked["blocker"],"context_mismatch");
+        for key in ["room","model_kind","profile","capture","candidate","evaluation","qualification","selection","sources"]{assert!(blocked[key].is_null(),"{change}:{key}");}
+        assert_eq!(rt.context().unwrap(),context);assert_eq!(rt.mutation_guard().unwrap(),before_guard);
+    }
+}
