@@ -436,3 +436,14 @@ impl QualificationEnvelope {
 #[cfg(test)]
 #[path = "qualification_boundary_tests.rs"]
 mod boundary_tests;
+
+/// Descriptive native-window failure flags use the SAME integer thresholds and
+/// denominators as criteria. Legacy policy/behavior/serialization is unchanged.
+pub(crate) fn native_condition_failure_codes(c:&super::training::ConditionEvaluation)->Vec<String>{
+    let mut codes=Vec::new();
+    if (c.scored as u128)*PERCENT_SCALE<(c.samples as u128)*MIN_COVERAGE_PERCENT{codes.push("coverage_below_minimum".into());}
+    if matches!(c.condition,RoomLabel::OccupiedStatic|RoomLabel::OccupiedMoving){
+        if(c.confusion.true_occupied as u128)*PERCENT_SCALE<(c.samples as u128)*MIN_SENSITIVITY_PERCENT{codes.push("sensitivity_below_minimum".into());}
+    }else if(c.confusion.false_occupied as u128)*PERCENT_SCALE>(c.samples as u128)*MAX_FALSE_POSITIVE_PERCENT{codes.push("false_positive_rate_above_maximum".into());}
+    codes
+}

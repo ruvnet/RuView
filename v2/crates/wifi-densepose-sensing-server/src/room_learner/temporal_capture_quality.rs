@@ -479,6 +479,7 @@ impl TemporalCaptureStage {
 }
 pub(crate) struct TemporalTrainCapture {
     workflow: TemporalWorkflow,
+    public_generation_id: String,
     // The exact immutable contract decoded from this workflow's validated
     // binding. Packet handling must not reparse its full JSON on every tick.
     schedule: ManagedScheduleContract,
@@ -513,9 +514,13 @@ impl TemporalTrainCapture {
         // Fail unsupported full-run profiles before creating a writer/genesis.
         full_run::ContinuationPolicy::build(&ManagedBinding::build(&schedule,config.clone())?)?;
         let owned_store=store.clone();
+        // Reuse authenticated retired-head chaining. An active predecessor is
+        // refused; this never upgrades/replaces an existing capture in place.
+        let predecessor=store.fresh_train_genesis_predecessor(now)?;
         Self::prepare_with(schedule,run,config,now,&store,move|w,store|{
             let binding=&w.session.managed.as_ref().ok_or("managed_session_required")?.binding;
             w.full_run=Some(full_run::FullRunState::fresh(binding,&w.session.run_id,witness)?);
+            w.commit_token=predecessor;
             let writer=std::sync::Arc::new(durability::Writer::new(owned_store,now)?);
             w.async_state=Some(durability::AsyncState::new(writer));
             w.persist_initial(store)
@@ -575,7 +580,7 @@ impl TemporalTrainCapture {
         workflow.async_state=Some(durability::AsyncState::new(writer));
         let error=workflow.persist_initial(&store).err();
         if error.is_some(){workflow.stage=Stage::BlockedDurability;}
-        Ok((Self{workflow,schedule,failure:None,durable_seals:0},error))
+        Ok((Self{public_generation_id:public_generation_id(&workflow)?,workflow,schedule,failure:None,durable_seals:0},error))
     }
     pub(crate) fn async_start(&mut self,now:u64)->Result<bool,String>{
         self.ensure_live()?;
@@ -634,6 +639,7 @@ impl TemporalTrainCapture {
         }
         Ok((
             Self {
+                public_generation_id:public_generation_id(&workflow)?,
                 workflow,
                 schedule,
                 failure: None,
@@ -684,16 +690,24 @@ impl TemporalTrainCapture {
             && !full_run_continuation_fence {
             return Err("temporal_priming_state".into());
         }
+        // No recorded observation exists in these closed Full2 stages. A
+        // changing host-arrival estimate may prime identity/replay fences,
+        // while the frozen recording band remains mandatory in ingest().
+        let full_run_idle = self.is_full_run() && matches!(self.stage(),
+            TemporalCaptureStage::Ready | TemporalCaptureStage::Paused |
+            TemporalCaptureStage::Preparing | TemporalCaptureStage::Blocked |
+            TemporalCaptureStage::Complete | TemporalCaptureStage::Frozen |
+            TemporalCaptureStage::FullComplete);
         let result: Result<(), String> = (|| {
             let w = &mut self.workflow;
             w.check_clock(now)?;
-            w.session
-                .managed
-                .as_ref()
-                .ok_or("managed_session_required")?
-                .binding
-                .native
-                .validate_packet_source(p)?;
+            let native = &w.session.managed.as_ref()
+                .ok_or("managed_session_required")?.binding.native;
+            if full_run_idle {
+                native.validate_priming_packet_source_identity(p)?;
+            } else {
+                native.validate_packet_source(p)?;
+            }
             let t = p.native_frame.timestamp_ns;
             if p.provenance != CaptureProvenance::LiveReceiverObserved
                 || p.native_frame.provenance.class
@@ -1037,6 +1051,7 @@ impl TemporalTrainCapture {
         let n = b.seals.len();
         let schedule = w.schedule()?;
         Ok(Self {
+            public_generation_id:public_generation_id(&w)?,
             workflow: w,
             schedule,
             failure: None,
@@ -1049,7 +1064,7 @@ impl TemporalTrainCapture {
     )->Result<Self,String>{
         let w=full_run::recover_current(store,artifact,context,now,epoch,anchor,witness)?;
         let n=w.bridge.as_ref().ok_or("temporal_bridge_checkpoint_required")?.seals.len();let schedule=w.schedule()?;
-        Ok(Self{workflow:w,schedule,failure:None,durable_seals:n})
+        Ok(Self{public_generation_id:public_generation_id(&w)?,workflow:w,schedule,failure:None,durable_seals:n})
     }
     pub(crate) fn repair_pending(&mut self, store: &RecoveryStore, now: u64) -> Result<(), String> {
         if self.workflow.async_state.is_some(){return self.workflow.request_async_repair(now);}
@@ -1108,3 +1123,72 @@ impl Drop for TemporalTrainCapture {
 #[cfg(test)]
 #[path="temporal_budget_profile_tests.rs"]
 mod budget_profile_tests;
+
+impl TemporalTrainCapture {
+    pub(crate) fn prepare_evaluation_source(&self,now:u64,held_out:bool)->Result<full_run::PendingTemporalEvidenceSource,String>{
+        self.ensure_live()?;self.workflow.prepare_temporal_evidence_source(now,held_out,&self.schedule)
+    }
+    pub(crate) fn evaluation_binding_matches(&self,binding:&full_run::TemporalEvaluationBinding)->bool{
+        self.failure.is_none()&&self.workflow.current_temporal_evidence_matches(binding)
+    }
+}
+
+// Informational public generation binding only, never an owner/source permit.
+// Computed once by off-lock construction/recovery, not on packet ingress.
+fn public_generation_id(w:&TemporalWorkflow)->Result<String,String>{hash(&("ruview.room-learner.capture-generation.v2",&w.descriptor.id,&w.session.run_id,w.context().digest()))}
+impl TemporalTrainCapture {
+    pub(crate) fn public_generation_id(&self)->&str{&self.public_generation_id}
+    pub(crate) fn public_phase_matches(&self,generation:&str,schedule:&str,episode:usize)->bool{self.public_generation_id==generation&&self.schedule.sha256()==schedule&&self.workflow.episode==episode}
+    pub(crate) fn public_profile(&self)->crate::room_learner::temporal_wire::TemporalProfileWire{
+        use crate::room_learner::temporal_wire::*;
+        TemporalProfileWire{profile_id:"native-2s-three-source-56bin-option-a-engineering-v1".into(),window_unit:"native_receiver_2s_window".into(),native_window_ms:2000,train_windows:64,held_out_windows:64,train_episodes:7,held_out_episodes:8,windows_per_condition:[16;4],train_episodes_per_condition:[1,2,2,2],held_out_episodes_per_condition:[2;4],episodes:self.schedule.episodes().iter().map(|e|TemporalEpisodeWire{index:e.index as u8,role:e.role,label:e.condition,target_ms:e.target_active_recording_ms,lead_in_ms:e.lead_in_ms,native_windows:e.slots.len()as u16}).collect()}
+    }
+    pub(crate) fn public_capture(&self,epoch:&str,lead_until:Option<u64>,now:u64)->crate::room_learner::temporal_wire::TemporalCaptureWire{
+        use crate::room_learner::temporal_wire::*;
+        let w=&self.workflow;let episode=self.schedule.episodes().get(w.episode);let lead=lead_until.map_or(0,|end|end.saturating_sub(now)/1_000_000);
+        let challenge=if matches!(self.stage(),TemporalCaptureStage::NeedsConfirmation|TemporalCaptureStage::Paused){self.confirmation_challenge().ok()}else{None};
+        TemporalCaptureWire{capture_generation_id:self.public_generation_id.clone(),schedule_sha256:self.schedule.sha256().into(),continuation_policy_sha256:w.full_run.as_ref().map(|m|m.policy.sha256().into()).unwrap_or_default(),durable_commitment_sha256:w.commit_token.as_ref().map(|t|t.data().commitment),original_deadline:TemporalOriginalDeadlineWire{created_at_unix_ms:w.descriptor.created_at_ms,expires_at_unix_ms:w.descriptor.expires_at_ms},receiver_epoch:epoch.into(),stage:if lead>0{"preparing".into()}else{self.stage().as_str().into()},current_episode:episode.map(|e|e.index as u8),role:episode.map(|e|e.role),label:episode.map(|e|e.condition),target_ms:episode.map(|e|e.target_active_recording_ms),lead_in_remaining_ms:lead,observed_ms:w.live_observed_ns/1_000_000,retained_windows:w.session.rows.len()as u16,durable_windows:w.durable_windows as u16,sealed_train_episodes:self.durable_seals as u8,sealed_held_out_episodes:w.async_state.as_ref().map_or(0,|a|a.accepted_held_out_seals as u8),durability_pending:w.async_state.as_ref().is_some_and(|a|a.pending.is_some()),awaiting_ground_truth:challenge.is_some(),confirmation_challenge:challenge,failure:self.failure.clone()}
+    }
+    pub(crate) fn public_candidate(&self)->Option<crate::room_learner::temporal_wire::TemporalCandidateIdentityWire>{
+        use crate::room_learner::temporal_wire::*;
+        let mode=self.workflow.full_run.as_ref()?;let record=mode.public_verified_fit()?;
+        Some(TemporalCandidateIdentityWire{model_kind:WholeTemporalKind::ManagedTemporalV3,model_sha256:record.body.artifact_sha256.clone(),verified_fit_record_sha256:record.sha256.clone(),context_digest:record.body.context_digest.clone(),room_digest:self.context().room_digest.clone(),persisted:true})
+    }
+    pub(crate) fn public_complete_refs(&self,proof_sha:&str)->Option<crate::room_learner::temporal_wire::TemporalCompleteRefsWire>{
+        use crate::room_learner::temporal_wire::*;
+        let mode=self.workflow.full_run.as_ref()?;let record=mode.public_complete(self.workflow.commit_token.as_ref())?;let fit=mode.public_verified_fit()?;
+        Some(TemporalCompleteRefsWire{model:TemporalModelIdentityWire{model_kind:WholeTemporalKind::ManagedTemporalV3,model_sha256:fit.body.artifact_sha256.clone(),verified_fit_record_sha256:fit.sha256.clone()},training_proof_sha256:proof_sha.into(),complete_record_sha256:record.sha256.clone(),complete_commitment_sha256:self.workflow.commit_token.as_ref()?.data().commitment})
+    }
+}
+
+impl TemporalTrainCapture {
+    /// Authenticated current recovery is decoded only to discover its context.
+    /// This DATA does not mint a continued/Frozen witness; restore does that.
+    pub(crate) fn saved_full_context(store:&RecoveryStore,now:u64)->Result<(CaptureContext,String),String>{
+        let loaded=store.load_temporal(now)?.ok_or("recovery_missing")?;
+        let prefix=loaded.prefix.ok_or("temporal_retired")?;
+        if prefix.metadata_kind()!=full_run::META_KIND{return Err("temporal_full_run_no_upconversion".into());}
+        let w=checkpoint::decode(prefix.bytes(),prefix.descriptor(),now)?;
+        Ok((w.context().clone(),public_generation_id(&w)?))
+    }
+    pub(crate) fn retirement_generation(store:&RecoveryStore,now:u64)->Result<String,String>{
+        let inspection=store.inspect_temporal_retirement(now)?.ok_or("recovery_missing")?;
+        if inspection.metadata_kind()!=full_run::META_KIND{return Err("temporal_full_run_no_upconversion".into());}
+        hash(&("ruview.room-learner.capture-generation.v2",&inspection.descriptor().id,inspection.run(),&inspection.descriptor().context_digest))
+    }
+}
+
+impl TemporalTrainCapture {pub(crate) fn current_source_floors(&self)->(Vec<(u8,u64,u64)>,u64){(self.workflow.source_high.clone(),self.workflow.last_now_ns)}}
+
+impl TemporalTrainCapture {
+    pub(crate) fn recovery_discovery(store:&RecoveryStore,now:u64)->Option<crate::room_learner::temporal_wire::TemporalRecoveryStatusWire>{
+        use crate::room_learner::temporal_wire::*;
+        let result=(||->Result<Option<TemporalRecoveryStatusWire>,String>{
+            let Some(inspection)=store.inspect_temporal_read_only(now)?else{return Ok(None)};
+            if inspection.metadata_kind()!=full_run::META_KIND||inspection.retired(){return Ok(None)}
+            let descriptor=inspection.descriptor();let generation=hash(&("ruview.room-learner.capture-generation.v2",&descriptor.id,inspection.run(),&descriptor.context_digest))?;
+            Ok(Some(TemporalRecoveryStatusWire{schema:RECOVERY_STATUS_SCHEMA.into(),state:if inspection.expired(){"expired"}else{"available"}.into(),capture_generation_id:Some(generation),context_digest:Some(descriptor.context_digest.clone()),original_deadline:Some(TemporalOriginalDeadlineWire{created_at_unix_ms:descriptor.created_at_ms,expires_at_unix_ms:descriptor.expires_at_ms})}))
+        })();
+        result.unwrap_or_else(|_|Some(TemporalRecoveryStatusWire{schema:RECOVERY_STATUS_SCHEMA.into(),state:"unavailable".into(),capture_generation_id:None,context_digest:None,original_deadline:None}))
+    }
+}

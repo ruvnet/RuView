@@ -1116,3 +1116,12 @@ impl ContinuationPolicy {
         Ok(ReplayFenceBudget{max_frames,native_policy_sha256:hash(&binding.native)?})
     }
 }
+
+#[path="temporal_evaluation_projection.rs"]
+mod evaluation_projection;
+pub(crate) use evaluation_projection::{PendingTemporalEvidenceSource, TemporalEvaluationBinding, VerifiedTemporalTrainSnapshot, VerifiedTemporalEvaluationSnapshot, VerifiedTemporalEvaluationResult};
+
+impl FullRunState {
+    pub(super) fn public_verified_fit(&self)->Option<&VerifiedFitRecordData>{let verified=self.verified.as_ref()?;let data=self.frozen.as_ref()?;if self.owner.is_none()||data!=&verified.record{return None}Some(data)}
+    pub(super) fn public_complete(&self,current:Option<&TemporalToken>)->Option<&held_out::FullCompleteRecordData>{let fact=self.completed.as_ref()?;let data=self.complete.as_ref()?;if current!=Some(&fact.token)||data.sha256!=fact.record_sha256{return None}Some(data)}
+}

@@ -8,9 +8,9 @@ pub(crate) fn owner_selection_routes(
 ) -> Router<SharedState> {
     Router::new()
         .route("/api/v1/room-learner/recovery/enable-current", post(enable_current_recovery))
-        .route("/api/v1/room-learner/qualify", post(qualify))
-        .route("/api/v1/room-learner/select", post(select_model))
-        .route("/api/v1/room-learner/deselect", post(deselect_model))
+        .route("/api/v1/room-learner/qualify", post(super::temporal_routes::qualify_dispatch))
+        .route("/api/v1/room-learner/select", post(super::temporal_routes::select_dispatch))
+        .route("/api/v1/room-learner/deselect", post(super::temporal_routes::deselect_dispatch))
         .route_layer(axum::middleware::from_fn_with_state(
             auth,
             companion_integration::require_owner,
@@ -50,7 +50,7 @@ pub(super) fn enriched_status(
     status
 }
 
-fn with_current_room<T>(
+pub(super) fn with_current_room<T>(
     state: &AppStateInner,
     rt: &RoomLearningRuntime,
     operation: impl FnOnce() -> Result<T, String>,

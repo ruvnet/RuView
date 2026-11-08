@@ -477,4 +477,8 @@ pub(super) use selection_routes::{owner_selection_routes, selection};
 
 #[path = "room_learner_api_progress.rs"]
 mod paired_progress;
-pub(super) use paired_progress::progress;
+pub(super) use paired_progress::{progress, progress_dispatch};
+
+#[path = "room_learner_api_temporal.rs"]
+mod temporal_routes;
+pub(super) use temporal_routes::{status_dispatch, selection_dispatch, configure_dispatch, begin_dispatch, finish_dispatch, train_dispatch, evaluate_dispatch, restore_dispatch, discard_dispatch, pause_dispatch, cancel_operation_dispatch};

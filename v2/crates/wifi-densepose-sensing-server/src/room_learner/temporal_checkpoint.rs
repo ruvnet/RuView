@@ -920,3 +920,7 @@ pub(crate) fn c4b_reference_batch_and_stale_seal_probe(bytes:&[u8],descriptor:&R
 
 #[cfg(test)]
 pub(crate) fn c4b_complete_fault_matrix(bytes:&[u8],descriptor:&RecoveryDescriptor,now:u64)->Result<serde_json::Value,String>{full_checkpoint::c4b_complete_fault_matrix(bytes,descriptor,now)}
+
+// Reuse the existing whole-prefix Train validator for C4C; this DATA check
+// cannot construct a snapshot or owner/write/evaluation capability.
+pub(super) fn validate_temporal_evaluation_train_prefix(w:&TemporalWorkflow,record:&full_run::VerifiedFitRecordData)->Result<(),String>{full_checkpoint::validate_immutable_train(w,record)}

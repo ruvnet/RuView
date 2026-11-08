@@ -113,11 +113,12 @@ impl RecoveryStore {
     fn temporal_dir(&self) -> PathBuf {
         self.directory.join(KIND)
     }
-    fn temporal_lock(&self, create: bool) -> Result<Locked, String> {
-        self.verify_directory()?;
+    fn temporal_lock(&self,create:bool)->Result<Locked,String>{self.temporal_lock_mode(create,true)}
+    fn temporal_lock_mode(&self,create:bool,create_lock:bool)->Result<Locked,String>{
+        if create_lock{self.verify_directory()?;}else{self.verify_directory_read_only()?;}
         let path = self.directory.join(LOCK);
         let mut options = OpenOptions::new();
-        options.read(true).write(true).create(true);
+        options.read(true).write(true).create(create_lock);
         #[cfg(unix)]
         {
             use std::os::unix::fs::OpenOptionsExt;
@@ -148,6 +149,9 @@ impl RecoveryStore {
             File::open(&self.directory)
                 .and_then(|f| f.sync_all())
                 .map_err(|_| "temporal_namespace_parent_fsync")?;
+        } else if !create_lock {
+            let m=fs::symlink_metadata(&directory).map_err(|_|"temporal_directory_read")?;
+            if !m.is_dir()||m.file_type().is_symlink(){return Err("temporal_directory_unsafe".into());}private_metadata(&m,true)?;
         } else if directory.exists() {
             private_directory(&directory)?;
         }
@@ -1173,6 +1177,8 @@ impl TemporalAbortTicket {
 /// Metadata-only erasure capability: deliberately not a TemporalToken accepted
 /// by active commit/resume. Neither expired sample bytes nor fit authority escape.
 pub(crate) struct TemporalRetirementInspection {
+    metadata_kind:String,
+    retired:bool,
     descriptor: RecoveryDescriptor,
     run: String,
     observed_ns: u64,
@@ -1180,6 +1186,9 @@ pub(crate) struct TemporalRetirementInspection {
     token: TemporalToken,
 }
 impl TemporalRetirementInspection {
+    pub(crate) fn metadata_kind(&self)->&str{&self.metadata_kind}
+    pub(crate) fn retired(&self)->bool{self.retired}
+
     pub(crate) fn descriptor(&self) -> &RecoveryDescriptor {
         &self.descriptor
     }
@@ -1213,6 +1222,40 @@ impl RecoveryStore {
                     return Err("recovery_receiver_clock_regression".into());
                 }
                 Ok(Some(TemporalRetirementInspection {
+                    metadata_kind:head.schema.clone(),
+                    retired:head.retired_at_ms.is_some(),
+                    descriptor: head.descriptor.clone(),
+                    run: head.run.clone(),
+                    observed_ns: now_ns,
+                    expired: now_ns / 1_000_000 >= head.descriptor.expires_at_ms,
+                    token: head.token()?,
+                }))
+            }
+            _ => Err("temporal_head_witness_mismatch_or_pending".into()),
+        }
+    }
+    /// Owner status discovery performs no mkdir/open-create/chmod or payload
+    /// read. Missing/corrupt metadata never creates a replacement lock/head.
+    pub(crate) fn inspect_temporal_read_only(&self,now_ns:u64)->Result<Option<TemporalRetirementInspection>,String>{
+        let _serial=self.serial.lock().map_err(|_|"recovery_store_unavailable")?;
+        self.verify_directory_read_only()?;
+        match fs::symlink_metadata(self.temporal_dir()){
+            Err(e)if e.kind()==std::io::ErrorKind::NotFound=>return Ok(None),
+            Err(_)=>return Err("temporal_directory_read".into()),
+            Ok(m)if !m.is_dir()||m.file_type().is_symlink()=>return Err("temporal_directory_unsafe".into()),
+            Ok(_)=>{}
+        }
+        let locked=self.temporal_lock_mode(false,false)?;
+        let c=self.temporal_components(&locked.directory)?;
+        match (c.head, c.latest) {
+            (None, None) => Ok(None),
+            (Some(head), Some(latest)) if head == latest => {
+                if now_ns < head.receiver_ns {
+                    return Err("recovery_receiver_clock_regression".into());
+                }
+                Ok(Some(TemporalRetirementInspection {
+                    metadata_kind:head.schema.clone(),
+                    retired:head.retired_at_ms.is_some(),
                     descriptor: head.descriptor.clone(),
                     run: head.run.clone(),
                     observed_ns: now_ns,

@@ -121,4 +121,53 @@ class CargoExecutableCustodyTests(unittest.TestCase):
             with self.assertRaises(ValueError):profiles.main()
         self.assertFalse(marker.exists(),'registry executed substituted out-of-target artifact')
 
+class C4CClassificationTests(unittest.TestCase):
+    def component(self):
+        return [('C4C', None, [profiles.C4C], [(profiles.C4C, True, 1)])]
+    def test_exact_default48_case_is_one_required_release_case(self):
+        result = profiles.validate(self.component(), {profiles.C4C, profiles.C4C + '_lookalike'}, set(), 'release-run')
+        self.assertEqual(result, [{'component': 'C4C', 'selector': profiles.C4C, 'exact': True, 'names': [profiles.C4C]}])
+    def test_debug_requires_the_same_case_registered_and_transparently_ignored(self):
+        result = profiles.validate(self.component(), {profiles.C4C}, {profiles.C4C}, 'debug-check')
+        self.assertEqual(result[0]['names'], [profiles.C4C])
+    def test_default48_cannot_be_left_unclassified_in_debug(self):
+        with self.assertRaises(ValueError):
+            profiles.validate(self.component(), {profiles.C4C}, set(), 'debug-check')
+    def test_default48_cannot_be_ignored_in_required_release(self):
+        with self.assertRaises(ValueError):
+            profiles.validate(self.component(), {profiles.C4C}, {profiles.C4C}, 'release-run')
+    def test_zero_or_missing_case_is_not_release_coverage(self):
+        with self.assertRaises(ValueError):
+            profiles.validate(self.component(), set(), set(), 'release-run')
+    def test_same_leaf_in_a_different_module_cannot_satisfy_exact_registration(self):
+        wrong = profiles.C4C.replace('public_workflow::acceptance::', 'public_workflow::wrong_module::')
+        with self.assertRaises(ValueError):
+            profiles.validate(self.component(), {wrong}, set(), 'release-run')
+    def test_exact_selector_does_not_sweep_opt_in_siblings(self):
+        perf = profiles.C4C + '_manual_performance'
+        result = profiles.validate(self.component(), {profiles.C4C, perf}, {perf}, 'release-run')
+        self.assertEqual(result[0]['names'], [profiles.C4C])
+    def test_missing_c4c_source_marker_cannot_silently_drop_release_batch(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            root = pathlib.Path(d)
+            source = root / 'v2/crates/wifi-densepose-sensing-server/src/room_learner'
+            source.mkdir(parents=True)
+            for name in ['lifecycle_temporal_tests.rs', 'lifecycle_temporal_held_out_tests.rs']:
+                (source / name).write_text('// synthetic source marker only')
+            with self.assertRaisesRegex(ValueError, 'C4C acceptance source marker'):
+                profiles.policy(root)
+    def test_current_policy_registers_exact_c4c_and_preserves_existing_components(self):
+        components = profiles.policy(pathlib.Path(__file__).resolve().parents[2])
+        self.assertEqual([c[0] for c in components], ['C2', 'C1', 'C3', 'C4', 'budget343', 'C4B', 'C4C'])
+        current = components[-1]
+        self.assertEqual(current[1].name, 'lifecycle_temporal_public_acceptance_tests.rs')
+        self.assertEqual(current[2:], ([profiles.C4C], [(profiles.C4C, True, 1)]))
+        self.assertEqual(components[0][3], [(profiles.C2, True, 1)])
+        self.assertEqual(components[1][3], [(profiles.C1, True, 1)])
+        self.assertEqual(components[2][3], [(profiles.PREFIX + 'fit_control::tests::', False, 12)])
+        self.assertEqual(components[3][3], [(profiles.PREFIX + 'full_run_tests::', False, 8)])
+        self.assertEqual(components[4][3], [(name, True, 1) for name in profiles.BUDGET])
+        self.assertEqual(components[5][3], [(profiles.C4B_PREFIX, False, 11)])
+
 if __name__=='__main__':unittest.main()

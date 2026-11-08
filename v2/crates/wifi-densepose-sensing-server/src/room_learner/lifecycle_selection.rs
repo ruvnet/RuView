@@ -9,14 +9,20 @@ use sha2::{Digest, Sha256};
 #[derive(Default)]
 pub(super) struct SelectionState {
     envelope: Option<SelectionEnvelope>,
+    pub(super) temporal:Option<Arc<super::temporal_control::selected_control::TemporalSelectedRuntime>>,
+    pub(super) withdrawal:Option<super::temporal_control::selected_control::TemporalWithdrawalJob>,
     model: Option<Arc<RoomModel>>,
     qualification: Option<QualificationEnvelope>,
-    error: Option<String>,
+    pub(super) error: Option<String>,
     assessment: Option<crate::room_learner::assessment::AssessmentEnvelope>,
 }
 impl SelectionState {
+    pub(super) fn known_revision(&self)->u64{self.temporal.as_ref().map(|s|s.stored.identity().selection_revision).or_else(||self.envelope.as_ref().map(|e|e.receipt.revision)).unwrap_or(0)}
+    pub(super) fn install_negative_temporal_tombstone(&mut self,envelope:SelectionEnvelope){self.envelope=Some(envelope);self.model=None;self.qualification=None;self.assessment=None;}
+
+    pub(super) fn blocks_new_temporal_capture(&self)->bool{self.temporal.is_some()||self.envelope.as_ref().is_some_and(|e|e.receipt.selected.is_some())||self.error.is_some()}
     pub(super) fn has_history(&self) -> bool {
-        self.envelope.is_some() || self.model.is_some() || self.qualification.is_some()
+        self.temporal.is_some() || self.envelope.is_some() || self.model.is_some() || self.qualification.is_some()
             || self.assessment.is_some() || self.error.is_some()
     }
 }
@@ -175,6 +181,8 @@ impl RoomLearningRuntime {
         }
         // Only publish in-memory authority after durable pointer and readback succeed.
         state.selection = SelectionState {
+            temporal:None,
+            withdrawal:None,
             envelope: Some(envelope.clone()),
             model: resolved.as_ref().map(|(m, _)| Arc::new(m.clone())),
             qualification: resolved.map(|(_, q)| q),

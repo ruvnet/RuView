@@ -53,7 +53,12 @@ pub(super) struct RuntimeTemporalCapture {
     failure: Option<String>,
     last_now_ns: u64,
     fit_job: Option<fit_control::TemporalFitJob>,
+    evidence_job: Option<evidence_control::TemporalEvidenceJob>,
+    training_proof: Option<crate::room_learner::temporal_evaluation::TemporalTrainProofData>,
+    evaluation: Option<Arc<crate::room_learner::artifact::StoredTemporalEvaluation>>,
+    assessment: Option<Arc<crate::room_learner::artifact::StoredTemporalAssessment>>,
     diagnostic_fit: Option<fit_control::TemporalDiagnosticFit>,
+    public_train_requested: bool,
 }
 impl RuntimeTemporalCapture {
     pub(super) fn owner_generation(&self) -> u64 {
@@ -109,6 +114,7 @@ impl RuntimeTemporalCapture {
             return Err(error);
         }
         if let Some(job) = &self.fit_job { job.observe_now(now); }
+        if let Some(job) = &self.evidence_job { job.observe_now(now); }
         self.last_now_ns = now;
         Ok(())
     }
@@ -274,6 +280,10 @@ impl RoomLearningRuntime {
     fn configure_temporal_capture_with_custody(
         &self,expected:&MutationGuard,context:CaptureContext,run:String,now:u64,
         prepare:impl FnOnce(ManagedScheduleContract,String,FitConfig,u64,&super::super::recovery_store::RecoveryStore,FullRunGenesisWitness)->Result<(TemporalTrainCapture,Option<String>),String>,
+    )->Result<(),String>{self.configure_temporal_capture_with_custody_mode(expected,context,run,now,false,prepare)}
+    fn configure_temporal_capture_with_custody_mode(
+        &self,expected:&MutationGuard,context:CaptureContext,run:String,now:u64,replace_empty_legacy:bool,
+        prepare:impl FnOnce(ManagedScheduleContract,String,FitConfig,u64,&super::super::recovery_store::RecoveryStore,FullRunGenesisWitness)->Result<(TemporalTrainCapture,Option<String>),String>,
     )->Result<(),String>{
         context.validate()?;
         if context.owner_scope != self.owner
@@ -289,10 +299,12 @@ impl RoomLearningRuntime {
         let fit = FitConfig::for_source_count(context.sources.len());
         fit.validate_context(&context)?;
         let mut state = self.command_state(expected)?;
-        if state.capture.is_some()
-            || state.model.is_some()
-            || state.selection.has_history()
-            || state.job.phase != JobPhase::Idle
+        let empty_legacy=replace_empty_legacy&&matches!(state.capture.as_ref(),Some(CaptureWorkflow::Legacy(c))if !c.phase_active()&&c.cohorts().is_empty());
+        let public_fresh=replace_empty_legacy&&(state.capture.is_none()||empty_legacy)&&!busy(&state.job)&&!state.selection.blocks_new_temporal_capture();
+        if (state.capture.is_some()&&!empty_legacy)
+            || (state.model.is_some()&&!public_fresh)
+            || (state.selection.has_history()&&!public_fresh)
+            || (state.job.phase != JobPhase::Idle&&!public_fresh)
             || state.recovery.descriptor.is_some()
         {
             return Err("temporal_setup_would_replace_existing_work".into());
@@ -303,7 +315,10 @@ impl RoomLearningRuntime {
             .checked_add(1)
             .ok_or("learner generation exhausted")?;
         let witness=FullRunGenesisWitness{runtime_epoch:self.runtime_epoch.clone(),generation:next_generation,context:context.clone(),run:run.clone()};
-        state.capture = Some(CaptureWorkflow::Temporal(Box::new(
+        // Historical immutable models remain in ArtifactStore. Retire only
+        // their RAM presentation when explicitly starting a new consented run.
+        let retired_legacy=if public_fresh{let old=(state.model.take(),state.receipt.take(),state.last_evaluation.take(),state.qualification.take());state.job=Job::default();state.frozen_training=false;state.qualification_error=None;Some(old)}else{None};
+        let retired_capture=state.capture.replace(CaptureWorkflow::Temporal(Box::new(
             RuntimeTemporalCapture {
                 context: context.clone(),
                 owner_generation: next_generation,
@@ -312,11 +327,16 @@ impl RoomLearningRuntime {
                 failure: None,
                 last_now_ns: now,
                 fit_job: None,
+                evidence_job: None,
+                training_proof: None,
+                evaluation: None,
+                assessment: None,
                 diagnostic_fit: None,
+                public_train_requested: false,
             },
         )));
         state.generation = next_generation;
-        drop(state);
+        drop(state);drop(retired_capture);drop(retired_legacy);
         // Initial crypto/filesystem execution never holds the receiver lock.
         let result = prepare(schedule, run, fit, now, store,witness);
         let (core, failure) = match result {
@@ -342,7 +362,8 @@ impl RoomLearningRuntime {
         }
         Ok(())
     }
-    fn start_temporal_phase(&self, expected: &MutationGuard, now: u64) -> Result<(), String> {
+    fn start_temporal_phase(&self, expected: &MutationGuard, now: u64) -> Result<(), String> {self.start_temporal_phase_checked(expected,now,|_|Ok(()))}
+    fn start_temporal_phase_checked(&self,expected:&MutationGuard,now:u64,check:impl FnOnce(&RuntimeTemporalCapture)->Result<(),String>)->Result<(),String>{
         let mut state = self.command_state(expected)?;
         if busy(&state.job) { return Err("temporal_fit_job_busy".into()); }
         let owner_generation = state.generation;
@@ -356,6 +377,7 @@ impl RoomLearningRuntime {
                 .map(|c| c.invalidate("temporal_owner_generation_changed"));
             return Err("temporal_owner_generation_changed".into());
         }
+        check(capture)?;
         capture.check_time(now)?;
         let core = capture
             .core
@@ -447,12 +469,8 @@ impl RoomLearningRuntime {
             .ok_or("temporal_initial_barrier_unconfirmed")?
             .confirmation_challenge()
     }
-    fn confirm_temporal_phase(
-        &self,
-        expected: &MutationGuard,
-        challenge: &str,
-        now: u64,
-    ) -> Result<(), String> {
+    fn confirm_temporal_phase(&self,expected:&MutationGuard,challenge:&str,now:u64)->Result<(),String>{self.confirm_temporal_phase_checked(expected,challenge,now,|_|Ok(()))}
+    fn confirm_temporal_phase_checked(&self,expected:&MutationGuard,challenge:&str,now:u64,check:impl FnOnce(&RuntimeTemporalCapture)->Result<(),String>)->Result<(),String>{
         let store = self.temporal_store()?;
         let mut state = self.command_state(expected)?;
         if busy(&state.job) { return Err("temporal_fit_job_busy".into()); }
@@ -467,6 +485,7 @@ impl RoomLearningRuntime {
                 .map(|c| c.invalidate("temporal_owner_generation_changed"));
             return Err("temporal_owner_generation_changed".into());
         }
+        check(capture)?;
         capture.check_time(now)?;
         if capture.lead_in_until.is_some() {
             return Err("temporal_phase_incomplete".into());
@@ -547,7 +566,12 @@ impl RoomLearningRuntime {
                 failure: None,
                 last_now_ns: now,
                 fit_job: None,
+                evidence_job: None,
+                training_proof: None,
+                evaluation: None,
+                assessment: None,
                 diagnostic_fit: None,
+                public_train_requested: false,
             },
         )));
         state.generation = next_generation;
@@ -585,7 +609,12 @@ impl RoomLearningRuntime {
                 failure: None,
                 last_now_ns: now,
                 fit_job: None,
+                evidence_job: None,
+                training_proof: None,
+                evaluation: None,
+                assessment: None,
                 diagnostic_fit: None,
+                public_train_requested: false,
             },
         )));
         state.generation = next_generation;
@@ -613,33 +642,26 @@ impl RoomLearningRuntime {
         Ok(())
     }
     fn cancel_temporal_durability(&self, expected: &MutationGuard) -> Result<(), String> {
-        let (writer, fit) = {
-            let mut state = self.command_state(expected)?;
-            let Some(CaptureWorkflow::Temporal(capture)) = state.capture.as_mut() else {
-                return Err(PRIVATE_KIND.into());
-            };
-            capture.lead_in_until = None;
-            let fit = capture.fit_job.clone();
-            capture.cancel_fit();
-            let core = capture
-                .core
-                .as_mut()
-                .ok_or("temporal_initial_barrier_unconfirmed")?;
-            let writer = core.writer();
-            core.invalidate("temporal_owner_write_cancelled");
-            if let Some(writer) = &writer {
-                writer.cancel();
-            }
-            if busy(&state.job) {
-                state.job.cancel.store(true, Ordering::Release);
-                state.job.phase = JobPhase::Cancelling;
-            }
-            (writer, fit)
+        let (writer,fit,evidence,withdrawal,retired_selected)={
+            let mut state=self.command_state(expected)?;
+            let withdrawal=state.selection.withdrawal.clone();
+            let has_selected=state.selection.temporal.is_some();
+            if !matches!(state.capture,Some(CaptureWorkflow::Temporal(_)))&&withdrawal.is_none()&&!has_selected{return Err(PRIVATE_KIND.into());}
+            if let Some(job)=&withdrawal{job.cancel();}
+            let retired_selected=state.selection.temporal.take();
+            let(writer,fit,evidence)=match state.capture.as_mut(){Some(CaptureWorkflow::Temporal(capture))=>{
+                capture.lead_in_until=None;capture.public_train_requested=false;
+                let fit=capture.fit_job.clone();let evidence=capture.evidence_job.clone();capture.cancel_fit();
+                let writer=capture.core.as_mut().and_then(|core|{let writer=core.writer();core.invalidate("temporal_owner_write_cancelled");writer});
+                if let Some(writer)=&writer{writer.cancel();}(writer,fit,evidence)
+            },_=>(None,None,None)};
+            if busy(&state.job){state.job.cancel.store(true,Ordering::Release);state.job.phase=JobPhase::Cancelling;}
+            (writer,fit,evidence,withdrawal,retired_selected)
         };
-        let writer_result = writer.map_or(Ok(()), |writer| writer.drain());
-        if let Some(fit) = fit { fit.drain(); }
-        writer_result?;
-        Ok(())
+        let writer_result=writer.map_or(Ok(()),|writer|writer.drain());
+        if let Some(fit)=fit{fit.drain();}if let Some(evidence)=evidence{evidence.drain();}if let Some(job)=withdrawal{job.drain();}
+        if let Some(selected)=retired_selected{selected.driver.lock().map_err(|_|"selected_driver_unavailable")?.deactivate();drop(selected);}
+        writer_result
     }
     fn temporal_capture_snapshot(&self, now: u64) -> Result<Value, String> {
         let state = self.inner.lock().map_err(|_| "learner state unavailable")?;
@@ -675,7 +697,10 @@ impl Drop for RoomLearningRuntime {
             Some(CaptureWorkflow::Temporal(capture)) => capture.fit_job.clone(),
             _ => None,
         };
+        let evidence=match state.capture.as_ref(){Some(CaptureWorkflow::Temporal(capture))=>capture.evidence_job.clone(),_=>None};
+        let withdrawal=state.selection.withdrawal.clone();if let Some(job)=&withdrawal{job.cancel();}
         if let Some(fit) = &fit { fit.cancel(); }
+        if let Some(job)=&evidence{job.cancel();}
         let writer = match state.capture.as_mut() {
             Some(CaptureWorkflow::Temporal(capture)) => capture.core.as_mut().and_then(|core| {
                 let writer = core.writer();
@@ -688,9 +713,21 @@ impl Drop for RoomLearningRuntime {
             let _ = writer.drain();
         }
         if let Some(fit) = fit { fit.drain(); }
+        if let Some(job)=evidence{job.drain();}
+        if let Some(job)=withdrawal{job.drain();}
+        if let Some(selected)=state.selection.temporal.take(){if let Ok(mut driver)=selected.driver.lock(){driver.deactivate();}}
     }
 }
 
 #[cfg(test)]
 #[path="lifecycle_temporal_held_out_tests.rs"]
 mod held_out_tests;
+
+#[path="lifecycle_temporal_evaluation.rs"]
+mod evidence_control;
+
+#[path="lifecycle_temporal_public.rs"]
+mod public_workflow;
+
+#[path="lifecycle_temporal_selection.rs"]
+pub(super) mod selected_control;
