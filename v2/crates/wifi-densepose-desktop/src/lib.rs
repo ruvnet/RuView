@@ -2,6 +2,15 @@ pub mod commands;
 pub mod domain;
 pub mod state;
 
+// Tauri attaches its Windows resource to binaries, but Cargo's library test
+// harness is a separate executable. Link the same Common Controls v6 manifest
+// there so TaskDialogIndirect can be resolved before the tests start.
+// The GNU resource is a COFF object named libresource.a, not an archive; avoid
+// bundling it into the rlib. This declaration only exists in the test harness.
+#[cfg(all(test, target_os = "windows", target_env = "gnu"))]
+#[link(name = "resource", kind = "static", modifiers = "-bundle")]
+extern "C" {}
+
 use commands::{discovery, flash, ota, provision, server, settings, wasm};
 
 pub fn run() {
