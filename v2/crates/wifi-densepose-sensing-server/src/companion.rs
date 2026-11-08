@@ -90,7 +90,14 @@ pub(crate) fn private_read(path: &Path) -> io::Result<Vec<u8>> {
     }
     std::fs::read(path)
 }
-pub(crate) fn atomic_private_write(path: &Path, data: &[u8]) -> io::Result<()> {
+pub(crate) fn atomic_private_write(path:&Path,data:&[u8])->io::Result<()>{atomic_private_write_checked(path,data,&mut||Ok(()),&mut||Ok(()))}
+/// One canonical writer body. Original callers use the no-op observer; C4C
+/// instance-scoped test observers can exercise the actual post-rename boundary.
+pub(crate) fn atomic_private_write_observed(path:&Path,data:&[u8],after_rename:&mut dyn FnMut()->io::Result<()>)->io::Result<()>{atomic_private_write_checked(path,data,&mut||Ok(()),after_rename)}
+/// The optional admission callback runs after staging is fully synced and
+/// immediately before the sole authoritative replacement. It cannot be delayed
+/// by staging IO. A refusal removes only this invocation's own unique temp.
+pub(crate) fn atomic_private_write_checked(path:&Path,data:&[u8],before_rename:&mut dyn FnMut()->io::Result<()>,after_rename:&mut dyn FnMut()->io::Result<()>)->io::Result<()>{
     let temp = path.with_extension(format!("tmp-{}", secret()));
     let mut options = std::fs::OpenOptions::new();
     options.create_new(true).write(true);
@@ -102,7 +109,13 @@ pub(crate) fn atomic_private_write(path: &Path, data: &[u8]) -> io::Result<()> {
     let mut f = options.open(&temp)?;
     f.write_all(data)?;
     f.sync_all()?;
+    if let Err(error)=before_rename(){
+        drop(f);
+        std::fs::remove_file(&temp)?;
+        return Err(error);
+    }
     std::fs::rename(&temp, path)?;
+    after_rename()?;
     std::fs::File::open(path.parent().ok_or_else(|| io::Error::other("parent"))?)?.sync_all()?;
     Ok(())
 }
@@ -967,3 +980,7 @@ mod tests {
             .all(|d| d["calibration_until"] == 0));
     }
 }
+
+#[cfg(test)]
+#[path="companion_atomic_write_tests.rs"]
+mod atomic_write_tests;

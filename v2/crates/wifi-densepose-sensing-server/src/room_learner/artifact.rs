@@ -321,3 +321,11 @@ pub(crate) use temporal_fit_summary::FitDiagnosticState;
 
 #[cfg(test)]
 pub(crate) use temporal_fit_summary::rehash_fixture as rehash_temporal_fit_fixture;
+
+#[path="temporal_evaluation_store.rs"]
+mod temporal_evaluation_store;
+pub(crate) use temporal_evaluation_store::{StoredTemporalEvaluation,StoredTemporalAssessment};
+
+#[path="temporal_selection_store.rs"]
+mod temporal_selection_store;
+pub(crate) use temporal_selection_store::StoredTemporalSelection;

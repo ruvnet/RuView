@@ -5,6 +5,8 @@ import argparse, hashlib, json, os, pathlib, re, stat, subprocess, sys
 PREFIX = 'room_learner::lifecycle::temporal_control::'
 C1 = PREFIX + 'tests::full_seven_train_phases_require_fresh_confirmation_and_never_issue_fit_authority'
 C2 = PREFIX + 'tests::c2_all_seven_train_phases_use_actual_async_runtime_and_durable_seals_without_fit'
+# Exact C4C declaration; the author must verify this name in the actual Rust registry.
+C4C = PREFIX + 'public_workflow::acceptance::c4c_default48_public_operator_workflow_native128_and_cold_selection'
 BUDGET = [PREFIX + 'tests::legacy_329_actual_runtime_saturation_retires_and_explicit_fresh_train_chains_343', PREFIX + 'tests::fresh_343_actual_runtime_all_128_gaps_seven_terminal_pauses_and_retirement_fit_budget']
 # This initial policy is populated below from reviewed source call sites.
 C3 = ['room_learner::lifecycle::temporal_control::fit_control::tests::c3_actual_native_train_fit_and_same_store_cold_report_keep_whole_model_diagnostic',
@@ -24,11 +26,23 @@ C4 = ['room_learner::lifecycle::temporal_control::full_run_tests::c4a_actual_sev
  'room_learner::lifecycle::temporal_control::full_run_tests::c4a_actual_frozen_lost_ack_same_intent_repair_installs_only_after_exact_ack',
  'room_learner::lifecycle::temporal_control::full_run_tests::c4a_running_compute_cancel_cannot_produce_accepted_fit_or_frozen']
 
+C4B_PREFIX = PREFIX + "held_out_tests::"
+C4B = ['room_learner::lifecycle::temporal_control::held_out_tests::c4b_actual_complete_cold_restore_requires_model_owner_context_and_original_deadline', 'room_learner::lifecycle::temporal_control::held_out_tests::c4b_actual_complete_owner_cancel_and_retirement_deny_reactivation', 'room_learner::lifecycle::temporal_control::held_out_tests::c4b_actual_complete_rehashed_role_phase_binding_floor_and_deadline_negatives', 'room_learner::lifecycle::temporal_control::held_out_tests::c4b_actual_native_train_frozen_eight_heldout_two_cold_interruptions_complete']
+C4B_ALL = ['room_learner::lifecycle::temporal_control::held_out_tests::c4b_actual_complete_cold_restore_requires_model_owner_context_and_original_deadline', 'room_learner::lifecycle::temporal_control::held_out_tests::c4b_actual_complete_owner_cancel_and_retirement_deny_reactivation', 'room_learner::lifecycle::temporal_control::held_out_tests::c4b_actual_complete_rehashed_role_phase_binding_floor_and_deadline_negatives', 'room_learner::lifecycle::temporal_control::held_out_tests::c4b_actual_native_train_frozen_eight_heldout_two_cold_interruptions_complete', 'room_learner::lifecycle::temporal_control::held_out_tests::c4b_full2_abort_contract_is_denied_before_any_parent_ticket_operation', 'room_learner::lifecycle::temporal_control::held_out_tests::c4b_full2_fence_budget_exact_boundary_and_other_guards_remain_strict', 'room_learner::lifecycle::temporal_control::held_out_tests::c4b_full2_one_inflight_one_tail_no_third_and_same_repair_adopts_queued_window', 'room_learner::lifecycle::temporal_control::held_out_tests::c4b_full_v3_cannot_adopt_kind1_fresh343_train_policy', 'room_learner::lifecycle::temporal_control::held_out_tests::c4b_native_partial_rollback_reproduces_retained_only_frame_fence_assumption', 'room_learner::lifecycle::temporal_control::held_out_tests::c4b_old_kind1_status_shape_has_no_full2_role_fields', 'room_learner::lifecycle::temporal_control::held_out_tests::c4b_rejected_native_packet_adds_no_fence_and_terminal_state_cannot_accumulate']
+
 def policy(root):
     source = root / 'v2/crates/wifi-densepose-sensing-server/src/room_learner'
     components = [('C2', source / 'lifecycle_temporal_tests.rs', [C2], [(C2, True, 1)])]
     components += [('C1', source / 'lifecycle_temporal_tests.rs', [C1], [(C1, True, 1)])]
     components += [('C3', source / 'lifecycle_temporal_fit_tests.rs', C3, [(PREFIX + 'fit_control::tests::', False, 12)]), ('C4', source / 'lifecycle_temporal_full_run_tests.rs', C4, [(PREFIX + 'full_run_tests::', False, 8)]), ('budget343', source / 'temporal_budget_profile_tests.rs', BUDGET, [(name, True, 1) for name in BUDGET])]
+    b_marker = source / 'lifecycle_temporal_held_out_tests.rs'
+    if not b_marker.is_file():
+        raise ValueError('C4B source marker is required; missing source is not coverage')
+    components += [('C4B', b_marker, C4B, [(C4B_PREFIX, False, 11)])]
+    c_marker = source / 'lifecycle_temporal_public_acceptance_tests.rs'
+    if not c_marker.is_file():
+        raise ValueError('C4C acceptance source marker is required; missing source is not coverage')
+    components += [('C4C', c_marker, [C4C], [(C4C, True, 1)])]
     active = [item for item in components if item[1].is_file()]
     if not active or active[0][0] != 'C2':
         raise ValueError('C2 classification/source must exist; zero selected tests is not coverage')
@@ -44,6 +58,11 @@ def validate(components, registered, ignored, mode):
                 raise ValueError('wrong profile classification for ' + name)
         for selector, exact, minimum in selectors:
             names = sorted(n for n in registered if n == selector) if exact else sorted(n for n in registered if n.startswith(selector))
+            if component == 'C4B':
+                if set(names) != set(C4B_ALL) or len(names) != 11:
+                    raise ValueError('C4B must register exactly the reviewed eleven tests')
+                if mode == 'debug-check' and any(n in ignored for n in set(C4B_ALL) - set(C4B)):
+                    raise ValueError('C4B small controls must stay Debug-active')
             if len(names) < minimum:
                 raise ValueError(f'{component}: expected >= {minimum} registered tests, got {len(names)}')
             if mode == 'release-run' and any(n in ignored for n in names):

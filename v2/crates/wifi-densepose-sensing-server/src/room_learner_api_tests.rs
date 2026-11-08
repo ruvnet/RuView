@@ -555,3 +555,6 @@ async fn enable_current_recovery_requires_explicit_versioned_consent_and_does_no
         assert!(rt.status(rt.receiver_now_ns())["context_digest"].is_null());
     }
 }
+
+#[path = "room_learner_api_temporal_tests.rs"]
+mod temporal_contract_tests;

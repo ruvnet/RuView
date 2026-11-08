@@ -18,7 +18,7 @@ impl RoomLearningRuntime {
         Ok(context)
     }
     pub fn selects_grid(&self, source_id: u8, grid_id: &str) -> bool {
-        self.inner.lock().ok().and_then(|state| state.capture_context().map(|c| c.sources.iter().any(|s| s.source_id == source_id && s.grid_id == grid_id))).unwrap_or(false)
+        self.inner.lock().map(|state|state.capture_context().is_some_and(|c|c.sources.iter().any(|s|s.source_id==source_id&&s.grid_id==grid_id))||state.selection.temporal.as_ref().is_some_and(|selected|selected.stored.envelope().receipt.selected.context.sources.iter().any(|s|s.source_id==source_id&&s.grid_id==grid_id))).unwrap_or(false)
     }
     pub fn capture_active(&self) -> Result<bool, String> {
         let state = self.inner.lock().map_err(|_| "learner state unavailable")?;
@@ -96,10 +96,25 @@ impl RoomLearningRuntime {
             self.record_native_rejection(packet.source_id,&packet.grid_id,"synthetic/replayed native provenance");
             return Err("live managed capture rejects synthetic/replayed native provenance".into());
         }
+        // Selected whole-model inference runs outside Runtime.inner. A stale
+        // Arc cannot publish evidence after selection is replaced; reads fence
+        // the exact current Arc again before returning a usable decision.
+        let selected={self.inner.lock().map_err(|_|"learner state unavailable")?.selection.temporal.clone()};
+        let selected_present=selected.is_some();
+        if let Some(selected)=selected{if selected.stored.envelope().receipt.selected.context.sources.iter().any(|s|s.source_id==packet.source_id&&s.grid_id==packet.grid_id&&s.center_frequency_hz==packet.frequency_hz&&s.bandwidth_hz==packet.bandwidth_hz){
+            let mut driver=selected.driver.lock().map_err(|_|"selected_native_input_unavailable")?;
+            // Poll/inference may have advanced processing time while this
+            // packet waited for the driver. Measure the trusted processing
+            // clock HERE; preserve its original receive timestamp/identities.
+            let processing_now=self.receiver_now_ns();
+            if processing_now<now_ns{return Err("selected_receiver_processing_clock_reversed".into());}
+            driver.ingest(packet,processing_now);
+        }}
         // Declared BEFORE the lock: every return/unwind releases inner before
         // any accepted/rejected ACK payload or replaced raw state is reclaimed.
         let mut retired=self.deferred_reclamation();
         let mut state = self.inner.lock().map_err(|_| "learner state unavailable")?;
+        let now_ns=if selected_present{let processing_now=self.receiver_now_ns();if processing_now<now_ns{return Err("selected_receiver_processing_clock_reversed".into());}processing_now}else{now_ns};
         let owner_generation=state.generation;
         if let Some(CaptureWorkflow::Temporal(capture)) = state.capture.as_mut() {
             if capture.owner_generation()!=owner_generation {capture.invalidate_owner();return Err("temporal_owner_generation_changed".into());}

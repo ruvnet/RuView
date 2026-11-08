@@ -24,6 +24,10 @@ mod fit_admission;
 pub(crate) use fit_admission::{PendingTemporalFitInput, TemporalFitCaptureIdentity,VerifiedTemporalFitSource};
 #[path = "temporal_full_run.rs"]
 pub(crate) mod full_run;
+#[path="temporal_held_out_capture.rs"]
+mod held_out;
+#[path="temporal_prefix_digests.rs"]
+mod prefix_digests;
 
 pub(crate) const EXECUTION_POLICY:&str="observed-complete-reservation-prefix-v1;paused-time;immutable-spans;partial-tail-drop;max128segments;persegment-native-firstarrival-skew-gaps;explicit-genesis-gap-anchor;quality-unimplemented;independence-false";
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -300,7 +304,7 @@ impl TemporalWorkflow {
             || epoch.len() > 128
             || anchor < self.last_now_ns
             || start < anchor
-            || self.ledger.gaps.len() >= 128
+            || (self.ledger.gaps.len() >= 128 && (self.full_run.is_none() || self.mapping.is_some()))
         {
             return Err("temporal_reconfirmation_or_clock_required".into());
         }
@@ -308,8 +312,8 @@ impl TemporalWorkflow {
         self.check_clock(start)?;
         let schedule = self.schedule()?;
         let segment = self.mapping.as_ref().map_or(0, |m| m.segment_ordinal + 1);
-        let bound =
-            schedule.bind_episode_start(&self.session.run_id, self.episode, 0, segment, None)?;
+        let frozen=self.frozen_identity()?;
+        let bound = schedule.bind_episode_start(&self.session.run_id, self.episode, 0, segment, frozen.as_ref())?;
         let mapping = ObservedSegmentMap {
             segment_ordinal: segment,
             session_id: bound.session_id().into(),
@@ -378,12 +382,9 @@ impl TemporalWorkflow {
         }
         let schedule = self.schedule()?;
         let mapping = self.mapping.clone().ok_or("temporal_segment_missing")?;
+        let frozen=self.frozen_identity()?;
         let bound = schedule.bind_episode_start(
-            &self.session.run_id,
-            self.episode,
-            0,
-            mapping.segment_ordinal,
-            None,
+            &self.session.run_id,self.episode,0,mapping.segment_ordinal,frozen.as_ref(),
         )?;
         let slot = self.session.rows.len()
             - schedule
@@ -704,6 +705,10 @@ impl TemporalWorkflow {
         ticket: &TemporalAbortTicket,
         now_ns: u64,
     ) -> Result<(), String> {
+        // The Full2 frame-budget proof requires adopt/SAME then at most one
+        // next tail. Aborting to an older parent could discard TWO consumed
+        // windows per resume; this generic synchronous route is not Full2.
+        self.require_abortable_contract()?;
         if self.stage != Stage::BlockedDurability
             || Some(ticket.expected_token()) != self.commit_token.as_ref()
             || now_ns < self.last_now_ns
@@ -804,3 +809,20 @@ pub(crate) mod checkpoint;
 #[cfg(test)]
 #[path = "temporal_execution_tests.rs"]
 mod tests;
+
+impl TemporalWorkflow {
+    fn require_abortable_contract(&self)->Result<(),String>{if self.full_run.is_some(){Err("temporal_full2_abort_to_parent_unsupported".into())}else{Ok(())}}
+    fn current_parts(&self)->Result<&Vec<bridge::QualityPart>,String>{
+        if let Some(held)=self.full_run.as_ref().and_then(|m|m.held_out.as_ref()){return Ok(&held.parts);}
+        Ok(&self.bridge.as_ref().ok_or("temporal_bridge_required")?.parts)
+    }
+    fn current_parts_mut(&mut self)->Result<&mut Vec<bridge::QualityPart>,String>{
+        if self.full_run.as_ref().is_some_and(|m|m.held_out.is_some()){return Ok(&mut self.full_run.as_mut().unwrap().held_out.as_mut().unwrap().parts);}
+        Ok(&mut self.bridge.as_mut().ok_or("temporal_bridge_required")?.parts)
+    }
+    fn set_current_disposition(&mut self,disposition:bridge::Disposition)->Result<(),String>{
+        if let Some(held)=self.full_run.as_mut().and_then(|m|m.held_out.as_mut()){held.disposition=disposition;}
+        else{self.bridge.as_mut().ok_or("temporal_bridge_required")?.disposition=disposition;}
+        Ok(())
+    }
+}

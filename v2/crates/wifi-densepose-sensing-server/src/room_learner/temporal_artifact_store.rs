@@ -58,7 +58,7 @@ fn metadata(meta: &fs::Metadata, directory: bool) -> Result<(), String> {
     #[allow(unreachable_code)]
     Ok(())
 }
-fn directory(path: &Path, create: bool) -> Result<bool, String> {
+pub(super) fn directory(path: &Path, create: bool) -> Result<bool, String> {
     match fs::symlink_metadata(path) {
         Ok(meta) => {
             metadata(&meta, true)?;
@@ -130,6 +130,11 @@ pub(super) fn bounded_read(path: &Path, limit: usize) -> Result<Vec<u8>, String>
     Ok(bytes)
 }
 pub(super) fn immutable(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    immutable_with_io(path,bytes,&mut |_|Ok(()))
+}
+// Same body, with a bounded IO-stage seam used by the C4C current job. A
+// callback cannot create source/result authority or choose paths/content.
+pub(super) fn immutable_with_io(path:&Path,bytes:&[u8],io:&mut dyn FnMut(&'static str)->Result<(),String>)->Result<(),String>{
     if bytes.len() > BLOB_LIMIT {
         return Err("temporal_artifact_size_limit".into());
     }
@@ -157,11 +162,27 @@ pub(super) fn immutable(path: &Path, bytes: &[u8]) -> Result<(), String> {
         Err(_) => return Err("temporal_artifact_install_failed".into()),
     }
     cleanup.map_err(|_| "temporal_artifact_stage_cleanup_failed")?;
+    io("before:directory_fsync")?;
     fs::File::open(parent)
         .and_then(|file| file.sync_all())
         .map_err(|_| "temporal_artifact_sync_failed")?;
     Ok(())
 }
+/// Re-establish a failed/ambiguous immutable metadata durability barrier. Equal
+/// existing bytes alone do not prove an earlier file/directory sync succeeded.
+pub(super) fn recertify_immutable(path:&Path,expected:&[u8],limit:usize,io:&mut dyn FnMut(&'static str)->Result<(),String>)->Result<(),String>{
+    if expected.len()>limit||bounded_read(path,limit)?!=expected{return Err("temporal_artifact_immutable_mismatch".into());}
+    let mut options=fs::OpenOptions::new();options.read(true);
+    #[cfg(target_os="macos")] {use std::os::unix::fs::OpenOptionsExt;options.custom_flags(0x100);}
+    #[cfg(target_os="linux")] {use std::os::unix::fs::OpenOptionsExt;options.custom_flags(0x20000);}
+    #[cfg(not(any(target_os="macos",target_os="linux")))] {return Err("temporal_artifact_nofollow_unsupported".into());}
+    let file=options.open(path).map_err(|_|"temporal_artifact_unavailable")?;metadata(&file.metadata().map_err(|_|"temporal_artifact_unavailable")?,false)?;
+    io("before:file_fsync")?;file.sync_all().map_err(|_|"temporal_artifact_sync_failed")?;
+    let parent=path.parent().ok_or("temporal_artifact_directory_unavailable")?;directory(parent,false)?;
+    io("before:directory_fsync")?;fs::File::open(parent).and_then(|f|f.sync_all()).map_err(|_|"temporal_artifact_sync_failed")?;
+    if bounded_read(path,limit)?!=expected{return Err("temporal_artifact_immutable_mismatch".into());}Ok(())
+}
+
 impl ArtifactStore {
     pub(super) fn temporal_directory(
         &self,
