@@ -287,6 +287,24 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
 {
     (void)ctx;
 
+    /* ADR-060: MAC address filtering — MOVED ABOVE the rate gate.
+     *
+     * The gate below stamps s_last_process_us before this filter ran, so a
+     * frame from any foreign transmitter claimed the 20 ms window and was then
+     * discarded here — starving the filtered stream. Measured on an ESP32-C6
+     * locked to its associated AP: 1.7 CSI/s instead of ~20 Hz. Filtering
+     * first preserves the gate's crash protection (processing is still capped
+     * at 50 Hz) while letting the matched transmitter actually fill the slots.
+     * With no filter configured the behaviour is byte-for-byte unchanged.
+     *
+     * Uses defensively-copied s_filter_mac instead of g_nvs_config (which can
+     * be corrupted by wifi_init_sta — same root cause as the node_id clobber). */
+    if (s_filter_mac_set) {
+        if (memcmp(info->mac, s_filter_mac, 6) != 0) {
+            return;  /* Source MAC doesn't match filter — skip frame. */
+        }
+    }
+
     /* Early rate gate: drop excess callbacks to ~50 Hz to prevent
      * SPI flash cache crash in WiFi ISR (wDev_ProcessFiq).
      *
@@ -339,15 +357,6 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
         return;
     }
     s_last_process_us = now_us;
-
-    /* ADR-060: MAC address filtering — drop frames from non-matching sources.
-     * Uses defensively-copied s_filter_mac instead of g_nvs_config (which can
-     * be corrupted by wifi_init_sta — same root cause as the node_id clobber). */
-    if (s_filter_mac_set) {
-        if (memcmp(info->mac, s_filter_mac, 6) != 0) {
-            return;  /* Source MAC doesn't match filter — skip frame. */
-        }
-    }
 
     s_cb_count++;
 
