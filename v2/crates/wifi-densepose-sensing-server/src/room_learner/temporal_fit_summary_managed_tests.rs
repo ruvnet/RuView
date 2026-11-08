@@ -109,7 +109,7 @@ fn actual_fit() -> (TemporalModel, TrainingReport, FitConfig) {
     }
     let permit = session.synthetic_test_fit_admission().unwrap();
     let (model, report) = session
-        .fit_managed_with_cancel(&permit, &AtomicBool::new(false))
+        .fit_managed_with_cancel(permit, &AtomicBool::new(false))
         .unwrap();
     assert_eq!(report.training_cohorts, 64);
     assert!(report.backbone_delta_l2 > 0.);

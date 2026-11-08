@@ -8,6 +8,8 @@ use crate::room_learner::{
 
 const TRAIN_LEAD_IN_NS: u64 = 5_000_000_000;
 const PRIVATE_KIND: &str = "learner_temporal_capture_private_unsupported_command";
+#[path = "lifecycle_temporal_fit.rs"]
+mod fit_control;
 
 pub(super) struct RuntimeTemporalCapture {
     context: CaptureContext,
@@ -16,12 +18,15 @@ pub(super) struct RuntimeTemporalCapture {
     lead_in_until: Option<u64>,
     failure: Option<String>,
     last_now_ns: u64,
+    fit_job: Option<fit_control::TemporalFitJob>,
+    diagnostic_fit: Option<fit_control::TemporalDiagnosticFit>,
 }
 impl RuntimeTemporalCapture {
     pub(super) fn owner_generation(&self) -> u64 {
         self.owner_generation
     }
     pub(super) fn invalidate_owner(&mut self) {
+        self.cancel_fit();
         self.lead_in_until = None;
         if let Some(core) = self.core.as_mut() {
             core.invalidate("temporal_owner_generation_changed");
@@ -50,6 +55,7 @@ impl RuntimeTemporalCapture {
     }
     fn check_time(&mut self, now: u64) -> Result<(), String> {
         if now < self.last_now_ns {
+            self.cancel_fit();
             self.lead_in_until = None;
             self.failure = Some("temporal_receiver_clock_reversed".into());
             if let Some(core) = self.core.as_mut() {
@@ -57,10 +63,15 @@ impl RuntimeTemporalCapture {
             }
             return Err("temporal_receiver_clock_reversed".into());
         }
-        self.core
+        let checked = self.core
             .as_mut()
             .ok_or("temporal_initial_barrier_unconfirmed")?
-            .check_time(now)?;
+            .check_time(now);
+        if let Err(error) = checked {
+            self.cancel_fit();
+            return Err(error);
+        }
+        if let Some(job) = &self.fit_job { job.observe_now(now); }
         self.last_now_ns = now;
         Ok(())
     }
@@ -133,6 +144,7 @@ impl RuntimeTemporalCapture {
             .iter()
             .any(|s| s.source_id == source_id && s.grid_id == grid_id)
         {
+            self.cancel_fit();
             self.lead_in_until = None;
             self.failure = Some(bounded(reason.into()));
             if let Some(core) = self.core.as_mut() {
@@ -239,6 +251,8 @@ impl RoomLearningRuntime {
                 lead_in_until: None,
                 failure: None,
                 last_now_ns: now,
+                fit_job: None,
+                diagnostic_fit: None,
             },
         )));
         state.generation = next_generation;
@@ -270,6 +284,7 @@ impl RoomLearningRuntime {
     }
     fn start_temporal_phase(&self, expected: &MutationGuard, now: u64) -> Result<(), String> {
         let mut state = self.command_state(expected)?;
+        if busy(&state.job) { return Err("temporal_fit_job_busy".into()); }
         let owner_generation = state.generation;
         let Some(CaptureWorkflow::Temporal(capture)) = state.capture.as_mut() else {
             return Err(PRIVATE_KIND.into());
@@ -382,6 +397,7 @@ impl RoomLearningRuntime {
     ) -> Result<(), String> {
         let store = self.temporal_store()?;
         let mut state = self.command_state(expected)?;
+        if busy(&state.job) { return Err("temporal_fit_job_busy".into()); }
         let owner_generation = state.generation;
         let Some(CaptureWorkflow::Temporal(capture)) = state.capture.as_mut() else {
             return Err(PRIVATE_KIND.into());
@@ -406,6 +422,7 @@ impl RoomLearningRuntime {
     fn pause_temporal_capture(&self, expected: &MutationGuard, now: u64) -> Result<(), String> {
         let store = self.temporal_store()?;
         let mut state = self.command_state(expected)?;
+        if busy(&state.job) { return Err("temporal_fit_job_busy".into()); }
         let owner_generation = state.generation;
         let Some(CaptureWorkflow::Temporal(capture)) = state.capture.as_mut() else {
             return Err(PRIVATE_KIND.into());
@@ -464,6 +481,8 @@ impl RoomLearningRuntime {
                 lead_in_until: None,
                 failure: None,
                 last_now_ns: now,
+                fit_job: None,
+                diagnostic_fit: None,
             },
         )));
         state.generation = next_generation;
@@ -490,6 +509,8 @@ impl RoomLearningRuntime {
                 lead_in_until: None,
                 failure: None,
                 last_now_ns: now,
+                fit_job: None,
+                diagnostic_fit: None,
             },
         )));
         state.generation = next_generation;
@@ -498,6 +519,7 @@ impl RoomLearningRuntime {
     fn repair_temporal_capture(&self, expected: &MutationGuard, now: u64) -> Result<(), String> {
         let store = self.temporal_store()?;
         let mut state = self.command_state(expected)?;
+        if busy(&state.job) { return Err("temporal_fit_job_busy".into()); }
         let owner_generation = state.generation;
         let Some(CaptureWorkflow::Temporal(capture)) = state.capture.as_mut() else {
             return Err(PRIVATE_KIND.into());
@@ -516,12 +538,14 @@ impl RoomLearningRuntime {
         Ok(())
     }
     fn cancel_temporal_durability(&self, expected: &MutationGuard) -> Result<(), String> {
-        let writer = {
+        let (writer, fit) = {
             let mut state = self.command_state(expected)?;
             let Some(CaptureWorkflow::Temporal(capture)) = state.capture.as_mut() else {
                 return Err(PRIVATE_KIND.into());
             };
             capture.lead_in_until = None;
+            let fit = capture.fit_job.clone();
+            capture.cancel_fit();
             let core = capture
                 .core
                 .as_mut()
@@ -531,11 +555,15 @@ impl RoomLearningRuntime {
             if let Some(writer) = &writer {
                 writer.cancel();
             }
-            writer
+            if busy(&state.job) {
+                state.job.cancel.store(true, Ordering::Release);
+                state.job.phase = JobPhase::Cancelling;
+            }
+            (writer, fit)
         };
-        if let Some(writer) = writer {
-            writer.drain()?;
-        }
+        let writer_result = writer.map_or(Ok(()), |writer| writer.drain());
+        if let Some(fit) = fit { fit.drain(); }
+        writer_result?;
         Ok(())
     }
     fn temporal_capture_snapshot(&self, now: u64) -> Result<Value, String> {
@@ -565,6 +593,11 @@ impl Drop for RoomLearningRuntime {
             Ok(state) => state,
             Err(poisoned) => poisoned.into_inner(),
         };
+        let fit = match state.capture.as_ref() {
+            Some(CaptureWorkflow::Temporal(capture)) => capture.fit_job.clone(),
+            _ => None,
+        };
+        if let Some(fit) = &fit { fit.cancel(); }
         let writer = match state.capture.as_mut() {
             Some(CaptureWorkflow::Temporal(capture)) => capture.core.as_mut().and_then(|core| {
                 let writer = core.writer();
@@ -576,5 +609,6 @@ impl Drop for RoomLearningRuntime {
         if let Some(writer) = writer {
             let _ = writer.drain();
         }
+        if let Some(fit) = fit { fit.drain(); }
     }
 }

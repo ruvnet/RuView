@@ -89,13 +89,15 @@ pub struct RoomLearningRuntime {
     runtime_epoch: String,
     owner: String,
     installation: String,
-    store: ArtifactStore,
+    store: Arc<ArtifactStore>,
     recovery_store: Option<std::sync::Arc<super::recovery_store::RecoveryStore>>,
     inner: Mutex<Inner>,
     #[cfg(test)]
     reclamation_probe:Mutex<Option<Arc<dyn Fn(super::temporal_model_input::managed::execution::ReclamationStats)+Send+Sync>>>,
     #[cfg(test)]
     panic_after_reclamation_ack:AtomicBool,
+    #[cfg(test)]
+    temporal_fit_hook: Mutex<Option<Arc<dyn Fn(&'static str) + Send + Sync>>>,
     clock_origin: std::time::Instant,
     clock_epoch_ns: u64,
 }
@@ -188,10 +190,11 @@ impl RoomLearningRuntime {
             runtime_epoch: crate::companion::secret(),
             owner: owner.into(),
             installation: installation.into(),
-            store: ArtifactStore::new(directory, owner, installation)?,
+            store: Arc::new(ArtifactStore::new(directory, owner, installation)?),
             recovery_store: recovery_store.map(std::sync::Arc::new),
             #[cfg(test)] reclamation_probe:Mutex::new(None),
             #[cfg(test)] panic_after_reclamation_ack:AtomicBool::new(false),
+            #[cfg(test)] temporal_fit_hook:Mutex::new(None),
             inner: Mutex::new(Inner {
                 generation: 0,
                 workflow_revision: 0,
