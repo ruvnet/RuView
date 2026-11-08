@@ -17,6 +17,24 @@ class ClassificationTests(unittest.TestCase):
         component=[('fixture',None,['module::one'],[('module::',False,2)])]
         result=profiles.validate(component,{'module::one','module::two'},set(),'release-run');self.assertEqual(len(result),1);self.assertEqual(result[0]['names'],['module::one','module::two'])
 
+class C1ClassificationTests(unittest.TestCase):
+    def component(self):
+        return [next(item for item in profiles.policy(pathlib.Path(__file__).resolve().parents[2]) if item[0] == 'C1')]
+    def test_current_policy_requires_one_exact_release_reference(self):
+        result=profiles.validate(self.component(),{profiles.C1,profiles.C1+'_lookalike',profiles.C2},set(),'release-run')
+        self.assertEqual(result,[{'component':'C1','selector':profiles.C1,'exact':True,'names':[profiles.C1]}])
+    def test_reference_stays_registered_but_transparently_ignored_in_debug(self):
+        result=profiles.validate(self.component(),{profiles.C1},{profiles.C1},'debug-check');self.assertEqual(result[0]['names'],[profiles.C1])
+    def test_missing_reference_cannot_be_silently_omitted(self):
+        with self.assertRaises(ValueError):profiles.validate(self.component(),set(),set(),'release-run')
+    def test_reference_cannot_run_unclassified_in_debug(self):
+        with self.assertRaises(ValueError):profiles.validate(self.component(),{profiles.C1},set(),'debug-check')
+    def test_reference_cannot_be_ignored_in_required_release(self):
+        with self.assertRaises(ValueError):profiles.validate(self.component(),{profiles.C1},{profiles.C1},'release-run')
+    def test_zero_or_lookalike_only_is_not_the_exact_reference(self):
+        with self.assertRaises(ValueError):profiles.validate(self.component(),{profiles.C1+'_manual_perf'},set(),'release-run')
+
+
 class CargoExecutableCustodyTests(unittest.TestCase):
     def setUp(self):
         import tempfile, copy

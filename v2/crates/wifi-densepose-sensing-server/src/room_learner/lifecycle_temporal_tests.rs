@@ -133,6 +133,7 @@ fn private_temporal_setup_uses_real_native_runtime_and_public_configure_cannot_r
         .is_err());
 }
 #[test]
+#[cfg_attr(debug_assertions, ignore = "synchronous native-persistence reference requires Release; CI explicitly executes and counts this exact test")]
 fn full_seven_train_phases_require_fresh_confirmation_and_never_issue_fit_authority() {
     let dir = tempfile::tempdir().unwrap();
     let rt = configured(dir.path());
