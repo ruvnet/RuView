@@ -410,3 +410,49 @@ async fn queryless_idle_progress_remains_v1_and_unknown_query_cannot_activate() 
     );
     assert!(rt.context().is_none());
 }
+
+#[tokio::test]
+async fn configured_owner_status_serializes_its_capture_clock_tick_before_sampling_time() {
+    use wifi_densepose_sensing_server::room_learner::recovery_store::RecoveryStore;
+    let (dir,state)=fixture();
+    let owner="a".repeat(64);
+    let path=dir.path().join(&owner).join("SensingServer");
+    let store=RecoveryStore::new(&path,&owner,"synthetic-install",Some(&[7;32])).unwrap();
+    let rt=Arc::new(RoomLearningRuntime::new_with_recovery(&path,&owner,"synthetic-install",store).unwrap());
+    state.write().await.room_learning=Some(rt.clone());
+    let app=temporal_app(state.clone());
+    let configured=decoded(app.clone(),"/configure",Some(configure_v2(rt.mutation_guard().unwrap()))).await;
+    assert_eq!(configured["success"],true,"{configured}");
+    for _ in 0..100 {
+        let s=decoded(app.clone(),&format!("/status?schema={STATUS_SCHEMA}"),None).await;
+        if s["status"]["capture"]["stage"]=="ready"{break;}
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    }
+    let shared_reader=state.read().await;
+    let task=tokio::spawn(async move{decoded(app,&format!("/status?schema={STATUS_SCHEMA}"),None).await});
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    let ran_concurrently=task.is_finished();
+    drop(shared_reader);
+    let reply=tokio::time::timeout(std::time::Duration::from_secs(5),task).await.unwrap().unwrap();
+    assert_eq!(reply["status"]["capture"]["stage"],"ready","{reply}");
+    assert_eq!(reply["status"]["capture"]["retained_windows"],0);
+    assert_eq!(reply["status"]["capture"]["observed_ms"],0);
+    assert!(!ran_concurrently,"clock-mutating owner status must not sample/tick concurrently under a shared read lock");
+}
+
+#[tokio::test(flavor="multi_thread", worker_threads=2)]
+async fn concurrent_actual_owner_status_requests_keep_unstarted_full_run_ready() {
+    use wifi_densepose_sensing_server::room_learner::recovery_store::RecoveryStore;
+    let (dir,state)=fixture();let owner="a".repeat(64);let path=dir.path().join(&owner).join("SensingServer");
+    let store=RecoveryStore::new(&path,&owner,"synthetic-install",Some(&[7;32])).unwrap();
+    let rt=Arc::new(RoomLearningRuntime::new_with_recovery(&path,&owner,"synthetic-install",store).unwrap());
+    state.write().await.room_learning=Some(rt.clone());let app=temporal_app(state.clone());
+    let configured=decoded(app.clone(),"/configure",Some(configure_v2(rt.mutation_guard().unwrap()))).await;assert_eq!(configured["success"],true,"{configured}");
+    let mut ready=false;for _ in 0..100{let s=decoded(app.clone(),&format!("/status?schema={STATUS_SCHEMA}"),None).await;if s["status"]["capture"]["stage"]=="ready"{ready=true;break;}tokio::time::sleep(std::time::Duration::from_millis(2)).await;}assert!(ready);
+    let barrier=Arc::new(tokio::sync::Barrier::new(2));let mut tasks=Vec::new();
+    for _ in 0..2 {let app=app.clone();let barrier=barrier.clone();tasks.push(tokio::spawn(async move{let mut failed=None;for _ in 0..200{barrier.wait().await;let s=decoded(app.clone(),&format!("/status?schema={STATUS_SCHEMA}"),None).await;if s["status"]["capture"]["stage"]!="ready"&&failed.is_none(){failed=Some(s);}}failed}));}
+    let mut errors=Vec::new();for task in tasks{if let Some(error)=tokio::time::timeout(std::time::Duration::from_secs(30),task).await.unwrap().unwrap(){errors.push(error);}}
+    if let Some(error)=errors.first(){println!("SYNTHETIC_ACTUAL_PARALLEL_OWNER_STATUS_FAILURE={error}");}
+    assert!(errors.is_empty(),"actual concurrent owner GETs failed an unstarted run: {errors:?}");
+    let last=decoded(app,&format!("/status?schema={STATUS_SCHEMA}"),None).await;assert_eq!(last["status"]["capture"]["retained_windows"],0);assert_eq!(last["status"]["capture"]["durable_windows"],0);assert_eq!(last["status"]["capture"]["observed_ms"],0);
+}
