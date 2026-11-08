@@ -1172,3 +1172,227 @@ fn c2_quiescent_start_waiter_handles_slow_recertification_without_observation_cr
     assert_eq!(status["lead_in_remaining_ms"],5000,"lead-in must start only at actual authorization ACK");
     rt.cancel_temporal_durability(&rt.mutation_guard().unwrap()).unwrap();
 }
+
+// READ-ONLY production behavior probe: no budget/policy/clock/threshold changes.
+// Private token Debug is parsed ONLY in this synthetic test to read the actual
+// authenticated header revision without adding a production metadata accessor.
+fn budget_repro_store_observation(rt:&RoomLearningRuntime,now:u64)->(usize,usize,usize,usize,String){
+    let loaded=rt.temporal_store().unwrap().load_temporal(now).unwrap().unwrap();
+    let token= format!("{:?}",loaded.token);
+    let revision=token.split("revision: ").nth(1).unwrap().split(',').next().unwrap().parse::<usize>().unwrap();
+    let prefix=loaded.prefix.unwrap();assert_eq!(prefix.transition_limit(),329);
+    let value:Value=serde_json::from_slice(prefix.bytes()).unwrap();
+    let rows=value["payload"]["rows"].as_array().unwrap().len();
+    let gaps=value["payload"]["ledger"]["gaps"].as_array().unwrap().len();
+    let bridge=&value["payload"]["bridge"];
+    let parts=bridge["parts"].as_array().unwrap().len()+bridge["seals"].as_array().unwrap().iter().map(|s|s["parts"].as_array().unwrap().len()).sum::<usize>();
+    (revision,rows,gaps,parts,format!("{:x}",<sha2::Sha256 as sha2::Digest>::digest(prefix.bytes())))
+}
+#[test]
+#[cfg_attr(debug_assertions, ignore = "native-persistence journey requires Release; CI explicitly executes and counts this test")]
+fn legacy_329_actual_runtime_saturation_retires_and_explicit_fresh_train_chains_343(){
+    assert!(!cfg!(debug_assertions), "execute this native-persistence journey in the explicit Release batch");
+    let dir=tempfile::tempdir().unwrap();let(rt,mut now)=configured_async(dir.path());let original=snapshot(&rt,now)["descriptor"].clone();
+    assert_eq!(budget_repro_store_observation(&rt,now).0,0);
+    //127 zero-observation pauses followed by127 resumes: initialsegment0 is
+    //paused, segments1..126 paused, finalsegment127 will actually collectEmpty.
+    for cycle in 0..127usize{
+        now=async_lead_end(&rt,now);rt.tick_temporal_capture(&rt.mutation_guard().unwrap(),now).unwrap();
+        rt.pause_temporal_capture(&rt.mutation_guard().unwrap(),now).unwrap();
+        now=settle_async_boundary(&rt,now);
+        assert_eq!(snapshot(&rt,now)["stage"],"paused");assert_eq!(snapshot(&rt,now)["durable_windows"],0);
+        if cycle==0 || cycle==126{
+            let actual=budget_repro_store_observation(&rt,now);
+            assert_eq!(actual.0,2*(cycle+1));assert_eq!(actual.2,cycle);
+            println!("SYNTHETIC_BUDGET_ZERO_PREFIX cycle={} authenticated_revision={} gaps={} parts={}",cycle+1,actual.0,actual.2,actual.3);
+        }
+    }
+    let mut seq=0;let mut before_failure=None;
+    for phase in 0..7u64{
+        if phase==6{
+            //Newlast-episodeinitialsegment has no newgap; pause it once so the
+            //following realresume consumes the128thGLOBALgap. No laterstart.
+            now=async_lead_end(&rt,now);rt.tick_temporal_capture(&rt.mutation_guard().unwrap(),now).unwrap();
+            rt.pause_temporal_capture(&rt.mutation_guard().unwrap(),now).unwrap();now=settle_async_boundary(&rt,now);
+        }
+        loop{
+            let status=snapshot(&rt,now);
+            match status["stage"].as_str().unwrap(){
+                "ready"|"paused"=>{now=async_lead_end(&rt,now);rt.tick_temporal_capture(&rt.mutation_guard().unwrap(),now).unwrap();},
+                "needs_confirmation"=>break,
+                "failed"=>panic!("STATIC_TRACE_REFUTED earlierphase failure phase={phase} status={status}"),_=>{}
+            }
+            if status["durable_windows"]==59 && before_failure.is_none(){
+                let observed=budget_repro_store_observation(&rt,now);
+                assert_eq!((observed.0,observed.1,observed.2,observed.3),(328,59,128,135));
+                println!("SYNTHETIC_BUDGET_LAST_HEAD revision={} windows={} gaps={} parts={}",observed.0,observed.1,observed.2,observed.3);
+                before_failure=Some(observed);
+            }
+            let pending=snapshot(&rt,now)["durability_pending"]==true;seq+=1;
+            for source in 1..=3{
+                match rt.ingest_native(&packet(source,seq,now),now){
+                    Ok(())=>{},Err(error)if error=="temporal_storage_busy_pause"=>break,
+                    Err(error)if error=="temporal_transition_budget"=>{
+                        assert_eq!(phase,6,"wrong phase hit budget");let before=before_failure.as_ref().expect("no observed last valid head");
+                        let after=budget_repro_store_observation(&rt,now);assert_eq!(&after,before,"failed operation changed authenticated durable prefix");
+                        let state=snapshot(&rt,now);assert_eq!(state["durable_windows"],59);assert!(state["retained_rows"].as_u64().unwrap()>=60);
+                        assert_eq!(state["stage"],"blocked");assert_eq!(state["descriptor"]["id"],original["id"]);assert_eq!(state["descriptor"]["expires_at_ms"],original["expires_at_ms"]);
+                        println!("SYNTHETIC_ACTUAL_TRANSITION_BUDGET_CONFIRMED phase_index=6 failed_window_in_episode=4 proposed_revision=329 accepted_states=329 last_authenticated_revision={} last_durable_windows={} global_gaps={} quality_parts={} current_stage={} last_prefix_sha256_unchanged=true",after.0,after.1,after.2,after.3,state["stage"]);
+                        rt.cancel_temporal_durability(&rt.mutation_guard().unwrap()).unwrap();
+                        let store=rt.temporal_store().unwrap();
+                        let token=store.load_temporal(now).unwrap().unwrap().token;
+                        let original_prefix=store.load_temporal(now).unwrap().unwrap().prefix.unwrap();
+                        // Same Runtime generated authenticated revision328. No
+                        // synthetic metadata/counter injection creates the head.
+                        assert!(store.fresh_train_genesis_predecessor(now).is_err());
+                        // Independent current-time branch of the SAME real
+                        // authenticated saturated prefix. Writer already drained;
+                        // copying only this synthetic TempDir creates no live data.
+                        let live=tempfile::tempdir().unwrap();let live_root=live.path().join("fixture");
+                        copy_synthetic_budget_fixture(dir.path(),&live_root);
+                        {let live_rt=runtime(&live_root,now);let live_store=live_rt.temporal_store().unwrap();
+                            let current=live_store.load_temporal(now).unwrap().unwrap();
+                            let live_intent=live_store.prepare_retire_temporal(&current.token,now,false).unwrap();
+                            let terminal=live_store.publish_temporal(&live_intent,None,now).unwrap();
+                            assert!(format!("{terminal:?}").contains("revision: 329,"));
+                            assert!(live_store.load_temporal(now).unwrap().unwrap().prefix.is_none());
+                            assert_eq!(live_store.repair_same_temporal(&live_intent,None,now).unwrap(),terminal);
+                        }
+                        let expired=original_prefix.descriptor().expires_at_ms*1_000_000;
+                        assert_eq!(store.load_temporal(expired).err().as_deref(),Some("recovery_expired"));
+                        let inspection=store.inspect_temporal_retirement(expired).unwrap().unwrap();
+                        assert!(inspection.expired());
+                        let intent=store.prepare_inspected_retirement(&inspection,expired,true).unwrap();
+                        let retired=store.publish_temporal(&intent,None,expired).unwrap();
+                        assert!(format!("{retired:?}").contains("generation: 0, revision: 329,"));
+                        // A lost ACK can only repair the exact same terminal,
+                        // never consume revision330 or restore positive rows.
+                        assert_eq!(store.repair_same_temporal(&intent,None,expired).unwrap(),retired);
+                        let same=store.prepare_retire_temporal(&retired,expired,false).unwrap();assert_eq!(store.publish_temporal(&same,None,expired).unwrap(),retired);
+                        assert!(store.load_temporal(expired).unwrap().unwrap().prefix.is_none());
+                        assert_eq!(store.fresh_train_genesis_predecessor(expired).unwrap(),Some(retired.clone()));
+                        assert!(store.prepare_retire_temporal(&token,expired,false).is_err());
+                        drop(rt);
+                        let fresh_at=expired+1_000_000;
+                        let fresh=runtime(dir.path(),fresh_at);
+                        fresh.configure_fresh_train_343_capture(&fresh.mutation_guard().unwrap(),context(),"synthetic-fresh-train-343".into(),fresh_at).unwrap();
+                        let fresh_now=settle_async_boundary(&fresh,fresh_at);
+                        let loaded=fresh.temporal_store().unwrap().load_temporal(fresh_now).unwrap().unwrap();
+                        assert_eq!(loaded.prefix.as_ref().unwrap().transition_limit(),343);
+                        assert!(format!("{:?}",loaded.token).contains("generation: 1, revision: 0,"));
+                        assert_ne!(loaded.prefix.as_ref().unwrap().descriptor().id,original_prefix.descriptor().id);
+                        assert_eq!(snapshot(&fresh,fresh_now)["durable_windows"],0);
+                        assert_eq!(snapshot(&fresh,fresh_now)["stage"],"ready");
+                        fresh.cancel_temporal_durability(&fresh.mutation_guard().unwrap()).unwrap();
+                        println!("SYNTHETIC_LEGACY_SATURATED_RETIRE_AND_FRESH_343_PASS expired_samples_unavailable=true terminal_revision=329 same_intent_repair=true fresh_rows=0");return;
+                    },
+                    Err(error)=>panic!("STATIC_TRACE_REFUTED earlierguard phase={phase} error={error}"),
+                }
+            }
+            now+=PERIOD;if pending{std::thread::sleep(std::time::Duration::from_nanos(PERIOD));}
+        }
+        let guard=rt.mutation_guard().unwrap();let challenge=rt.temporal_confirmation_challenge(&guard).unwrap();rt.confirm_temporal_phase(&guard,&challenge,now).unwrap();now=settle_async_boundary(&rt,now);
+        let actual=budget_repro_store_observation(&rt,now);println!("SYNTHETIC_BUDGET_PHASE_SEAL phase={} authenticated_revision={} windows={} gaps={} parts={}",phase+1,actual.0,actual.1,actual.2,actual.3);
+    }
+    panic!("STATIC_TRACE_REFUTED complete path did not hit predicted old329 budget");
+}
+
+// Fresh-profile complete upper-bound journey: original 128 gap / 135 part
+// schedule plus a legitimate deferred pause before EACH of the seven seals.
+// All counters below come from authenticated store readback, not a mock limit.
+#[test]
+#[cfg_attr(debug_assertions, ignore = "native-persistence journey requires Release; CI explicitly executes and counts this test")]
+fn fresh_343_actual_runtime_all_128_gaps_seven_terminal_pauses_and_retirement_fit_budget(){
+    assert!(!cfg!(debug_assertions), "execute this native-persistence journey in the explicit Release batch");
+    let dir=tempfile::tempdir().unwrap();let rt=runtime(dir.path(),START);
+    rt.configure_fresh_train_343_capture(&rt.mutation_guard().unwrap(),context(),"synthetic-full-343".into(),START).unwrap();
+    let mut now=settle_async_boundary(&rt,START);let original=snapshot(&rt,now)["descriptor"].clone();
+    for _ in 0..127{
+        now=async_lead_end(&rt,now);rt.tick_temporal_capture(&rt.mutation_guard().unwrap(),now).unwrap();
+        rt.pause_temporal_capture(&rt.mutation_guard().unwrap(),now).unwrap();now=settle_async_boundary(&rt,now);
+        assert_eq!(snapshot(&rt,now)["durable_windows"],0);
+    }
+    let mut seq=0;let mut terminal_pauses=0;
+    for phase in 0..7u64{
+        if phase==6{
+            now=async_lead_end(&rt,now);rt.tick_temporal_capture(&rt.mutation_guard().unwrap(),now).unwrap();
+            rt.pause_temporal_capture(&rt.mutation_guard().unwrap(),now).unwrap();now=settle_async_boundary(&rt,now);
+        }
+        let target=16+phase*8;let mut terminal_pause=false;let supervision=std::time::Instant::now();
+        loop{
+            assert!(supervision.elapsed()<std::time::Duration::from_secs(60),"fresh343 phase did not settle: {}",snapshot(&rt,now));
+            let status=snapshot(&rt,now);
+            match status["stage"].as_str().unwrap(){
+                "ready"|"paused" if !terminal_pause=>{now=async_lead_end(&rt,now);rt.tick_temporal_capture(&rt.mutation_guard().unwrap(),now).unwrap();},
+                "needs_confirmation"=>break,"failed"|"blocked"=>panic!("fresh343 phase={phase} {status}"),_=>{}
+            }
+            let pending=snapshot(&rt,now)["durability_pending"]==true;seq+=1;
+            for source in 1..=3{
+                match rt.ingest_native(&packet(source,seq,now),now){Ok(())=>{},Err(e)if e=="temporal_storage_busy_pause"=>break,Err(e)=>panic!("fresh343 phase={phase} ingress={e}")}
+            }
+            let after=snapshot(&rt,now);
+            if !terminal_pause && after["retained_rows"]==target && after["durability_pending"]==true{
+                // Exact real pending final WINDOW. pause does not consume its
+                // ACK; no new raw data, target slide, or fake duration is used.
+                rt.pause_temporal_capture(&rt.mutation_guard().unwrap(),now).unwrap();
+                terminal_pause=true;terminal_pauses+=1;
+                now=settle_async_boundary(&rt,now);
+                // Paused presentation precedes NeedsConfirmation; the real
+                // challenge below is the authority for complete-phase credit.
+                assert_eq!(snapshot(&rt,now)["durable_windows"],target);break;
+            }else{now+=PERIOD;if pending{std::thread::sleep(std::time::Duration::from_nanos(PERIOD));}}
+        }
+        assert!(terminal_pause,"did not exercise terminal deferred pause");
+        let guard=rt.mutation_guard().unwrap();let challenge=rt.temporal_confirmation_challenge(&guard).unwrap();
+        rt.confirm_temporal_phase(&guard,&challenge,now).unwrap();now=settle_async_boundary(&rt,now);
+        println!("SYNTHETIC_FRESH343_SEAL phase={} rows={} terminal_pauses={}",phase+1,target,terminal_pauses);
+    }
+    assert_eq!(snapshot(&rt,now)["sealed_train_episodes"],7);assert_eq!(snapshot(&rt,now)["durable_windows"],64);
+    rt.cancel_temporal_durability(&rt.mutation_guard().unwrap()).unwrap();
+    let store=rt.temporal_store().unwrap();let loaded=store.load_temporal(now).unwrap().unwrap();let prefix=loaded.prefix.unwrap();
+    assert_eq!(prefix.transition_limit(),343);assert_eq!(prefix.window_count(),64);
+    let value:Value=serde_json::from_slice(prefix.bytes()).unwrap();
+    assert_eq!(value["payload"]["ledger"]["gaps"].as_array().unwrap().len(),128);
+    let bridge=&value["payload"]["bridge"];
+    let parts=bridge["parts"].as_array().unwrap().len()+bridge["seals"].as_array().unwrap().iter().map(|seal|seal["parts"].as_array().unwrap().len()).sum::<usize>();
+    assert_eq!(parts,135);
+    assert_eq!(prefix.descriptor().id,original["id"].as_str().unwrap());
+    assert_eq!(prefix.descriptor().expires_at_ms,original["expires_at_ms"].as_u64().unwrap());
+    let before=format!("{:?}",loaded.token);assert!(before.contains("revision: 341,"),"{before}");
+    let intent=store.prepare_retire_temporal(&loaded.token,now,false).unwrap();let terminal=store.publish_temporal(&intent,None,now).unwrap();
+    assert!(format!("{terminal:?}").contains("revision: 342,"));assert!(store.load_temporal(now).unwrap().unwrap().prefix.is_none());
+    assert_eq!(store.repair_same_temporal(&intent,None,now).unwrap(),terminal);
+    println!("SYNTHETIC_FRESH343_COMPLETE authenticated_states=343 last_revision=342 rows=64 gaps=128 quality_parts=135 terminal_pauses=7 retired=true");
+}
+
+#[test]
+fn fresh343_actual_genesis_fixture_for_frozen_old_runtime_consumer(){
+    let dir=tempfile::tempdir().unwrap();let rt=runtime(dir.path(),START);
+    rt.configure_fresh_train_343_capture(&rt.mutation_guard().unwrap(),context(),"synthetic-old-reader-fixture".into(),START).unwrap();
+    let now=settle_async_boundary(&rt,START);rt.cancel_temporal_durability(&rt.mutation_guard().unwrap()).unwrap();
+    let loaded=rt.temporal_store().unwrap().load_temporal(now).unwrap().unwrap();assert_eq!(loaded.prefix.unwrap().transition_limit(),343);
+    if let Some(output)=std::env::var_os("RUVIEW_2473_SYNTHETIC_FIXTURE_OUTPUT"){
+        fn copy_private(from:&Path,to:&Path){
+            std::fs::create_dir(to).unwrap();
+            #[cfg(unix)]{use std::os::unix::fs::PermissionsExt;std::fs::set_permissions(to,std::fs::Permissions::from_mode(0o700)).unwrap();}
+            for e in std::fs::read_dir(from).unwrap(){let e=e.unwrap();let m=std::fs::symlink_metadata(e.path()).unwrap();assert!(!m.file_type().is_symlink());
+                if m.is_dir(){copy_private(&e.path(),&to.join(e.file_name()));}else{assert!(m.is_file());std::fs::copy(e.path(),to.join(e.file_name())).unwrap();
+                    #[cfg(unix)]{use std::os::unix::fs::PermissionsExt;std::fs::set_permissions(to.join(e.file_name()),std::fs::Permissions::from_mode(0o600)).unwrap();}
+                }
+            }
+        }
+        let output=std::path::PathBuf::from(output);std::fs::create_dir_all(&output).unwrap();copy_private(dir.path(),&output.join("fresh343"));
+        std::fs::write(output.join("fresh343.json"),serde_json::to_vec(&json!({"now_ns":now,"owner_scope":context().owner_scope,"installation_id":context().installation_id})).unwrap()).unwrap();
+    }
+}
+
+// Synthetic temp fixture only: no symbolic links, public state or user profile.
+fn copy_synthetic_budget_fixture(from:&Path,to:&Path){
+    std::fs::create_dir(to).unwrap();
+    #[cfg(unix)]{use std::os::unix::fs::PermissionsExt;std::fs::set_permissions(to,std::fs::Permissions::from_mode(0o700)).unwrap();}
+    for entry in std::fs::read_dir(from).unwrap(){let entry=entry.unwrap();let m=std::fs::symlink_metadata(entry.path()).unwrap();assert!(!m.file_type().is_symlink());
+        if m.is_dir(){copy_synthetic_budget_fixture(&entry.path(),&to.join(entry.file_name()));}else{assert!(m.is_file());std::fs::copy(entry.path(),to.join(entry.file_name())).unwrap();
+            #[cfg(unix)]{use std::os::unix::fs::PermissionsExt;std::fs::set_permissions(to.join(entry.file_name()),std::fs::Permissions::from_mode(0o600)).unwrap();}
+        }
+    }
+}

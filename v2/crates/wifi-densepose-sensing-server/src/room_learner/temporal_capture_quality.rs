@@ -5,6 +5,24 @@ use crate::room_learner::temporal_acquisition::WindowInputPolicy;
 use serde_json::{json, Value};
 
 pub(super) const BRIDGE_POLICY: &str = "native-receiver-whole-train-period-v1;all-selected-packets;existing-cadence-gap-arrival-skew;confirmed-durable-seals;no-fit-authority";
+// Explicit NEW Train genesis only. The generic constructor and old literal
+// remain historical329; restore never upgrades a stored generation.
+pub(super) const FRESH_TRAIN_343_POLICY:&str="native-receiver-whole-train-period-v2;all-selected-packets;existing-cadence-gap-arrival-skew;confirmed-durable-seals;train-budget343;no-fit-authority";
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub(super) enum TrainBudgetProfile { Historical329, FreshTrain343 }
+impl TrainBudgetProfile {
+    pub(super) fn from_stored(policy:&str)->Result<Self,String>{match policy{
+        BRIDGE_POLICY=>Ok(Self::Historical329),FRESH_TRAIN_343_POLICY=>Ok(Self::FreshTrain343),
+        _=>Err("temporal_train_profile_unknown".into()),
+    }}
+    pub(super) fn policy(self)->&'static str{match self{Self::Historical329=>BRIDGE_POLICY,Self::FreshTrain343=>FRESH_TRAIN_343_POLICY}}
+    pub(super) fn transition_limit(self,schedule:&ManagedScheduleContract)->Result<usize,String>{
+        let episodes=schedule.counts().train_episodes;
+        let old=schedule.counts().train_windows.checked_add(2*128).and_then(|n|n.checked_add(episodes)).and_then(|n|n.checked_add(2)).ok_or("temporal_transition_capacity")?;
+        match self{Self::Historical329=>Ok(old),Self::FreshTrain343=>old.checked_add(2*episodes).ok_or("temporal_transition_capacity".into())}
+    }
+}
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum Disposition {
@@ -160,9 +178,9 @@ pub(super) struct TrainSeal {
     pub(super) sha256: String,
 }
 impl TrainSeal {
-    fn digest(&self) -> Result<String, String> {
+    fn digest(&self,profile:TrainBudgetProfile) -> Result<String, String> {
         hash(&(
-            BRIDGE_POLICY,
+            profile.policy(),
             self.episode,
             &self.trial_id,
             &self.context_sha256,
@@ -192,6 +210,10 @@ impl BridgeState {
             parts: vec![],
         }
     }
+    pub(super) fn fresh_train_343()->Self{
+        Self{policy:FRESH_TRAIN_343_POLICY.into(),..Self::new()}
+    }
+    pub(super) fn profile(&self)->Result<TrainBudgetProfile,String>{TrainBudgetProfile::from_stored(&self.policy)}
     pub(super) fn validate(
         &self,
         schedule: &ManagedScheduleContract,
@@ -208,8 +230,8 @@ impl BridgeState {
             .iter()
             .take_while(|e| e.role == DataRole::Train)
             .count();
-        if self.policy != BRIDGE_POLICY
-            || self.seals.len() > train
+        let profile=self.profile()?;
+        if self.seals.len() > train
             || episode != self.seals.len()
             || episode > train
             || self.parts.len() > 128
@@ -232,7 +254,7 @@ impl BridgeState {
                 || s.confirmed_at_ns < last_confirm
                 || s.confirmed_at_ns > now
                 || s.previous_sha256 != previous
-                || s.sha256 != s.digest()?
+                || s.sha256 != s.digest(profile)?
                 || s.quality_sha256 != hash(&s.parts)?
                 || s.row_prefix_sha256
                     != hash(&(&rows[..count], &evidence[..count], &ledger.spans[..count]))?
@@ -462,6 +484,23 @@ impl TemporalTrainCapture {
             w.async_state=Some(durability::AsyncState::new(writer));
             w.persist_initial(store)
         })
+    }
+    /// Explicit NEW Train genesis only. Existing generic/old constructors and
+    /// cold restore retain their stored profile; C4 never inherits this choice.
+    pub(crate) fn prepare_async_fresh_train_343(
+        schedule:ManagedScheduleContract,run:String,config:FitConfig,now:u64,
+        store:std::sync::Arc<RecoveryStore>,
+    )->Result<(Self,Option<String>),String>{
+        let predecessor=store.fresh_train_genesis_predecessor(now)?;
+        let mut workflow=TemporalWorkflow::prepare(schedule,run,config,now)?;
+        let schedule=workflow.schedule()?;
+        workflow.bridge=Some(BridgeState::fresh_train_343());
+        workflow.commit_token=predecessor;
+        let writer=std::sync::Arc::new(durability::Writer::new(store.clone(),now)?);
+        workflow.async_state=Some(durability::AsyncState::new(writer));
+        let error=workflow.persist_initial(&store).err();
+        if error.is_some(){workflow.stage=Stage::BlockedDurability;}
+        Ok((Self{workflow,schedule,failure:None,durable_seals:0},error))
     }
     pub(crate) fn async_start(&mut self,now:u64)->Result<bool,String>{
         self.ensure_live()?;
@@ -808,7 +847,7 @@ impl TemporalTrainCapture {
         let w = &self.workflow;
         let b = w.bridge.as_ref().ok_or("temporal_bridge_required")?;
         hash(&(
-            BRIDGE_POLICY,
+            b.profile()?.policy(),
             &w.descriptor.id,
             &w.session.run_id,
             w.episode,
@@ -857,7 +896,7 @@ impl TemporalTrainCapture {
             previous_sha256: b.seals.last().map(|s| s.sha256.clone()),
             sha256: String::new(),
         };
-        seal.sha256 = seal.digest()?;
+        seal.sha256 = seal.digest(b.profile()?)?;
         b.seals.push(seal);
         b.parts.clear();
         w.episode += 1;
@@ -958,3 +997,7 @@ impl Drop for TemporalTrainCapture {
         if let Some(state)=&self.workflow.async_state {let _=state.writer.drain();}
     }
 }
+
+#[cfg(test)]
+#[path="temporal_budget_profile_tests.rs"]
+mod budget_profile_tests;

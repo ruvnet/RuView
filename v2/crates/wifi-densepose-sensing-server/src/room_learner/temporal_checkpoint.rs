@@ -500,20 +500,10 @@ pub(crate) fn validated_prefix(
 ) -> Result<ValidatedTemporalPrefix, String> {
     let v = decode(bytes, descriptor, now_ns)?;
     let schedule = v.schedule()?;
-    let train_episodes = schedule
-        .episodes()
-        .iter()
-        .filter(|e| e.role == DataRole::Train)
-        .count();
-    // Each64 native Train window +2x128 run-global pause/resume gap barriers +7 Train segment
-    // boundaries + genesis/terminal states. Identical retries consume none.
-    let transition_limit = schedule
-        .counts()
-        .train_windows
-        .checked_add(2 * 128)
-        .and_then(|n| n.checked_add(train_episodes))
-        .and_then(|n| n.checked_add(2))
-        .ok_or("temporal_transition_capacity")?;
+    // Historical profiles retain their ORIGINAL limit/hash; only an explicit
+    // fresh-Train genesis can select the recognized343 budget profile.
+    let profile=match &v.bridge{Some(bridge)=>bridge.profile()?,None=>bridge::TrainBudgetProfile::Historical329};
+    let transition_limit=profile.transition_limit(&schedule)?;
     if transition_limit > 512 {
         return Err("temporal_transition_capacity".into());
     }
@@ -522,7 +512,7 @@ pub(crate) fn validated_prefix(
         descriptor: descriptor.clone(),
         run: v.session.run_id.clone(),
         policy_sha256: if v.bridge.is_some() {
-            hash(&(v.session.plan_sha256(), bridge::BRIDGE_POLICY))?
+            hash(&(v.session.plan_sha256(), profile.policy()))?
         } else {
             v.session.plan_sha256().into()
         },
@@ -800,4 +790,14 @@ pub(crate) fn synthetic_floor_regression(
     e.payload_sha256 = hash(&e.payload).unwrap();
     let b = serde_json::to_vec(&e).unwrap();
     validated_prefix(&b, &e.payload.descriptor, e.payload.last_now_ns).unwrap()
+}
+
+// Test-only typed fixture: create a NEW empty run and encode its explicit
+// profile through the same strict codec; never upgrades an existing prefix.
+#[cfg(test)]
+pub(crate) fn synthetic_fresh_train343_empty_run(input:&ValidatedTemporalPrefix,created:u64)->ValidatedTemporalPrefix{
+    let empty=synthetic_new_empty_run(input,created);
+    let mut workflow=decode(empty.bytes(),empty.descriptor(),empty.saved_receiver_ns()).unwrap();
+    workflow.bridge=Some(super::bridge::BridgeState::fresh_train_343());
+    let bytes=encode(&workflow).unwrap();validated_prefix(&bytes,&workflow.descriptor,workflow.last_now_ns).unwrap()
 }

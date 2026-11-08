@@ -190,6 +190,15 @@ impl RoomLearningRuntime {
             },
         )
     }
+    /// Explicit trusted new-Train entry point. No public route or profile flag.
+    /// Active old generations must retire first; only authenticated retired
+    /// metadata can chain a new343 generation in the SAME store.
+    fn configure_fresh_train_343_capture(&self,expected:&MutationGuard,context:CaptureContext,run:String,now:u64)->Result<(),String>{
+        self.configure_temporal_capture_with(expected,context,run,now,|schedule,run,fit,now,_|{
+            let store=self.recovery_store.clone().ok_or("temporal_recovery_unavailable")?;
+            TemporalTrainCapture::prepare_async_fresh_train_343(schedule,run,fit,now,store)
+        })
+    }
     fn configure_temporal_capture_with(
         &self,
         expected: &MutationGuard,
