@@ -429,6 +429,27 @@ impl WindowInputPolicy {
         &self,
         p: &CanonicalPacket,
     ) -> Result<(&SourceSpec, &SourceWindowPolicy), String> {
+        let (spec, policy) = self.validate_packet_source_identity(p)?;
+        let (lo, hi, _) = policy.receiver_cadence.range();
+        if p.receiver_sample_rate_hz < lo as f64 / 1000.
+            || p.receiver_sample_rate_hz > hi as f64 / 1000.
+        {
+            return Err("acquisition_cadence_changed".into());
+        }
+        Ok((spec, policy))
+    }
+    /// Identity-only check for closed Full2 priming, never a window admission.
+    /// The owning capture derives and checks its non-observing stage first.
+    pub(super) fn validate_priming_packet_source_identity(
+        &self,
+        p: &CanonicalPacket,
+    ) -> Result<(&SourceSpec, &SourceWindowPolicy), String> {
+        self.validate_packet_source_identity(p)
+    }
+    fn validate_packet_source_identity(
+        &self,
+        p: &CanonicalPacket,
+    ) -> Result<(&SourceSpec, &SourceWindowPolicy), String> {
         let spec = self
             .context
             .sources
@@ -465,11 +486,7 @@ impl WindowInputPolicy {
                 return Err("acquisition_native_geometry_changed".into());
             }
         }
-        let (lo, hi, _) = policy.receiver_cadence.range();
-        if !p.receiver_sample_rate_hz.is_finite()
-            || p.receiver_sample_rate_hz < lo as f64 / 1000.
-            || p.receiver_sample_rate_hz > hi as f64 / 1000.
-        {
+        if !p.receiver_sample_rate_hz.is_finite() || p.receiver_sample_rate_hz <= 0.0 {
             return Err("acquisition_cadence_changed".into());
         }
         Ok((spec, policy))
