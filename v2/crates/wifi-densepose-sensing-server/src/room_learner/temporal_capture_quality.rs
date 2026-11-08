@@ -690,16 +690,24 @@ impl TemporalTrainCapture {
             && !full_run_continuation_fence {
             return Err("temporal_priming_state".into());
         }
+        // No recorded observation exists in these closed Full2 stages. A
+        // changing host-arrival estimate may prime identity/replay fences,
+        // while the frozen recording band remains mandatory in ingest().
+        let full_run_idle = self.is_full_run() && matches!(self.stage(),
+            TemporalCaptureStage::Ready | TemporalCaptureStage::Paused |
+            TemporalCaptureStage::Preparing | TemporalCaptureStage::Blocked |
+            TemporalCaptureStage::Complete | TemporalCaptureStage::Frozen |
+            TemporalCaptureStage::FullComplete);
         let result: Result<(), String> = (|| {
             let w = &mut self.workflow;
             w.check_clock(now)?;
-            w.session
-                .managed
-                .as_ref()
-                .ok_or("managed_session_required")?
-                .binding
-                .native
-                .validate_packet_source(p)?;
+            let native = &w.session.managed.as_ref()
+                .ok_or("managed_session_required")?.binding.native;
+            if full_run_idle {
+                native.validate_priming_packet_source_identity(p)?;
+            } else {
+                native.validate_packet_source(p)?;
+            }
             let t = p.native_frame.timestamp_ns;
             if p.provenance != CaptureProvenance::LiveReceiverObserved
                 || p.native_frame.provenance.class

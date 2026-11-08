@@ -512,3 +512,86 @@ async fn actual_client_publication_and_learner_revision_domains_pair_without_rew
         assert_eq!(rt.context().unwrap(),context);assert_eq!(rt.mutation_guard().unwrap(),before_guard);
     }
 }
+
+async fn cadence_priming_fixture(cold_restore:bool)->(tempfile::TempDir,SharedState,Arc<RoomLearningRuntime>,Router,serde_json::Value) {
+    use wifi_densepose_sensing_server::room_learner::recovery_store::RecoveryStore;
+    let (dir,state)=fixture();let owner="a".repeat(64);let path=dir.path().join(&owner).join("SensingServer");
+    let store=RecoveryStore::new(&path,&owner,"synthetic-install",Some(&[7;32])).unwrap();
+    let rt=Arc::new(RoomLearningRuntime::new_with_recovery(&path,&owner,"synthetic-install",store).unwrap());
+    state.write().await.room_learning=Some(rt.clone());let app=temporal_app(state.clone());
+    let configured=decoded(app.clone(),"/configure",Some(configure_v2(rt.mutation_guard().unwrap()))).await;assert_eq!(configured["success"],true,"{configured}");
+    let mut before=serde_json::Value::Null;for _ in 0..100{let s=decoded(app.clone(),&format!("/status?schema={STATUS_SCHEMA}"),None).await;if s["status"]["capture"]["stage"]=="ready"{before=s;break;}tokio::time::sleep(std::time::Duration::from_millis(2)).await;}assert!(before.is_object());
+    if !cold_restore{return(dir,state,rt,app,before);}
+    let context=rt.context().unwrap();let capture_id=before["status"]["capture"]["capture_generation_id"].as_str().unwrap().to_string();
+    state.write().await.room_learning=None;drop(rt);
+    let store=RecoveryStore::new(&path,&owner,"synthetic-install",Some(&[7;32])).unwrap();
+    let restored=Arc::new(RoomLearningRuntime::new_with_recovery(&path,&owner,"synthetic-install",store).unwrap());
+    restored.temporal_restore_v2(&restored.mutation_guard().unwrap(),&context,&capture_id,restored.receiver_now_ns()).unwrap();
+    state.write().await.room_learning=Some(restored.clone());
+    let after=decoded(app.clone(),&format!("/status?schema={STATUS_SCHEMA}"),None).await;assert_eq!(after["status"]["capture"]["stage"],"paused","{after}");
+    assert_eq!(after["status"]["capture"]["capture_generation_id"],before["status"]["capture"]["capture_generation_id"]);assert_eq!(after["status"]["capture"]["original_deadline"],before["status"]["capture"]["original_deadline"]);
+    (dir,state,restored,app,after)
+}
+async fn actual_header_observe(state:&SharedState,sequence:u32) -> f64 {
+    let packet=wire(15,sequence);let frame=parse_esp32_frame(&packet).unwrap();let mut s=state.write().await;
+    observe(&mut s,&frame,&packet,std::time::Instant::now());
+    s.room_learning_sources.iter().find(|(k,_)|k.node_id==15).unwrap().1.receiver_rate_hz
+}
+async fn assert_nonobserving_cadence_does_not_fail(cold:bool) {
+    let (_dir,state,rt,app,before)=cadence_priming_fixture(cold).await;
+    let rate=actual_header_observe(&state,121).await;assert!(rate>0.&&rate<30.,"fixture must expose a real moving-arrival estimate below recording band: {rate}");
+    let after=decoded(app,&format!("/status?schema={STATUS_SCHEMA}"),None).await;
+    println!("SYNTHETIC_ACTUAL_INGRESS_PRIMING_CADENCE cold={cold} measured_receiver_hz={rate} capture={}",after["status"]["capture"]);
+    assert_eq!(after["status"]["capture"]["stage"],if cold{"paused"}else{"ready"},"{after}");
+    for key in ["capture_generation_id","original_deadline","schedule_sha256","retained_windows","durable_windows","sealed_train_episodes","sealed_held_out_episodes","observed_ms","durable_commitment_sha256","continuation_policy_sha256"]{assert_eq!(after["status"]["capture"][key],before["status"]["capture"][key],"{key}");}
+    assert_eq!(rt.context().unwrap().revision,1);
+}
+#[tokio::test]
+async fn actual_ingress_ready_zero_window_rate_estimate_does_not_record_or_fail(){assert_nonobserving_cadence_does_not_fail(false).await;}
+#[tokio::test]
+async fn actual_ingress_cold_paused_zero_window_rate_estimate_does_not_record_or_fail(){assert_nonobserving_cadence_does_not_fail(true).await;}
+
+#[tokio::test]
+async fn actual_ingress_low_cadence_lead_in_has_zero_credit_then_observing_rejects() {
+    let (_dir,state,rt,app,before)=cadence_priming_fixture(false).await;
+    let capture=&before["status"]["capture"];
+    let start=decoded(app.clone(),"/phase/start",Some(serde_json::json!({"schema":PHASE_START_REQUEST_SCHEMA,"expected":rt.mutation_guard().unwrap(),"capture_generation_id":capture["capture_generation_id"],"schedule_sha256":capture["schedule_sha256"],"episode_index":0,"conditions_confirmed":true}))).await;
+    assert_eq!(start["success"],true,"{start}");
+    let wait=std::time::Instant::now();let mut saw_lead=false;let mut failed=false;
+    for sequence in 121..221 {
+        {let mut s=state.write().await;for node in [15,16,17]{let packet=wire(node,sequence);let frame=parse_esp32_frame(&packet).unwrap();observe(&mut s,&frame,&packet,std::time::Instant::now());}}
+        let current=decoded(app.clone(),&format!("/status?schema={STATUS_SCHEMA}"),None).await;
+        assert_eq!(current["status"]["capture"]["retained_windows"],0);assert_eq!(current["status"]["capture"]["durable_windows"],0);
+        if current["status"]["capture"]["stage"]=="failed" {
+            assert!(saw_lead,"must first prove non-observing lead-in accepted without credit");
+            assert_eq!(current["status"]["capture"]["failure"],"acquisition_cadence_changed","{current}");failed=true;break;
+        }
+        if current["status"]["capture"]["lead_in_remaining_ms"].as_u64().unwrap()>0 {
+            saw_lead=true;assert_eq!(current["status"]["capture"]["observed_ms"],0);
+        }
+        assert!(wait.elapsed()<std::time::Duration::from_secs(10));
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(failed,"observing must still reject the unchanged low moving-arrival rate");
+}
+fn low_rate_native_packet(rt:&RoomLearningRuntime, sequence:u32)->native::CanonicalPacket {
+    let bytes=wire(15,sequence);let frame=parse_esp32_frame(&bytes).unwrap();
+    native::canonicalize_esp32(native::NativePacketInput{node_id:15,n_antennas:1,raw_bins:64,frequency_hz:2_437_000_000,ppdu_type:frame.ppdu_type,sequence,received_at_ns:rt.receiver_now_ns(),receiver_sample_rate_hz:10.,iq_bytes:&bytes[20..],flags:frame.adr018_flags,provenance:wifi_densepose_sensing_server::room_learner::observation::CaptureProvenance::LiveReceiverObserved}).unwrap()
+}
+#[tokio::test]
+async fn fullrun_priming_still_rejects_replay_and_changed_phy_identity() {
+    {let (_dir,state,_rt,app,_)=cadence_priming_fixture(false).await;actual_header_observe(&state,121).await;actual_header_observe(&state,121).await;
+     let s=decoded(app,&format!("/status?schema={STATUS_SCHEMA}"),None).await;assert_eq!(s["status"]["capture"]["failure"],"temporal_priming_source_or_fence");assert_eq!(s["status"]["capture"]["retained_windows"],0);}
+    {let (_dir,_state,rt,app,_)=cadence_priming_fixture(false).await;let mut p=low_rate_native_packet(&rt,121);p.frequency_hz=2_462_000_000;
+     assert_eq!(rt.ingest_native(&p,rt.receiver_now_ns()),Err("acquisition_native_source_changed".into()));
+     let s=decoded(app,&format!("/status?schema={STATUS_SCHEMA}"),None).await;assert_eq!(s["status"]["capture"]["retained_windows"],0);}
+}
+#[tokio::test]
+async fn fullrun_priming_still_rejects_zero_nan_and_nonfinite_rate_metadata() {
+    for rate in [0.,-1.,f64::NAN,f64::INFINITY] {
+        let (_dir,_state,rt,app,_)=cadence_priming_fixture(false).await;
+        let mut p=low_rate_native_packet(&rt,121);p.receiver_sample_rate_hz=rate;
+        assert_eq!(rt.ingest_native(&p,rt.receiver_now_ns()),Err("acquisition_cadence_changed".into()));
+        let s=decoded(app,&format!("/status?schema={STATUS_SCHEMA}"),None).await;assert_eq!(s["status"]["capture"]["retained_windows"],0);assert_eq!(s["status"]["capture"]["observed_ms"],0);
+    }
+}

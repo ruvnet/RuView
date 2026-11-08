@@ -1396,3 +1396,19 @@ fn copy_synthetic_budget_fixture(from:&Path,to:&Path){
         }
     }
 }
+
+#[test]
+fn historical329_and_fresh343_priming_keep_the_original_cadence_band() {
+    for fresh in [false,true] {
+        let directory=tempfile::tempdir().unwrap();let rt=runtime(directory.path(),START);
+        if fresh {rt.configure_fresh_train_343_capture(&rt.mutation_guard().unwrap(),context(),"synthetic-old-profile-rate".into(),START).unwrap();}
+        else {rt.configure_temporal_capture(&rt.mutation_guard().unwrap(),context(),"synthetic-old-profile-rate".into(),START).unwrap();}
+        let now=settle_async_boundary(&rt,START);
+        let iq=vec![3u8;128];
+        let packet=canonicalize_esp32(NativePacketInput{node_id:1,n_antennas:1,raw_bins:64,frequency_hz:2_437_000_000,ppdu_type:PpduType::HtLegacy,sequence:1,received_at_ns:now,receiver_sample_rate_hz:10.,iq_bytes:&iq,flags:Adr018Flags::default(),provenance:CaptureProvenance::LiveReceiverObserved}).unwrap();
+        assert_eq!(rt.ingest_native(&packet,now),Err("acquisition_cadence_changed".into()),"fresh343={fresh}");
+        assert_eq!(snapshot(&rt,now)["retained_rows"],0);
+        assert_eq!(snapshot(&rt,now)["durable_windows"],0);
+        assert_eq!(snapshot(&rt,now)["failure"],"acquisition_cadence_changed");
+    }
+}
