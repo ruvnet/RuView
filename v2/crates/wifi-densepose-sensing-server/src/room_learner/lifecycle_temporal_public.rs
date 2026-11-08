@@ -746,14 +746,14 @@ impl RoomLearningRuntime {
                     .map(|s| &s.stored.envelope().receipt.selected.context)
             });
             if let (Some(published), Some(context)) = (result.room.as_ref(), context) {
+                // The full binding digest includes the monotonic publication revision.
+                // Context.revision is a separate learner structural fingerprint.
                 if installation_id != self.installation
                     || context.installation_id != installation_id
                     || context.room_digest != published.binding_digest
-                    || context.revision != published.revision
                     || state.selection.temporal.as_ref().is_some_and(|selected| {
                         let c = &selected.stored.envelope().receipt.selected.context;
                         c.room_digest != published.binding_digest
-                            || c.revision != published.revision
                             || c.digest() != context.digest()
                     })
                 {
