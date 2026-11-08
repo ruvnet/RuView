@@ -1186,3 +1186,48 @@ fn same_accepted_prefix(before: &Value, after: &Value) {
 #[cfg(all(test, unix))]
 #[path = "lifecycle_temporal_public_safety_tests.rs"]
 mod safety;
+
+#[test]
+fn explicit_stale_native_processing_coordinate_still_fails_closed() {
+    let temp = tempfile::Builder::new().prefix("SYNTHETIC-fullrun-primer-order-").tempdir().unwrap();
+    let rt = Arc::new(fixture::runtime(temp.path(), fixture::START));
+    let now = rt.receiver_now_ns();
+    rt.temporal_configure_v2(&rt.mutation_guard().unwrap(), fixture::context(), "synthetic-primer-order".into(), true, now).unwrap();
+    let wait = Instant::now();
+    loop {
+        let status=rt.temporal_status_v2(rt.receiver_now_ns()).unwrap();
+        if status["capture"]["stage"]=="ready" {break;}
+        assert!(wait.elapsed()<Duration::from_secs(5),"initial durable ACK stalled: {status}");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let received_processing_now=rt.receiver_now_ns();
+    let packet=established::packet(1,1,received_processing_now,RoomLabel::Empty);
+    std::thread::sleep(Duration::from_millis(2));
+    let polled=rt.temporal_status_v2(rt.receiver_now_ns()).unwrap();
+    assert_eq!(polled["capture"]["stage"],"ready");
+    assert_eq!(polled["capture"]["observed_ms"],0);
+    let admitted=rt.ingest_native(&packet,received_processing_now);
+    let status=rt.temporal_status_v2(rt.receiver_now_ns()).unwrap();
+    println!("SYNTHETIC_PRIMER_ORDER result={admitted:?} capture={} error={}",status["capture"],status["error"]);
+    assert_eq!(admitted, Err("temporal_receiver_clock_reversed".into()));
+    assert_eq!(status["capture"]["stage"],"failed");
+    assert_eq!(status["capture"]["retained_windows"],0);
+    assert_eq!(status["capture"]["durable_windows"],0);
+    assert_eq!(status["capture"]["observed_ms"],0);
+}
+
+#[test]
+fn explicit_stale_status_coordinate_still_fails_closed() {
+    let temp=tempfile::tempdir().unwrap();
+    let rt=Arc::new(fixture::runtime(temp.path(),fixture::START));
+    let now=rt.receiver_now_ns();
+    rt.temporal_configure_v2(&rt.mutation_guard().unwrap(),fixture::context(),"synthetic-status-order".into(),true,now).unwrap();
+    let wait=Instant::now();loop{let s=rt.temporal_status_v2(rt.receiver_now_ns()).unwrap();if s["capture"]["stage"]=="ready"{break;}assert!(wait.elapsed()<Duration::from_secs(5));std::thread::sleep(Duration::from_millis(1));}
+    let earlier_request_coordinate=rt.receiver_now_ns();
+    std::thread::sleep(Duration::from_millis(2));
+    assert_eq!(rt.temporal_status_v2(rt.receiver_now_ns()).unwrap()["capture"]["stage"],"ready");
+    let delayed=rt.temporal_status_v2(earlier_request_coordinate).unwrap();
+    println!("SYNTHETIC_CONCURRENT_STATUS capture={} error={}",delayed["capture"],delayed["error"]);
+    assert_eq!(delayed["capture"]["stage"],"failed");
+    assert_eq!(delayed["capture"]["failure"],"temporal_receiver_clock_reversed");
+}

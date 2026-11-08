@@ -109,7 +109,9 @@ async fn temporal_status(
     state: &SharedState,
     rt: &Arc<RoomLearningRuntime>,
 ) -> Json<serde_json::Value> {
-    let state = state.read().await;
+    // Polling a durable ACK advances the capture clock. Serialize before
+    // sampling receiver time, just like native ingress and owner mutations.
+    let state = state.write().await;
     if state.privacy_mode {
         return failure(
             "learner_privacy_mode",
