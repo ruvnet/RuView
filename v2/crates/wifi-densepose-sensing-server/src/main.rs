@@ -441,7 +441,7 @@ struct CalibrationGridBinding {
     evidence: Option<CalibrationGridEvidence>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 struct CalibrationModelReceipt {
     schema: &'static str,
     boot_epoch: String,
@@ -1148,6 +1148,8 @@ struct NodeState {
     rssi_history: VecDeque<f64>,
     vital_detector: VitalSignDetector,
     latest_vitals: VitalSigns,
+    /// Immutable admission result for the CSI sample that produced these vitals.
+    latest_vital_sample: Option<QualifiedVitalSample>,
     pub(crate) last_frame_time: Option<std::time::Instant>,
     edge_vitals: Option<Esp32VitalsPacket>,
     /// Host arrival of the edge packet, independent of CSI and device uptime.
@@ -1618,6 +1620,7 @@ impl NodeState {
             rssi_history: VecDeque::new(),
             vital_detector: VitalSignDetector::new(20.0),
             latest_vitals: VitalSigns::default(),
+            latest_vital_sample: None,
             last_frame_time: None,
             edge_vitals: None,
             edge_vitals_received_at: None,
@@ -1825,6 +1828,7 @@ impl NodeState {
                 self.accepted_csi_fps_samples = 0;
                 self.vital_detector.reset();
                 self.latest_vitals = VitalSigns::default();
+                self.latest_vital_sample = None;
                 self.smoothed_hr = 0.0;
                 self.smoothed_br = 0.0;
                 self.smoothed_hr_conf = 0.0;
@@ -3363,7 +3367,143 @@ mod calibration_expiry_tests {
         state.source = "esp32".to_string();
         state.last_esp32_frame = Some(std::time::Instant::now());
         assert_eq!(state.person_count_at(now_ms), 1);
+        capture_test_vitals(&mut state, 5);
         state
+    }
+
+    fn capture_test_vitals(state: &mut AppStateInner, node_id: u8) {
+        let now = std::time::Instant::now();
+        let now_ms = chrono::Utc::now().timestamp_millis().max(0) as u64;
+        let grid = state.calibration_grid_binding.unwrap().grid;
+        let node = state.node_states.get_mut(&node_id).unwrap();
+        node.latest_accepted_csi_at = Some(now);
+        node.latest_csi_sequence = Some(50);
+        node.field_model_latest_sequence = Some(50);
+        node.field_model_latest_seen = Some(now);
+        node.active_grid = Some((grid.n_subcarriers, wifi_densepose_hardware::PpduType::HtLegacy));
+        let candidates = node.latest_vitals.clone();
+        let origin = VitalSampleOrigin {
+            node_id, grid, sequence: 50, source_tick: state.tick,
+            observed_at: now, observed_at_unix_ms: now_ms,
+        };
+        let sample = QualifiedVitalSample::capture(state, origin, candidates, 1);
+        state.node_states.get_mut(&node_id).unwrap().latest_vital_sample = Some(sample);
+    }
+
+    #[tokio::test]
+    async fn review_unbound_newest_node_cannot_borrow_calibration() {
+        let mut state = live_vitals_fixture();
+        let mut other = NodeState::new();
+        other.latest_accepted_csi_at = Some(std::time::Instant::now());
+        other.latest_vitals = qualified_vital_candidates();
+        state.node_states.insert(7, other);
+        capture_test_vitals(&mut state, 7);
+        let Json(body) = vital_signs_endpoint(State(Arc::new(RwLock::new(state)))).await;
+        assert!(body["vital_signs"]["heart_rate_bpm"].is_null(), "{body}");
+        assert_eq!(body["authority"], "abstained");
+        assert_eq!(body["abstention_reason"], "vital_source_not_calibrated");
+    }
+
+    #[tokio::test]
+    async fn review_unbound_edge_node_cannot_borrow_calibration() {
+        let mut state = live_vitals_fixture();
+        attach_edge_fixture(&mut state);
+        let mut raw = state.edge_vitals.clone().unwrap();
+        raw.node_id = 7;
+        let mut other = NodeState::new();
+        other.edge_vitals = Some(raw.clone());
+        other.edge_vitals_received_at = Some(std::time::Instant::now());
+        state.node_states.insert(7, other);
+        state.edge_vitals = Some(raw);
+        let Json(body) = edge_vitals_endpoint(State(Arc::new(RwLock::new(state)))).await;
+        assert!(body["edge_vitals"].is_null(), "{body}");
+    }
+
+    #[tokio::test]
+    async fn review_vitals_grid_receipt_and_window_changes_revoke_admission() {
+        for change in ["grid", "receipt", "sequence", "window", "stale"] {
+            let mut state = live_vitals_fixture();
+            match change {
+                "grid" => state.node_states.get_mut(&5).unwrap().active_grid =
+                    Some((192, wifi_densepose_hardware::PpduType::HtLegacy)),
+                "receipt" => state.calibration_model_receipt.as_mut().unwrap().model_id = "replacement".into(),
+                "sequence" => state.node_states.get_mut(&5).unwrap().field_model_latest_sequence = Some(51),
+                "window" => { state.node_states.get_mut(&5).unwrap().field_model_history.pop_front(); },
+                "stale" => state.node_states.get_mut(&5).unwrap().field_model_latest_seen =
+                    Some(std::time::Instant::now() - ESP32_OFFLINE_TIMEOUT),
+                _ => unreachable!(),
+            }
+            let Json(body) = vital_signs_endpoint(State(Arc::new(RwLock::new(state)))).await;
+            assert!(body["vital_signs"]["heart_rate_bpm"].is_null(), "{change}: {body}");
+            assert_eq!(body["authority"], "abstained");
+        }
+    }
+
+    #[tokio::test]
+    async fn review_rejected_sample_is_not_retroactively_promoted() {
+        let mut state = live_vitals_fixture();
+        state.node_states.get_mut(&5).unwrap().field_model_history.pop_front();
+        capture_test_vitals(&mut state, 5);
+        assert_eq!(state.node_states[&5].latest_vital_sample.as_ref().unwrap().admission
+            .as_ref().unwrap_err(), &"calibration_window_incomplete");
+        // Completing a window later is not a new measurement of the old BPM.
+        let frame = state.node_states[&5].field_model_history.back().unwrap().clone();
+        state.node_states.get_mut(&5).unwrap().field_model_history.push_back(frame);
+        let shared = Arc::new(RwLock::new(state));
+        let Json(body) = vital_signs_endpoint(State(shared.clone())).await;
+        assert!(body["vital_signs"]["heart_rate_bpm"].is_null());
+        assert_eq!(body["abstention_reason"], "calibration_window_incomplete");
+        // Only a new, source-bound admission can restore publication.
+        capture_test_vitals(&mut *shared.write().await, 5);
+        let Json(body) = vital_signs_endpoint(State(shared)).await;
+        assert_eq!(body["vital_signs"]["heart_rate_bpm"], 70.0);
+    }
+
+    #[tokio::test]
+    async fn review_interleaved_edge_cannot_refresh_or_relabel_csi_vitals() {
+        let mut state = live_vitals_fixture();
+        let source_tick = state.tick;
+        let observed_ms = state.node_states[&5].latest_vital_sample.as_ref().unwrap().origin.observed_at_unix_ms;
+        attach_edge_fixture(&mut state);
+        state.tick += 1; // An unrelated edge event does not change CSI identity.
+        let shared = Arc::new(RwLock::new(state));
+        let Json(body) = vital_signs_endpoint(State(shared.clone())).await;
+        assert_eq!(body["vital_signs"]["heart_rate_bpm"], 70.0);
+        assert_eq!(body["diagnostics"]["source_tick"], source_tick);
+        assert_eq!(body["diagnostics"]["observed_at_unix_ms"], observed_ms);
+        {
+            let mut state = shared.write().await;
+            let old = std::time::Instant::now() - ESP32_OFFLINE_TIMEOUT;
+            let node = state.node_states.get_mut(&5).unwrap();
+            node.latest_accepted_csi_at = Some(old);
+            node.field_model_latest_seen = Some(old);
+            node.latest_vital_sample.as_mut().unwrap().origin.observed_at = old;
+            node.edge_vitals_received_at = Some(std::time::Instant::now());
+            node.last_frame_time = Some(std::time::Instant::now());
+        }
+        let Json(body) = vital_signs_endpoint(State(shared)).await;
+        assert!(body["vital_signs"]["heart_rate_bpm"].is_null());
+        assert_eq!(body["abstention_reason"], "vital_source_stale");
+    }
+
+    #[test]
+    fn review_candidate_requires_its_own_grid_receipt_and_tick_at_ingestion() {
+        let state = live_vitals_fixture();
+        let sample = state.node_states[&5].latest_vital_sample.as_ref().unwrap();
+        for change in ["grid", "tick", "sequence", "before_calibration"] {
+            let mut origin = sample.origin;
+            match change {
+                "grid" => origin.grid.n_subcarriers = 192,
+                "tick" => origin.source_tick += 1,
+                "sequence" => origin.sequence += 1,
+                "before_calibration" => origin.observed_at_unix_ms = 0,
+                _ => unreachable!(),
+            }
+            let rejected = QualifiedVitalSample::capture(&state, origin, sample.candidates.clone(), 1);
+            assert!(rejected.admission.is_err(), "{change}");
+        }
+        // The legacy summary packet still lacks lineage even for the bound node.
+        assert_eq!(qualified_edge_vitals().unwrap_err(), "edge_measurement_provenance_unavailable");
     }
 
     #[tokio::test]
@@ -3394,6 +3534,7 @@ mod calibration_expiry_tests {
     async fn rest_vitals_explains_a_withheld_heartbeat_without_hiding_valid_breathing() {
         let mut state = live_vitals_fixture();
         state.node_states.get_mut(&5).unwrap().latest_vitals.heartbeat_confidence = 0.1;
+        capture_test_vitals(&mut state, 5);
         let Json(body) = vital_signs_endpoint(State(Arc::new(RwLock::new(state)))).await;
         assert_eq!(body["vital_signs"]["breathing_rate_bpm"], 15.0);
         assert!(body["vital_signs"]["heart_rate_bpm"].is_null());
@@ -3461,15 +3602,16 @@ mod calibration_expiry_tests {
         attach_edge_fixture(&mut state);
         let shared = Arc::new(RwLock::new(state));
         let Json(body) = edge_vitals_endpoint(State(shared.clone())).await;
-        assert_eq!(body["status"], "ok");
-        assert_eq!(body["edge_vitals"]["heartrate_bpm"], 72.0);
-        assert_eq!(body["edge_vitals"]["timestamp_ms"], 12);
+        assert_eq!(body["status"], "abstained");
+        assert!(body["edge_vitals"].is_null());
+        assert_eq!(body["timestamp_ms"], 12);
+        assert_eq!(body["abstention_reason"], "edge_measurement_provenance_unavailable");
         {
             let mut s = shared.write().await;
             s.edge_vitals.as_mut().unwrap().presence_score = 0.1;
         }
         let Json(body) = edge_vitals_endpoint(State(shared.clone())).await;
-        assert_eq!(body["abstention_reason"], "signal_quality_below_threshold");
+        assert_eq!(body["abstention_reason"], "edge_measurement_provenance_unavailable");
         assert!(body["edge_vitals"].is_null());
         {
             let mut s = shared.write().await;
@@ -3477,7 +3619,7 @@ mod calibration_expiry_tests {
             s.node_states.get_mut(&5).unwrap().field_model_history.pop_front();
         }
         let Json(body) = edge_vitals_endpoint(State(shared.clone())).await;
-        assert_eq!(body["abstention_reason"], "calibration_window_incomplete");
+        assert_eq!(body["abstention_reason"], "edge_measurement_provenance_unavailable");
         assert!(body["edge_vitals"].is_null());
         {
             let mut s = shared.write().await;
@@ -8844,6 +8986,7 @@ fn vitals_for_publication(
 /// cannot authorize numeric rates when the bound field model says absent.
 /// Require both the existing room gate and a fresh, complete model window;
 /// never use a heuristic fallback as calibrated single-occupant evidence.
+#[cfg(test)]
 fn calibrated_vitals_for_publication(
     state: &AppStateInner,
     candidates: &VitalSigns,
@@ -8895,13 +9038,104 @@ fn calibrated_vitals_decision(
         .ok_or("no_qualified_vital_estimate")
 }
 
-fn edge_vital_candidates(vitals: &Esp32VitalsPacket) -> VitalSigns {
-    VitalSigns {
-        breathing_rate_bpm: (vitals.breathing_rate_bpm > 0.0).then_some(vitals.breathing_rate_bpm),
-        heart_rate_bpm: (vitals.heartrate_bpm > 0.0).then_some(vitals.heartrate_bpm),
-        breathing_confidence: if vitals.presence { 0.7 } else { 0.0 },
-        heartbeat_confidence: if vitals.presence { 0.7 } else { 0.0 },
-        signal_quality: vitals.presence_score as f64,
+/// The legacy edge packet identifies a node but carries no CSI grid or source
+/// sequence. A nearby host CSI packet cannot establish its measurement lineage.
+fn qualified_edge_vitals() -> Result<VitalSigns, &'static str> {
+    Err("edge_measurement_provenance_unavailable")
+}
+
+#[derive(Debug, Clone, Copy)]
+struct VitalSampleOrigin {
+    node_id: u8,
+    grid: CsiGridKey,
+    sequence: u32,
+    source_tick: u64,
+    observed_at: std::time::Instant,
+    observed_at_unix_ms: u64,
+}
+
+#[derive(Debug, Clone)]
+struct QualifiedVitalSample {
+    origin: VitalSampleOrigin,
+    receipt: Option<CalibrationModelReceipt>,
+    candidates: VitalSigns,
+    /// Capture at ingestion, never re-authorize an earlier rejected sample.
+    admission: Result<VitalSigns, &'static str>,
+}
+
+fn vital_source_matches(
+    state: &AppStateInner,
+    origin: VitalSampleOrigin,
+) -> Result<(), &'static str> {
+    let binding = state.calibration_grid_binding.ok_or("calibration_grid_missing")?;
+    if binding.source_node_id != origin.node_id {
+        return Err("vital_source_not_calibrated");
+    }
+    if binding.grid != origin.grid {
+        return Err("vital_grid_not_calibrated");
+    }
+    let node = state.node_states.get(&origin.node_id).ok_or("vital_source_unavailable")?;
+    let active = node.active_grid.map(|(n_subcarriers, ppdu)| CsiGridKey {
+        n_subcarriers, ppdu_type: ppdu.to_byte(),
+    });
+    if active != Some(origin.grid) {
+        return Err("vital_grid_not_calibrated");
+    }
+    if node.latest_csi_sequence != Some(origin.sequence)
+        || node.field_model_latest_sequence != Some(origin.sequence)
+        || node.latest_accepted_csi_at != Some(origin.observed_at)
+        || node.field_model_latest_seen != Some(origin.observed_at)
+    {
+        return Err("vital_window_not_current");
+    }
+    let receipt = state.calibration_model_receipt.as_ref().ok_or("vital_receipt_unavailable")?;
+    if receipt.boot_epoch != state.calibration_boot_epoch
+        || Some(&receipt.session_id) != state.calibration_session_id.as_ref()
+        || Some(&receipt.model_id) != state.calibration_model_id.as_ref()
+        || Some(&receipt.binding_digest) != state.calibration_binding_digest.as_ref()
+        || !receipt.source_node_ids.contains(&origin.node_id)
+        || origin.observed_at_unix_ms < receipt.completed_at_unix_ms
+    {
+        return Err("vital_receipt_mismatch");
+    }
+    Ok(())
+}
+
+impl QualifiedVitalSample {
+    fn capture(
+        state: &AppStateInner,
+        origin: VitalSampleOrigin,
+        candidates: VitalSigns,
+        room_person_count: usize,
+    ) -> Self {
+        let admission = vital_source_matches(state, origin).and_then(|()| {
+            if origin.source_tick != state.tick {
+                return Err("vital_source_tick_mismatch");
+            }
+            calibrated_vitals_decision(state, &candidates, room_person_count, origin.observed_at_unix_ms)
+        });
+        Self { origin, receipt: state.calibration_model_receipt.clone(), candidates, admission }
+    }
+
+    fn for_publication(
+        &self,
+        state: &AppStateInner,
+        now: std::time::Instant,
+        now_unix_ms: u64,
+        room_person_count: usize,
+    ) -> Result<VitalSigns, &'static str> {
+        // This ordering is deliberate: new calibration/occupancy/quality must
+        // never upgrade a sample that failed admission at its original tick.
+        let admitted = self.admission.clone()?;
+        if now.saturating_duration_since(self.origin.observed_at) >= ESP32_OFFLINE_TIMEOUT {
+            return Err("vital_source_stale");
+        }
+        if self.receipt.is_none() || self.receipt != state.calibration_model_receipt {
+            return Err("vital_receipt_changed");
+        }
+        vital_source_matches(state, self.origin)?;
+        // Rechecking can revoke old permission; it cannot grant new permission.
+        calibrated_vitals_decision(state, &admitted, room_person_count, now_unix_ms)
     }
 }
 
@@ -10853,14 +11087,17 @@ async fn vital_signs_endpoint(State(state): State<SharedState>) -> Json<serde_js
     let selected = is_esp32.then(|| s.node_states.iter()
         .filter(|(_, node)| node.latest_accepted_csi_at.is_some())
         .max_by_key(|(_, node)| node.latest_accepted_csi_at)).flatten();
-    let candidates = selected.map_or(&s.latest_vitals, |(_, node)| &node.latest_vitals);
+    let sample = selected.and_then(|(_, node)| node.latest_vital_sample.as_ref());
+    let candidates = sample.map_or(&s.latest_vitals, |sample| &sample.candidates);
     let decision = if is_esp32 && selected.is_none() {
         Err("no_accepted_csi_samples")
     } else if selected.is_some_and(|(_, node)| node.latest_accepted_csi_at
         .is_none_or(|seen| now.saturating_duration_since(seen) >= ESP32_OFFLINE_TIMEOUT)) {
         Err("vital_source_stale")
     } else {
-        calibrated_vitals_decision(&s, candidates, person_count, observed_at_unix_ms)
+        sample.ok_or("vital_measurement_provenance_unavailable").and_then(|sample| {
+            sample.for_publication(&s, now, observed_at_unix_ms, person_count)
+        })
     };
     let reason = decision.as_ref().err().copied();
     let published = decision.ok();
@@ -10894,6 +11131,10 @@ async fn vital_signs_endpoint(State(state): State<SharedState>) -> Json<serde_js
         "abstention_reason": reason,
         "diagnostics": {
             "source_node_id": selected.map(|(id, _)| *id),
+            "source_tick": sample.map(|sample| sample.origin.source_tick),
+            "source_sequence": sample.map(|sample| sample.origin.sequence),
+            "source_grid": sample.map(|sample| sample.origin.grid),
+            "observed_at_unix_ms": sample.map(|sample| sample.origin.observed_at_unix_ms),
             "scored_node_id": s.calibration_grid_binding.map(|binding| binding.source_node_id),
             "minimum_confidence": VITAL_PUBLICATION_MIN_CONFIDENCE,
             "minimum_signal_quality": VITAL_PUBLICATION_MIN_SIGNAL_QUALITY,
@@ -10982,7 +11223,7 @@ async fn edge_vitals_endpoint(State(state): State<SharedState>) -> Json<serde_js
         }));
     }
     let count = s.person_count_at(observed_at_unix_ms);
-    match calibrated_vitals_decision(&s, &edge_vital_candidates(raw), count, observed_at_unix_ms) {
+    match qualified_edge_vitals() {
         Ok(published) => Json(serde_json::json!({
             "status": "ok",
             "authority": "explicit_calibration",
@@ -10997,6 +11238,7 @@ async fn edge_vitals_endpoint(State(state): State<SharedState>) -> Json<serde_js
             "status": "abstained", "edge_vitals": null,
             "authority": "abstained", "abstention_reason": reason,
             "age_ms": age.map(|age| age.as_millis() as u64),
+            "node_id": raw.node_id, "timestamp_ms": raw.timestamp_ms,
         })),
     }
 }
@@ -12993,15 +13235,9 @@ async fn udp_receiver_task(
                         (vitals.presence_score as f64).min(1.0),
                         &[],
                     );
-                    let vital_candidates = edge_vital_candidates(&vitals);
                     let explicit_calibration_fresh =
                         s.explicit_calibration_fresh_at(observed_at_unix_ms);
-                    let published_vitals = calibrated_vitals_for_publication(
-                        &s,
-                        &vital_candidates,
-                        total_persons,
-                        observed_at_unix_ms,
-                    );
+                    let published_vitals = qualified_edge_vitals().ok();
 
                     // Keep the legacy edge_vitals stream aligned with the
                     // governed sensing envelope. Raw numeric candidates are
@@ -13279,7 +13515,7 @@ async fn udp_receiver_task(
                     let first_sensing_frame = ns.observe_accepted_csi_frame(
                         frame.sequence,
                         frame.adr018_flags.ieee802154_sync_valid,
-                        std::time::Instant::now(),
+                        observed_at,
                     );
                     if first_sensing_frame && telemetry::curated_events_enabled() {
                         info!(name: semconv::EVENT_RUVIEW_NODE_ONLINE, { "ruview.node.id" = node_id }, "node {node_id} online (CSI)");
@@ -13496,12 +13732,17 @@ async fn udp_receiver_task(
                         now,
                         observed_at_unix_ms,
                     );
-                    let published_vitals = calibrated_vitals_for_publication(
+                    let sample = QualifiedVitalSample::capture(
                         &s,
-                        &vitals,
+                        VitalSampleOrigin {
+                            node_id, grid: grid_key, sequence: frame.sequence,
+                            source_tick: tick, observed_at, observed_at_unix_ms,
+                        },
+                        vitals.clone(),
                         total_persons,
-                        observed_at_unix_ms,
                     );
+                    let published_vitals = sample.admission.clone().ok();
+                    s.node_states.get_mut(&node_id).expect("accepted node").latest_vital_sample = Some(sample);
 
                     let calibrated_presence_evidence = s.calibrated_presence_evidence(
                         node_id,
