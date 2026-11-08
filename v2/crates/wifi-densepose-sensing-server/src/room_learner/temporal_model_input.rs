@@ -341,6 +341,39 @@ impl Fences {
         Ok(())
     }
 }
+/// Immutable retained records shared with one bounded durability snapshot.
+/// Serialization delegates exactly to the existing record; no new wire shape.
+struct SharedRecordValue<T> {
+    value:T,
+    // In-memory integrity cache only. Never serialized or accepted from JSON.
+    sha256:std::sync::OnceLock<String>,
+}
+#[derive(Clone)]
+struct SharedRecord<T>(std::sync::Arc<SharedRecordValue<T>>);
+impl<T> SharedRecord<T> {
+    fn new(value:T)->Self {Self(std::sync::Arc::new(SharedRecordValue{value,sha256:std::sync::OnceLock::new()}))}
+    fn same_record(&self,other:&Self)->bool {std::sync::Arc::ptr_eq(&self.0,&other.0)}
+}
+impl<T:Serialize> SharedRecord<T> {
+    fn canonical_sha256(&self)->Result<&str,String>{
+        if self.0.sha256.get().is_none(){let digest=hash(&self.0.value)?;let _=self.0.sha256.set(digest);}
+        self.0.sha256.get().map(String::as_str).ok_or("temporal_record_digest_unavailable".into())
+    }
+}
+impl<T> std::ops::Deref for SharedRecord<T> {
+    type Target=T;
+    fn deref(&self)->&T {&self.0.value}
+}
+impl<T> std::borrow::Borrow<T> for SharedRecord<T> {
+    fn borrow(&self)->&T {&self.0.value}
+}
+impl<T:Serialize> Serialize for SharedRecord<T> {
+    fn serialize<S:serde::Serializer>(&self,serializer:S)->Result<S::Ok,S::Error>{self.0.value.serialize(serializer)}
+}
+fn owned_records<T: Clone>(records: &[SharedRecord<T>]) -> Vec<T> {
+    records.iter().map(|record| (**record).clone()).collect()
+}
+
 /// Raw cohorts are private and assembled here; there is intentionally no API to
 /// fit a caller-supplied temporal-evidence flag or caller-created window.
 pub struct TemporalTrainingSession {
@@ -348,8 +381,8 @@ pub struct TemporalTrainingSession {
     binding: Binding,
     run_id: String,
     assembler: NativeWindowAssembler,
-    rows: Vec<CaptureCohort>,
-    evidence: Vec<WindowEvidence>,
+    rows: Vec<SharedRecord<CaptureCohort>>,
+    evidence: Vec<SharedRecord<WindowEvidence>>,
     config: FitConfig,
     fitted: bool,
     failed: bool,
@@ -471,8 +504,8 @@ impl TemporalTrainingSession {
                         .windows
                         .push(identity.ok_or("managed_window_identity_missing")?);
                 }
-                self.rows.push(window.cohort);
-                self.evidence.push(evidence);
+                self.rows.push(SharedRecord::new(window.cohort));
+                self.evidence.push(SharedRecord::new(evidence));
                 Ok(())
             }
             Err(error) => {
@@ -494,7 +527,7 @@ impl TemporalTrainingSession {
             return Err("temporal_complete_train_schedule_required".into());
         }
         preflight(self.plan.context(), &self.plan, &self.config)?;
-        let dataset = ValidatedDataset::new(self.plan.context().clone(), self.rows.clone())?;
+        let dataset = ValidatedDataset::new(self.plan.context().clone(), owned_records(&self.rows))?;
         let (model, report) = RoomModel::fit(&dataset, self.config.clone())?;
         if model.encoder_config() != self.plan.encoder_config() {
             self.failed = true;
@@ -504,7 +537,7 @@ impl TemporalTrainingSession {
             binding: self.binding.clone(),
             run_id: self.run_id.clone(),
             model,
-            evidence: self.evidence.clone(),
+            evidence: owned_records(&self.evidence),
             managed: None,
         };
         if let Err(error) = input.validate() {
@@ -515,7 +548,7 @@ impl TemporalTrainingSession {
         Ok((input, report))
     }
     pub fn dataset(&self) -> Result<ValidatedDataset, String> {
-        ValidatedDataset::new(self.plan.context().clone(), self.rows.clone())
+        ValidatedDataset::new(self.plan.context().clone(), owned_records(&self.rows))
     }
     pub fn plan_sha256(&self) -> &str {
         &self.binding.plan_sha256

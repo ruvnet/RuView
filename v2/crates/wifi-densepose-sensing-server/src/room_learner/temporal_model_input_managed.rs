@@ -201,7 +201,7 @@ fn expected_position(
 fn validate_records(
     schedule: &ManagedScheduleContract,
     run: &str,
-    evidence: &[WindowEvidence],
+    evidence: &[impl std::borrow::Borrow<WindowEvidence>],
     records: &[ManagedWindowIdentity],
     binding: &Binding,
     train_only: bool,
@@ -212,6 +212,7 @@ fn validate_records(
     let mut fences = Fences::default();
     let mut previous: Option<&ManagedWindowIdentity> = None;
     for (index, (e, r)) in evidence.iter().zip(records).enumerate() {
+        let e = e.borrow();
         let position = expected_position(schedule, index)?;
         if (r.episode_index, r.slot_index) != position
             || (train_only && (r.role != DataRole::Train || r.frozen_artifact_sha256.is_some()))
@@ -350,7 +351,7 @@ impl TemporalTrainingSession {
             &self.binding,
             true,
         )?;
-        let dataset = ValidatedDataset::new(schedule.context().clone(), self.rows.clone())?;
+        let dataset = ValidatedDataset::new(schedule.context().clone(), owned_records(&self.rows))?;
         if permit.policy != hash(&managed.binding)?
             || permit.data != hash(&dataset.train())?
             || permit.evidence != hash(&self.evidence)?
@@ -366,7 +367,7 @@ impl TemporalTrainingSession {
             binding: self.binding.clone(),
             run_id: self.run_id.clone(),
             model,
-            evidence: self.evidence.clone(),
+            evidence: owned_records(&self.evidence),
             managed: Some(ManagedModel {
                 binding: managed.binding.clone(),
                 windows: managed.windows.clone(),
