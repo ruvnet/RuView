@@ -61,7 +61,7 @@ fn train() -> TemporalTrainProofData {
         training_data_sha256: fixture_sha(20),
         training_evidence_sha256: fixture_sha(21),
         training_identities_sha256: fixture_sha(22),
-        train_seal_sha256s: std::array::from_fn(|i| fixture_sha(200 + i as u64)),
+        train_seal_sha256s: (0..7).map(|i| fixture_sha(200 + i)).collect(),
         train_seal_chain_sha256: fixture_sha(23),
         train_windows: 64,
         windows_per_condition: [16; 4],
@@ -86,7 +86,7 @@ fn held(t: &TemporalTrainProofData) -> TemporalHeldOutEvidenceData {
         complete_evidence_sha256: fixture_sha(34),
         complete_identities_sha256: fixture_sha(35),
         complete_ledger_sha256: fixture_sha(36),
-        held_out_seal_sha256s: std::array::from_fn(|i| fixture_sha(300 + i as u64)),
+        held_out_seal_sha256s: (0..8).map(|i| fixture_sha(300 + i)).collect(),
         held_out_seal_chain_sha256: fixture_sha(37),
         complete_record_sha256: fixture_sha(38),
         complete_commitment: token(&t.body.identity, 160),
@@ -436,4 +436,64 @@ fn final_complete_source_fences_are_exact_bounded_native_metadata_not_a_live_per
         TemporalHeldOutEvidenceData::decode_data(&serde_json::to_vec(&value).unwrap()).is_err()
     );
     assert!(!h.body.claims.adoption_authorized);
+}
+
+
+fn operator_records() -> (TemporalTrainProofData, TemporalHeldOutEvidenceData, TemporalEvaluationReceiptData) {
+    let mut tb = train().body;
+    tb.train_seal_sha256s.truncate(4);
+    tb.declared_episodes_per_condition = [1; 4];
+    let t = TemporalTrainProofData::from_body_data(tb).unwrap();
+    let mut hb = held(&t).body;
+    hb.held_out_seal_sha256s.truncate(4);
+    hb.held_out_windows = 16;
+    hb.windows_per_condition = [4; 4];
+    hb.declared_episodes_per_condition = [1; 4];
+    let h = TemporalHeldOutEvidenceData::from_body_data(hb).unwrap();
+    let mut eb = evaluation(&t, &h).body;
+    eb.role = DataRole::Validation;
+    let mut report = serde_json::to_value(&eb.report).unwrap();
+    for key in ["samples", "correct", "scored", "binary_cross_entropy_samples"] { report[key] = json!(16); }
+    for key in ["declared_trial_count", "declared_session_count"] { report[key] = json!(4); }
+    report["confusion"] = confusion(8, 8);
+    for c in report["per_condition"].as_array_mut().unwrap() {
+        for key in ["samples", "correct", "scored", "binary_cross_entropy_samples"] { c[key] = json!(4); }
+        for key in ["declared_trial_count", "declared_session_count"] { c[key] = json!(1); }
+        let occupied = c["condition"].as_str().unwrap().starts_with("Occupied");
+        c["confusion"] = confusion(if occupied { 0 } else { 4 }, if occupied { 4 } else { 0 });
+    }
+    eb.report = serde_json::from_value(report).unwrap();
+    let e = TemporalEvaluationReceiptData::from_body_data(eb).unwrap();
+    (t, h, e)
+}
+
+#[test]
+fn operator_eight_step_validation_metadata_roundtrips_without_heldout_claims() {
+    let (t, h, e) = operator_records();
+    assert_eq!(t.schema, OPERATOR_TRAIN_SCHEMA);
+    assert_eq!(h.schema, OPERATOR_CHECK_SCHEMA);
+    assert_eq!(e.schema, OPERATOR_EVALUATION_SCHEMA);
+    assert_eq!(e.body.role, DataRole::Validation);
+    assert_eq!(e.body.report.samples, 16);
+    assert!(!e.body.report.independence_verified);
+    e.validate_data_links(&t, &h).unwrap();
+    assert_eq!(TemporalTrainProofData::decode_data(&t.encode_data().unwrap()).unwrap(), t);
+    assert_eq!(TemporalHeldOutEvidenceData::decode_data(&h.encode_data().unwrap()).unwrap(), h);
+    assert_eq!(TemporalEvaluationReceiptData::decode_data(&e.encode_data().unwrap()).unwrap(), e);
+}
+
+#[test]
+fn operator_and_legacy_metadata_cannot_be_relabelled_or_cross_linked_after_rehash() {
+    let (t, h, e) = operator_records();
+    let mut old_name = t.clone(); old_name.schema = TRAIN_SCHEMA.into(); old_name.sha256 = data_sha(&old_name.schema, &old_name.body).unwrap();
+    assert!(old_name.validate_data().is_err());
+    let mut invented = train(); invented.schema = OPERATOR_TRAIN_SCHEMA.into(); invented.sha256 = data_sha(&invented.schema, &invented.body).unwrap();
+    assert!(invented.validate_data().is_err());
+    let mut wrong_role = e.clone(); wrong_role.body.role = DataRole::HeldOut; wrong_role.sha256 = data_sha(&wrong_role.schema, &wrong_role.body).unwrap();
+    assert!(wrong_role.validate_data().is_err());
+    let mut wrong_count = h.clone(); wrong_count.body.held_out_windows = 64; wrong_count.sha256 = data_sha(&wrong_count.schema, &wrong_count.body).unwrap();
+    assert!(wrong_count.validate_data().is_err());
+    let legacy = train();
+    let mut crossed = h.clone(); crossed.body.training_proof_sha256 = legacy.sha256.clone(); crossed.sha256 = data_sha(&crossed.schema, &crossed.body).unwrap();
+    assert!(crossed.validate_data_links(&legacy).is_err());
 }

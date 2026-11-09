@@ -166,8 +166,26 @@ class C4CClassificationTests(unittest.TestCase):
         self.assertEqual(components[0][3], [(profiles.C2, True, 1)])
         self.assertEqual(components[1][3], [(profiles.C1, True, 1)])
         self.assertEqual(components[2][3], [(profiles.PREFIX + 'fit_control::tests::', False, 12)])
-        self.assertEqual(components[3][3], [(profiles.PREFIX + 'full_run_tests::', False, 8)])
+        self.assertEqual(components[3][3], [(profiles.PREFIX + 'full_run_tests::', False, 9)])
         self.assertEqual(components[4][3], [(name, True, 1) for name in profiles.BUDGET])
         self.assertEqual(components[5][3], [(profiles.C4B_PREFIX, False, 11)])
+
+
+
+class OperatorEightClassificationTests(unittest.TestCase):
+    def component(self):return [('operator8',None,[profiles.OPERATOR8],[(profiles.OPERATOR8,True,1)])]
+    def test_exact_operator_case_is_mandatory_active_in_release(self):
+        result=profiles.validate(self.component(),{profiles.OPERATOR8,profiles.OPERATOR8+'_lookalike'},set(),'release-run')
+        self.assertEqual(result[0]['names'],[profiles.OPERATOR8])
+    def test_debug_registration_is_explicitly_ignored_not_passed(self):
+        result=profiles.validate(self.component(),{profiles.OPERATOR8},{profiles.OPERATOR8},'debug-check')
+        self.assertEqual(result[0]['names'],[profiles.OPERATOR8])
+        with self.assertRaises(ValueError):profiles.validate(self.component(),{profiles.OPERATOR8},set(),'debug-check')
+    def test_missing_or_ignored_release_case_fails(self):
+        with self.assertRaises(ValueError):profiles.validate(self.component(),set(),set(),'release-run')
+        with self.assertRaises(ValueError):profiles.validate(self.component(),{profiles.OPERATOR8},{profiles.OPERATOR8},'release-run')
+    def test_actual_policy_carries_operator_case_in_cached_c4_batch(self):
+        c4=next(c for c in profiles.policy(pathlib.Path(__file__).resolve().parents[2]) if c[0]=='C4')
+        self.assertIn(profiles.OPERATOR8,c4[2]);self.assertEqual(c4[3],[(profiles.PREFIX+'full_run_tests::',False,9)])
 
 if __name__=='__main__':unittest.main()

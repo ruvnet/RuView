@@ -13,6 +13,7 @@ pub(super) const HELD_OUT_SEAL_DOMAIN: &str = "ruview.room-learner.temporal-held
 pub(super) const HELD_OUT_CONDITIONS_DOMAIN: &str =
     "ruview.room-learner.temporal-heldout-conditions.v1";
 pub(super) const FULL_COMPLETE_DOMAIN: &str = "ruview.room-learner.temporal-full-complete.v1";
+pub(super) const OPERATOR_COMPLETE_DOMAIN: &str = "ruview.room-learner.temporal-full-complete.operator-eight-step.v1";
 const WHOLE_MODEL_KIND: &str = "ruview.room-learner.managed-temporal-input.v3";
 const TRAIN_EPISODES: usize = 7;
 const TRAIN_WINDOWS: usize = 64;
@@ -269,9 +270,10 @@ impl FullCompleteRecordData {
     /// Computes a DATA digest. Only actual last-SEAL ACK/current-store recovery
     /// may later supply the separate non-serde Complete write/install witness.
     pub(super) fn from_body(body: FullCompleteBody) -> Result<Self, String> {
-        let sha256 = hash(&(FULL_COMPLETE_DOMAIN, &body))?;
+        let domain=if (body.windows,body.held_out_windows,body.held_out_seals)==(80,16,4){OPERATOR_COMPLETE_DOMAIN}else{FULL_COMPLETE_DOMAIN};
+        let sha256 = hash(&(domain, &body))?;
         Ok(Self {
-            schema: FULL_COMPLETE_DOMAIN.into(),
+            schema: domain.into(),
             body,
             sha256,
         })
@@ -283,6 +285,9 @@ impl FullCompleteRecordData {
         now: u64,
     ) -> Result<(), String> {
         let body = &self.body;
+        let operator=fit.body.operator_profile.as_deref()==Some("native-2s-three-source-56bin-operator-eight-step-v1");
+        if fit.body.operator_profile.is_some() && !operator{return Err("temporal_full_complete_profile_changed".into());}
+        let domain=if operator{OPERATOR_COMPLETE_DOMAIN}else{FULL_COMPLETE_DOMAIN};
         let hashes = [
             &body.continuation_policy_sha256,
             &body.verified_fit_sha256,
@@ -293,7 +298,7 @@ impl FullCompleteRecordData {
             &body.identity_sha256,
             &body.ledger_sha256,
         ];
-        if self.schema != FULL_COMPLETE_DOMAIN
+        if self.schema != domain
             || hashes.iter().any(|value| !digest64(value))
             || body.context_sha256 != descriptor.context_digest
             || body.context_sha256 != fit.body.context_digest
@@ -307,19 +312,19 @@ impl FullCompleteRecordData {
             || body.artifact_kind != WHOLE_MODEL_KIND
             || body.artifact_kind != fit.body.artifact_kind
             || body.artifact_sha256 != fit.body.artifact_sha256
-            || body.windows != FULL_WINDOWS
-            || body.held_out_windows != TRAIN_WINDOWS
-            || body.held_out_seals != HELD_OUT_EPISODES
+            || body.windows != if operator{80}else{FULL_WINDOWS}
+            || body.held_out_windows != if operator{16}else{TRAIN_WINDOWS}
+            || body.held_out_seals != if operator{4}else{HELD_OUT_EPISODES}
             || body.accepted_held_out_commitment.id != descriptor.id
             || body.accepted_held_out_commitment.run != body.run
             || !digest64(&body.accepted_held_out_commitment.commitment)
-            || body.accepted_held_out_commitment.revision > 430
+            || body.accepted_held_out_commitment.revision > if operator{361}else{430}
             || body.complete_prepare_receiver_ns < fit.body.freeze_prepare_receiver_ns
             || body.complete_prepare_receiver_ns > now
             || now / 1_000_000 >= descriptor.expires_at_ms
             || body.source_floors.len() != fit.body.source_floors.len()
             || !digest64(&self.sha256)
-            || self.sha256 != hash(&(FULL_COMPLETE_DOMAIN, body))?
+            || self.sha256 != hash(&(domain, body))?
         {
             return Err("temporal_full_complete_data_binding".into());
         }

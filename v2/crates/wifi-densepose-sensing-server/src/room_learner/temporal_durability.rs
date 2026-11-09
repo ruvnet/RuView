@@ -104,7 +104,7 @@ enum Work {
 }
 struct Pending {
     intent: TemporalIntent,
-    prefix: checkpoint::ValidatedTemporalPrefix,
+    prefix: Arc<checkpoint::ValidatedTemporalPrefix>,
     id: u64,
     slot: bool,
     rows: usize,
@@ -112,6 +112,8 @@ struct Pending {
     records: checkpoint::SharedRecords,
 }
 struct Shared {
+    failed_repair: Mutex<Option<(TemporalIntent, Arc<checkpoint::ValidatedTemporalPrefix>)>>,
+    terminal_drained: AtomicBool,
     cancelled: AtomicBool,
     busy: AtomicBool,
     now_ns: AtomicU64,
@@ -120,6 +122,8 @@ struct Shared {
     #[cfg(test)]
     lose_next_ack: AtomicBool,
     #[cfg(test)]
+    fail_next_publication: AtomicBool,
+    #[cfg(test)]
     ack_queued: AtomicBool,
     #[cfg(test)]
     corrupt_ack_id: AtomicBool,
@@ -127,6 +131,8 @@ struct Shared {
     hold: Mutex<Option<(mpsc::SyncSender<()>, mpsc::Receiver<()>)>>,
     #[cfg(test)]
     hold_after_prepare: Mutex<Option<(mpsc::SyncSender<()>, mpsc::Receiver<()>)>>,
+    #[cfg(test)]
+    hold_after_publish: Mutex<Option<(mpsc::SyncSender<()>, mpsc::Receiver<()>)>>,
 }
 impl Shared {
     fn now(&self) -> Result<u64, String> {
@@ -154,6 +160,7 @@ impl Shared {
     }
 }
 pub(crate) struct Writer {
+    store: Arc<RecoveryStore>,
     send: mpsc::SyncSender<Work>,
     receive: Mutex<mpsc::Receiver<CommitAck>>,
     shared: Arc<Shared>,
@@ -164,6 +171,8 @@ impl Writer {
         let (send, requests) = mpsc::sync_channel(1);
         let (replies, receive) = mpsc::sync_channel(1);
         let shared = Arc::new(Shared {
+            failed_repair: Mutex::new(None),
+            terminal_drained: AtomicBool::new(false),
             cancelled: AtomicBool::new(false),
             busy: AtomicBool::new(false),
             now_ns: AtomicU64::new(now),
@@ -172,6 +181,8 @@ impl Writer {
             #[cfg(test)]
             lose_next_ack: AtomicBool::new(false),
             #[cfg(test)]
+            fail_next_publication: AtomicBool::new(false),
+            #[cfg(test)]
             ack_queued: AtomicBool::new(false),
             #[cfg(test)]
             corrupt_ack_id: AtomicBool::new(false),
@@ -179,11 +190,15 @@ impl Writer {
             hold: Mutex::new(None),
             #[cfg(test)]
             hold_after_prepare: Mutex::new(None),
+            #[cfg(test)]
+            hold_after_publish: Mutex::new(None),
         });
         let state = shared.clone();
+        let worker_store = store.clone();
         let thread = std::thread::Builder::new()
             .name("ruview-temporal-durable".into())
             .spawn(move || {
+                let store = worker_store;
                 let mut pending: Option<Pending> = None;
                 while let Ok(work) = requests.recv() {
                     let (id, slot, rows, seals, start_ticket, result) = match work {
@@ -219,6 +234,8 @@ impl Writer {
                                     &prefix,
                                     state.allowed(&request.descriptor)?,
                                 )?;
+                                let prefix = Arc::new(prefix);
+                                *state.failed_repair.lock().map_err(|_| "temporal_writer_repair_lock")? = Some((intent.clone(), prefix.clone()));
                                 pending = Some(Pending {
                                     intent,
                                     prefix,
@@ -234,11 +251,14 @@ impl Writer {
                                     let _ = release.recv();
                                 }
                                 let p = pending.as_ref().unwrap();
-                                let token = store.publish_temporal(
-                                    &p.intent,
-                                    Some(&p.prefix),
-                                    state.allowed(p.prefix.descriptor())?,
-                                )?;
+                                #[cfg(not(test))]
+                                let token = store.publish_temporal(&p.intent, Some(&p.prefix), state.allowed(p.prefix.descriptor())?)?;
+                                #[cfg(test)]
+                                let token = if state.fail_next_publication.swap(false,Ordering::AcqRel){
+                                    store.synthetic_fail_before_head_publication(&p.intent,&p.prefix,state.allowed(p.prefix.descriptor())?)
+                                }else{store.publish_temporal(&p.intent,Some(&p.prefix),state.allowed(p.prefix.descriptor())?)}?;
+                                #[cfg(test)]
+                                if let Some((entered,release))=state.hold_after_publish.lock().map_err(|_|"temporal_writer_test_lock")?.take(){let _=entered.send(());let _=release.recv();}
                                 #[cfg(test)]
                                 if state.lose_next_ack.swap(false, Ordering::AcqRel) {
                                     return Err("synthetic_lost_publish_ack".into());
@@ -247,6 +267,7 @@ impl Writer {
                             })();
                             if result.is_ok() {
                                 pending = None;
+                                if let Ok(mut ticket) = state.failed_repair.lock() { *ticket = None; }
                             }
                             (meta.0, meta.1, meta.2, meta.3, false, result)
                         }
@@ -331,6 +352,7 @@ impl Writer {
                             })();
                             if result.is_ok() {
                                 pending = None;
+                                if let Ok(mut ticket) = state.failed_repair.lock() { *ticket = None; }
                             }
                             (meta.0, meta.1, meta.2, meta.3, false, result)
                         }
@@ -366,6 +388,7 @@ impl Writer {
             })
             .map_err(|_| "temporal_writer_spawn_failed")?;
         Ok(Self {
+            store,
             send,
             receive: Mutex::new(receive),
             shared,
@@ -467,6 +490,24 @@ impl Writer {
         }
         Ok(())
     }
+    /// Explicit owner Retry only, outside Runtime.inner. The thread lock also
+    /// serializes erasure's drain, so no exact-intent repair can publish after
+    /// that drain has returned. Never infer a failed write from a lost ACK.
+    pub(crate) fn reconcile_failed(&self, now: u64) -> Result<(), String> {
+        self.observe_now(now);
+        self.cancel();
+        let mut thread = self.thread.lock().map_err(|_| "temporal_writer_join_lock")?;
+        if self.shared.terminal_drained.load(Ordering::Acquire) { return Err("temporal_writer_terminally_drained".into()); }
+        if let Some(worker) = thread.take() {
+            worker.join().map_err(|_| "temporal_writer_panicked")?;
+        }
+        let mut repair = self.shared.failed_repair.lock().map_err(|_| "temporal_writer_repair_lock")?;
+        if let Some((intent, prefix)) = repair.as_ref() {
+            self.store.repair_same_temporal(intent, Some(prefix.as_ref()), self.shared.now()?)?;
+            *repair = None;
+        }
+        Ok(())
+    }
     pub fn cancel(&self) {
         self.shared.cancelled.store(true, Ordering::Release);
         let _ = self.send.try_send(Work::Stop);
@@ -475,18 +516,16 @@ impl Writer {
     /// undone; this barrier prevents an old worker from publishing after erase.
     pub fn drain(&self) -> Result<(), String> {
         self.cancel();
-        let joined = if let Some(thread) = self
-            .thread
-            .lock()
-            .map_err(|_| "temporal_writer_join_lock")?
-            .take()
-        {
-            thread
-                .join()
-                .map_err(|_| "temporal_writer_panicked".to_string())
-        } else {
-            Ok(())
-        };
+        let mut handle = self.thread.lock().map_err(|_| "temporal_writer_join_lock")?;
+        // Terminal owner invalidation/erase barrier. Unlike Retry's own join,
+        // no captured Writer Arc may reconcile or publish after this returns.
+        self.shared.terminal_drained.store(true, Ordering::Release);
+        let joined = if let Some(thread) = handle.take() {
+            thread.join().map_err(|_| "temporal_writer_panicked".to_string())
+        } else { Ok(()) };
+        let repair = self.shared.failed_repair.lock().map(|mut value|value.take()).unwrap_or_else(|error|error.into_inner().take());
+        drop(repair);
+        drop(handle);
         // A revoked/failed capture may never poll its final ACK. Release its
         // large serialized/candidate buffers here, not when Core drops inner.
         if let Ok(receiver) = self.receive.lock() {
@@ -496,6 +535,12 @@ impl Writer {
         }
         joined
     }
+    #[cfg(test)]
+    pub(crate) fn fail_next_publication(&self){self.shared.fail_next_publication.store(true,Ordering::Release);}
+    #[cfg(test)]
+    pub(crate) fn has_failed_repair(&self)->bool{self.shared.failed_repair.lock().unwrap().is_some()}
+    #[cfg(test)]
+    pub(crate) fn hold_next_after_publish(&self,entered:mpsc::SyncSender<()>,release:mpsc::Receiver<()>){*self.shared.hold_after_publish.lock().unwrap()=Some((entered,release));}
     #[cfg(test)]
     pub fn ack_is_queued(&self) -> bool {
         self.shared.ack_queued.load(Ordering::Acquire)

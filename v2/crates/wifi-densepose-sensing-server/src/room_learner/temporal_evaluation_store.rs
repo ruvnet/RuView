@@ -39,13 +39,13 @@ impl StoredTemporalEvaluation {
 fn lookup(source: &VerifiedTemporalEvaluationSnapshot) -> Result<String, String> {
     let identity = &source.proof().body.identity;
     crate::room_learner::qualification::hash(&(
-        data::EVALUATION_SCHEMA,
+        if source.proof().is_operator_eight_step() { data::OPERATOR_EVALUATION_SCHEMA } else { data::EVALUATION_SCHEMA },
         "lookup",
         &identity.artifact_kind,
         &identity.artifact_sha256,
         &source.proof().sha256,
         &source.held_out().sha256,
-        DataRole::HeldOut,
+        if source.proof().is_operator_eight_step() { DataRole::Validation } else { DataRole::HeldOut },
     ))
 }
 fn allowed(
@@ -405,7 +405,7 @@ impl ArtifactStore {
         let key = crate::room_learner::qualification::hash(&(
             crate::room_learner::temporal_wire::ASSESSMENT_SCHEMA,
             &evaluation.receipt().sha256,
-            crate::room_learner::temporal_wire::TemporalQualificationPolicyWire::current(),
+            crate::room_learner::temporal_wire::TemporalQualificationPolicyWire::for_operator_eight_step(source.proof().is_operator_eight_step()),
         ))?;
         let path = directory.join(format!("assessment-{key}.json"));
         let (assessment, qualification) = match std::fs::symlink_metadata(&path) {

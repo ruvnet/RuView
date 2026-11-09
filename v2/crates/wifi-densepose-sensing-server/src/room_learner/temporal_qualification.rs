@@ -57,6 +57,9 @@ impl ComputedTemporalAssessment {
         let held = evaluation.held_out();
         let eval = evaluation.receipt();
         eval.validate_data_links(proof, held)?;
+        let operator = proof.is_operator_eight_step();
+        let check_windows = if operator { 4 } else { 16 };
+        let check_episodes = if operator { 1 } else { 2 };
         let id = &proof.body.identity;
         if now / 1_000_000 >= id.original_deadline.expires_at_unix_ms
             || now
@@ -69,23 +72,24 @@ impl ComputedTemporalAssessment {
             return Err("temporal_assessment_clock_or_original_deadline".into());
         }
         if proof.body.windows_per_condition != [16; 4]
-            || held.body.windows_per_condition != [16; 4]
-            || eval.body.report.samples != 64
+            || held.body.windows_per_condition != [check_windows; 4]
+            || eval.body.report.samples != usize::from(check_windows) * 4
             || eval.body.report.per_condition.len() != 4
             || eval
                 .body
                 .report
                 .per_condition
                 .iter()
-                .any(|c| c.samples != 16 || c.declared_trial_count != 2)
+                .any(|c| c.samples != usize::from(check_windows) || c.declared_trial_count != check_episodes)
         {
             return Err("temporal_assessment_exact_native_evidence_required".into());
         }
-        let policy = TemporalQualificationPolicyWire::current();
+        let policy = TemporalQualificationPolicyWire::for_operator_eight_step(operator);
         let policy_sha = h(&policy)?;
-        let criteria = native_criteria(&eval.body.report);
+        let criteria = native_criteria(&eval.body.report, operator);
         // Authoritative pass/failure is the established integer criteria,
-        // with exact16 input shapes enforced above. No metric is replaced.
+        // with exact versioned 16- or 4-window input shapes enforced above.
+        // The smaller operator validation set is not equal-confidence evidence.
         let outcome = super::qualification::criteria(&eval.body.report, &[16; 4]);
         let qualification = if outcome.is_ok() {
             let mut summary = TemporalQualificationSummaryWire {
@@ -94,7 +98,7 @@ impl ComputedTemporalAssessment {
                 model_kind: WholeTemporalKind::ManagedTemporalV3,
                 model_sha256: id.artifact_sha256.clone(),
                 verified_fit_record_sha256: id.verified_fit_record_sha256.clone(),
-                training_lineage_basis: "managed_temporal_training_proof_v1".into(),
+                training_lineage_basis: if operator { "managed_temporal_training_proof_operator_eight_step_v1" } else { "managed_temporal_training_proof_v1" }.into(),
                 training_proof_sha256: proof.sha256.clone(),
                 held_out_evidence_sha256: held.sha256.clone(),
                 complete_record_sha256: held.body.complete_record_sha256.clone(),
@@ -104,14 +108,14 @@ impl ComputedTemporalAssessment {
                 evaluated_at_unix_ms: eval.body.evaluated_at_unix_ms,
                 policy: policy.clone(),
                 policy_sha256: policy_sha.clone(),
-                label_provenance: "temporal-training-proof-v1+sealed-native-heldout-v1".into(),
+                label_provenance: if operator { "temporal-training-proof-operator-eight-step-v1+reserved-native-validation-v1" } else { "temporal-training-proof-v1+sealed-native-heldout-v1" }.into(),
                 criteria: criteria.clone(),
                 authority_scope: "local_operator_binary_presence".into(),
                 window_unit: "native_receiver_2s_window".into(),
                 train_windows: 64,
-                held_out_windows: 64,
-                train_episodes: 7,
-                held_out_episodes: 8,
+                held_out_windows: if operator { 16 } else { 64 },
+                train_episodes: if operator { 4 } else { 7 },
+                held_out_episodes: if operator { 4 } else { 8 },
                 independence_verified: false,
                 physically_validated: false,
                 measurement_clock_available: false,
@@ -229,9 +233,19 @@ impl TemporalQualificationEnvelope {
             || q.evaluation_receipt_sha256 != e.sha256
             || q.context_digest != id.context_digest
             || q.room_digest != id.room_digest
-            || q.policy != TemporalQualificationPolicyWire::current()
+            || q.policy != TemporalQualificationPolicyWire::for_operator_eight_step(proof.is_operator_eight_step())
+            || q.train_windows != 64
+            || q.held_out_windows != if proof.is_operator_eight_step() { 16 } else { 64 }
+            || q.train_episodes != if proof.is_operator_eight_step() { 4 } else { 7 }
+            || q.held_out_episodes != if proof.is_operator_eight_step() { 4 } else { 8 }
+            || q.training_lineage_basis != if proof.is_operator_eight_step() { "managed_temporal_training_proof_operator_eight_step_v1" } else { "managed_temporal_training_proof_v1" }
+            || q.label_provenance != if proof.is_operator_eight_step() { "temporal-training-proof-operator-eight-step-v1+reserved-native-validation-v1" } else { "temporal-training-proof-v1+sealed-native-heldout-v1" }
+            || q.independence_verified || q.physically_validated || q.measurement_clock_available
+            || q.model_kind != WholeTemporalKind::ManagedTemporalV3
+            || q.authority_scope != "local_operator_binary_presence"
+            || q.window_unit != "native_receiver_2s_window"
             || q.policy_sha256 != h(&q.policy)?
-            || q.criteria != native_criteria(&e.body.report)
+            || q.criteria != native_criteria(&e.body.report, proof.is_operator_eight_step())
             || q.evaluated_at_unix_ms != e.body.evaluated_at_unix_ms
             || self.receipt.qualified_at_unix_ms < e.body.evaluated_at_unix_ms
             || self.receipt.qualified_at_unix_ms >= id.original_deadline.expires_at_unix_ms
@@ -281,9 +295,13 @@ impl TemporalAssessmentEnvelope {
             || a.held_out_evidence_sha256 != held.sha256
             || a.complete_record_sha256 != held.body.complete_record_sha256
             || a.evaluation_receipt_sha256 != e.sha256
-            || a.policy != TemporalQualificationPolicyWire::current()
+            || a.context_digest != id.context_digest
+            || a.room_digest != id.room_digest
+            || a.model_kind != WholeTemporalKind::ManagedTemporalV3
+            || a.window_unit != "native_receiver_2s_window"
+            || a.policy != TemporalQualificationPolicyWire::for_operator_eight_step(proof.is_operator_eight_step())
             || a.policy_sha256 != h(&a.policy)?
-            || a.criteria != native_criteria(&e.body.report)
+            || a.criteria != native_criteria(&e.body.report, proof.is_operator_eight_step())
             || a.evaluated_at_unix_ms != e.body.evaluated_at_unix_ms
             || a.assessed_at_unix_ms < e.body.evaluated_at_unix_ms
             || a.assessed_at_unix_ms >= id.original_deadline.expires_at_unix_ms
@@ -314,6 +332,7 @@ impl TemporalAssessmentEnvelope {
 
 fn native_criteria(
     report: &super::training::EvaluationReport,
+    operator: bool,
 ) -> Vec<TemporalConditionCriterionWire> {
     report
         .per_condition
@@ -331,12 +350,12 @@ fn native_criteria(
                 scored_windows: c.scored as u16,
                 abstained_windows: c.abstained as u16,
                 missing_windows: c.missing as u16,
-                declared_train_episodes: if c.condition == super::observation::RoomLabel::Empty {
+                declared_train_episodes: if operator || c.condition == super::observation::RoomLabel::Empty {
                     1
                 } else {
                     2
                 },
-                declared_held_out_episodes: 2,
+                declared_held_out_episodes: if operator { 1 } else { 2 },
                 evaluated_window_coverage: c.scored as f64 / c.samples as f64,
                 unconditional_sensitivity: occupied
                     .then_some(c.confusion.true_occupied as f64 / c.samples as f64),

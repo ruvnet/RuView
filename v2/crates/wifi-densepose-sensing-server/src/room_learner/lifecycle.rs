@@ -91,6 +91,9 @@ pub struct RoomLearningRuntime {
     installation: String,
     store: Arc<ArtifactStore>,
     recovery_store: Option<std::sync::Arc<super::recovery_store::RecoveryStore>>,
+    operator_recovery_store: Option<std::sync::Arc<super::recovery_store::RecoveryStore>>,
+    operator_profile_selected: AtomicBool,
+    operator_profile_initialized: AtomicBool,
     inner: Mutex<Inner>,
     #[cfg(test)]
     reclamation_probe:Mutex<Option<Arc<dyn Fn(super::temporal_model_input::managed::execution::ReclamationStats)+Send+Sync>>>,
@@ -98,6 +101,8 @@ pub struct RoomLearningRuntime {
     panic_after_reclamation_ack:AtomicBool,
     #[cfg(test)]
     temporal_fit_hook: Mutex<Option<Arc<dyn Fn(&'static str) + Send + Sync>>>,
+    #[cfg(test)]
+    temporal_status_profile_hook: Mutex<Option<Box<dyn FnOnce()+Send>>>,
     #[cfg(test)]
     temporal_evidence_io_hook: Mutex<Option<Arc<dyn Fn(&'static str)->Result<(),String> + Send + Sync>>>,
     clock_origin: std::time::Instant,
@@ -186,6 +191,7 @@ impl RoomLearningRuntime {
             .as_nanos()
             .try_into()
             .map_err(|_| "receiver clock outside bounds")?;
+        let operator_recovery_store = recovery_store.as_ref().map(|store| store.operator_eight_scope()).transpose()?.map(Arc::new);
         let runtime = Self {
             clock_origin,
             clock_epoch_ns,
@@ -194,9 +200,13 @@ impl RoomLearningRuntime {
             installation: installation.into(),
             store: Arc::new(ArtifactStore::new(directory, owner, installation)?),
             recovery_store: recovery_store.map(std::sync::Arc::new),
+            operator_recovery_store,
+            operator_profile_selected: AtomicBool::new(false),
+            operator_profile_initialized: AtomicBool::new(false),
             #[cfg(test)] reclamation_probe:Mutex::new(None),
             #[cfg(test)] panic_after_reclamation_ack:AtomicBool::new(false),
             #[cfg(test)] temporal_fit_hook:Mutex::new(None),
+            #[cfg(test)] temporal_status_profile_hook:Mutex::new(None),
             #[cfg(test)] temporal_evidence_io_hook:Mutex::new(None),
             inner: Mutex::new(Inner {
                 generation: 0,

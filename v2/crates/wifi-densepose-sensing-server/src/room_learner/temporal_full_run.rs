@@ -62,8 +62,8 @@ impl ContinuationPolicy {
                 c.train_windows,
                 c.held_out_windows,
                 c.total_windows,
-            ) != (7, 8, 64, 64, 128)
-            || schedule.resources().max_numeric_values != 1_655_808
+            ) != if schedule.is_operator_eight_step(){(4,4,64,16,80)}else{(7,8,64,64,128)}
+            || schedule.resources().max_numeric_values != if schedule.is_operator_eight_step(){1_034_880}else{1_655_808}
             || schedule.resources().max_numeric_values > 2_000_000
         {
             return Err("temporal_full_run_engineering_profile_unsupported".into());
@@ -86,7 +86,7 @@ impl ContinuationPolicy {
             .and_then(|n| n.checked_add(episodes))
             .and_then(|n| n.checked_add(3))
             .ok_or("temporal_full_run_capacity")?;
-        if transition_limit != 433 || transition_limit > 512 {
+        if transition_limit != if schedule.is_operator_eight_step(){364}else{433} || transition_limit > 512 {
             return Err("temporal_full_run_transition_capacity".into());
         }
         let body = PolicyBody {
@@ -203,7 +203,7 @@ impl FullRunState {
             .ok_or("temporal_full_run_owner_custody_required")?;
         if self.frozen.is_some()
             && self.pending.is_none()
-            && (self.held_out.is_none() || self.verified.is_none() || self.completed.is_some())
+            && ((!self.frozen.as_ref().is_some_and(|f|f.body.operator_profile.is_some()) && self.held_out.is_none()) || self.verified.is_none() || self.completed.is_some())
         {
             return Err("temporal_frozen_write_requires_current_producer".into());
         }
@@ -304,6 +304,8 @@ pub(super) struct VerifiedFitRecordBody {
     pub actual_summary: FitSummaryReference,
     pub freeze_prepare_receiver_ns: u64,
     pub source_floors: Vec<(u8, u64, u64)>,
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub operator_profile: Option<String>,
 }
 /// Serializable DATA, not a permit. SHA binds data, never producer authority.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -333,6 +335,7 @@ impl VerifiedFitRecordData {
             || b.owner_scope != c.owner_scope
             || b.installation_id != c.installation_id
             || b.context_digest != c.digest()
+            || b.operator_profile.as_deref() != binding.contract()?.is_operator_eight_step().then_some("native-2s-three-source-56bin-operator-eight-step-v1")
             || b.run.is_empty()
             || b.run.len() > 256
             || !b.run.is_ascii()
@@ -400,7 +403,8 @@ fn verify_model_binding(
 ) -> Result<(), String> {
     let b = model.fit_diagnostic_binding()?;
     let r = &record.body;
-    if b.artifact_kind != MODEL_KIND
+    if record.body.operator_profile.is_some() != model.managed_is_operator_eight_step()?
+        || b.artifact_kind != MODEL_KIND
         || b.artifact_sha256 != r.artifact_sha256
         || b.context_digest != r.context_digest
         || b.input_policy_sha256 != r.input_policy_sha256
@@ -451,15 +455,16 @@ impl VerifiedFrozenSession {
         }
     }
     fn check_current_train_prefix(&self, session: &TemporalTrainingSession) -> Result<(), String> {
+        let count=if self.record.body.operator_profile.is_some(){80}else{64};
         if session.failed
             || !session.fitted
-            || session.rows.len() < 64
-            || session.evidence.len() < 64
-            || session.rows[..64]
+            || session.rows.len() < count
+            || session.evidence.len() < count
+            || session.rows[..count]
                 .iter()
                 .zip(&self.rows)
                 .any(|(a, b)| !a.same_record(b))
-            || session.evidence[..64]
+            || session.evidence[..count]
                 .iter()
                 .zip(&self.evidence)
                 .any(|(a, b)| !a.same_record(b))
@@ -475,11 +480,12 @@ impl VerifiedFrozenSession {
         Ok(())
     }
     fn check(&self, session: &TemporalTrainingSession) -> Result<(), String> {
+        let count=if self.record.body.operator_profile.is_some(){80}else{64};
         if session.active
             || session.failed
             || session.fitted
-            || session.rows.len() != 64
-            || session.evidence.len() != 64
+            || session.rows.len() != count
+            || session.evidence.len() != count
             || session
                 .rows
                 .iter()
@@ -816,8 +822,8 @@ impl VerifiedContinuedSession {
             store: self.store.clone(),
             model: self.model.clone(),
             record: self.record.clone(),
-            rows: self.rows[..64].to_vec(),
-            evidence: self.evidence[..64].to_vec(),
+            rows: self.rows[..if self.record.body.operator_profile.is_some(){80}else{64}].to_vec(),
+            evidence: self.evidence[..if self.record.body.operator_profile.is_some(){80}else{64}].to_vec(),
         });
         Ok(())
     }
@@ -985,15 +991,18 @@ impl TemporalWorkflow {
         let Some(mode) = &self.full_run else {
             return Ok(false);
         };
-        if mode.held_out_seals() != 8 || mode.complete.is_some() {
+        let operator=self.schedule()?.is_operator_eight_step();
+        let operator_ready=operator && mode.verified.is_some()
+            && self.bridge.as_ref().is_some_and(|b|b.seals.len()==8);
+        if (!operator_ready && mode.held_out_seals() != 8) || mode.complete.is_some() {
             return Ok(false);
         }
         let state = self.async_state.as_ref().ok_or("temporal_async_required")?;
         if state.pending.is_some()
-            || state.accepted_held_out_seals != 8
-            || self.durable_windows != 128
-            || self.session.rows.len() != 128
-            || self.episode != 15
+            || if operator {state.accepted_seals != 8}else{state.accepted_held_out_seals != 8}
+            || self.durable_windows != if operator{80}else{128}
+            || self.session.rows.len() != if operator{80}else{128}
+            || self.episode != if operator{8}else{15}
             || self.mapping.is_some()
         {
             return Ok(false);
@@ -1019,22 +1028,18 @@ impl TemporalWorkflow {
             verified_fit_sha256: fit.sha256.clone(),
             artifact_kind: fit.body.artifact_kind.clone(),
             artifact_sha256: fit.body.artifact_sha256.clone(),
-            held_out_chain_sha256: mode
-                .held_out
-                .as_ref()
-                .unwrap()
-                .seals
-                .last()
-                .unwrap()
-                .sha256
-                .clone(),
+            held_out_chain_sha256: if operator {
+                let schedule=self.schedule()?;
+                hash(&self.bridge.as_ref().ok_or("operator_checks_seals_missing")?.seals.iter()
+                    .filter(|seal|schedule.episodes()[seal.episode].role==DataRole::Validation).collect::<Vec<_>>())?
+            } else {mode.held_out.as_ref().unwrap().seals.last().unwrap().sha256.clone()},
             raw_sha256: hashes.raw.clone(),
             evidence_sha256: hashes.evidence.clone(),
             identity_sha256: hashes.identities.clone(),
             ledger_sha256: hashes.ledger.clone(),
-            windows: 128,
-            held_out_windows: 64,
-            held_out_seals: 8,
+            windows: if operator{80}else{128},
+            held_out_windows: if operator{16}else{64},
+            held_out_seals: if operator{4}else{8},
             accepted_held_out_commitment: predecessor.data(),
             complete_prepare_receiver_ns: now,
             source_floors: self.source_high.clone(),

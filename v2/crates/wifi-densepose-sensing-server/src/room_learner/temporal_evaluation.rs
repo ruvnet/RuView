@@ -11,6 +11,9 @@ use sha2::{Digest, Sha256};
 pub(super) const TRAIN_SCHEMA: &str = "ruview.room-learner.temporal-training-proof.v1";
 pub(super) const HELD_OUT_SCHEMA: &str = "ruview.room-learner.temporal-heldout-evidence.v1";
 pub(super) const EVALUATION_SCHEMA: &str = "ruview.room-learner.temporal-evaluation.v1";
+pub(super) const OPERATOR_TRAIN_SCHEMA: &str = "ruview.room-learner.temporal-training-proof.operator-eight-step.v1";
+pub(super) const OPERATOR_CHECK_SCHEMA: &str = "ruview.room-learner.temporal-validation-evidence.operator-eight-step.v1";
+pub(super) const OPERATOR_EVALUATION_SCHEMA: &str = "ruview.room-learner.temporal-evaluation.operator-eight-step.v1";
 const MODEL_KIND: &str = "ruview.room-learner.managed-temporal-input.v3";
 const PREFIX_SCHEMA: &str = "ruview.room-learner.temporal-runtime-prefix.v3";
 const METADATA_KIND: &str = "temporal-prefix-commitment-v2";
@@ -206,7 +209,7 @@ pub(super) struct TemporalTrainProofBodyData {
     pub training_data_sha256: String,
     pub training_evidence_sha256: String,
     pub training_identities_sha256: String,
-    pub train_seal_sha256s: [String; 7],
+    pub train_seal_sha256s: Vec<String>,
     pub train_seal_chain_sha256: String,
     pub train_windows: u16,
     pub windows_per_condition: [u16; 4],
@@ -224,6 +227,7 @@ pub(super) struct TemporalTrainProofData {
     pub sha256: String,
 }
 impl TemporalTrainProofData {
+    pub(super) fn is_operator_eight_step(&self) -> bool { self.schema == OPERATOR_TRAIN_SCHEMA }
     pub(super) fn decode_data(bytes: &[u8]) -> Result<Self, String> {
         let value: Self = decode_data(bytes)?;
         value.validate_data()?;
@@ -235,9 +239,9 @@ impl TemporalTrainProofData {
         b.claims.validate_data()?;
         b.accepted_train_commitment.validate_data(&b.identity)?;
         let cut = decimal(&b.freeze_prepare_receiver_ns)?;
-        if self.schema != TRAIN_SCHEMA
+        if ![TRAIN_SCHEMA, OPERATOR_TRAIN_SCHEMA].contains(&self.schema.as_str())
             || !sha(&self.sha256)
-            || self.sha256 != data_sha(TRAIN_SCHEMA, b)?
+            || self.sha256 != data_sha(&self.schema, b)?
             || [
                 &b.training_data_sha256,
                 &b.training_evidence_sha256,
@@ -251,10 +255,11 @@ impl TemporalTrainProofData {
                 .iter()
                 .collect::<std::collections::HashSet<_>>()
                 .len()
-                != 7
+                != if self.is_operator_eight_step() { 4 } else { 7 }
+            || b.train_seal_sha256s.len() != if self.is_operator_eight_step() { 4 } else { 7 }
             || b.train_windows != 64
             || b.windows_per_condition != [16; 4]
-            || b.declared_episodes_per_condition != [1, 2, 2, 2]
+            || b.declared_episodes_per_condition != if self.is_operator_eight_step() { [1; 4] } else { [1, 2, 2, 2] }
             || !b.identity.original_deadline.contains_receiver_ns(cut)
         {
             return invalid();
@@ -290,7 +295,7 @@ pub(super) struct TemporalHeldOutBodyData {
     pub complete_evidence_sha256: String,
     pub complete_identities_sha256: String,
     pub complete_ledger_sha256: String,
-    pub held_out_seal_sha256s: [String; 8],
+    pub held_out_seal_sha256s: Vec<String>,
     pub held_out_seal_chain_sha256: String,
     pub complete_record_sha256: String,
     pub complete_commitment: CommitmentData,
@@ -310,6 +315,7 @@ pub(super) struct TemporalHeldOutEvidenceData {
     pub sha256: String,
 }
 impl TemporalHeldOutEvidenceData {
+    pub(super) fn is_operator_eight_step(&self) -> bool { self.schema == OPERATOR_CHECK_SCHEMA }
     pub(super) fn decode_data(bytes: &[u8]) -> Result<Self, String> {
         let value: Self = decode_data(bytes)?;
         value.validate_data()?;
@@ -320,9 +326,9 @@ impl TemporalHeldOutEvidenceData {
         b.identity.validate_data()?;
         b.claims.validate_data()?;
         b.complete_commitment.validate_data(&b.identity)?;
-        if self.schema != HELD_OUT_SCHEMA
+        if ![HELD_OUT_SCHEMA, OPERATOR_CHECK_SCHEMA].contains(&self.schema.as_str())
             || !sha(&self.sha256)
-            || self.sha256 != data_sha(HELD_OUT_SCHEMA, b)?
+            || self.sha256 != data_sha(&self.schema, b)?
             || [
                 &b.training_proof_sha256,
                 &b.held_out_data_sha256,
@@ -342,10 +348,11 @@ impl TemporalHeldOutEvidenceData {
                 .iter()
                 .collect::<std::collections::HashSet<_>>()
                 .len()
-                != 8
-            || b.held_out_windows != 64
-            || b.windows_per_condition != [16; 4]
-            || b.declared_episodes_per_condition != [2; 4]
+                != if self.is_operator_eight_step() { 4 } else { 8 }
+            || b.held_out_seal_sha256s.len() != if self.is_operator_eight_step() { 4 } else { 8 }
+            || b.held_out_windows != if self.is_operator_eight_step() { 16 } else { 64 }
+            || b.windows_per_condition != if self.is_operator_eight_step() { [4; 4] } else { [16; 4] }
+            || b.declared_episodes_per_condition != if self.is_operator_eight_step() { [1; 4] } else { [2; 4] }
             || !b
                 .identity
                 .original_deadline
@@ -379,7 +386,8 @@ impl TemporalHeldOutEvidenceData {
     pub(super) fn validate_data_links(&self, train: &TemporalTrainProofData) -> Result<(), String> {
         self.validate_data()?;
         train.validate_data()?;
-        if self.body.identity != train.body.identity
+        if self.is_operator_eight_step() != train.is_operator_eight_step()
+            || self.body.identity != train.body.identity
             || self.body.training_proof_sha256 != train.sha256
             || decimal(&self.body.complete_prepare_receiver_ns)?
                 < decimal(&train.body.freeze_prepare_receiver_ns)?
@@ -433,6 +441,7 @@ pub(super) struct TemporalEvaluationReceiptData {
     pub sha256: String,
 }
 impl TemporalEvaluationReceiptData {
+    pub(super) fn is_operator_eight_step(&self) -> bool { self.schema == OPERATOR_EVALUATION_SCHEMA }
     pub(super) fn decode_data(bytes: &[u8]) -> Result<Self, String> {
         let value: Self = decode_data(bytes)?;
         value.validate_data()?;
@@ -444,9 +453,9 @@ impl TemporalEvaluationReceiptData {
         b.claims.validate_data()?;
         b.report.validate()?;
         let ns = decimal(&b.evaluated_at_receiver_ns)?;
-        if self.schema != EVALUATION_SCHEMA
+        if ![EVALUATION_SCHEMA, OPERATOR_EVALUATION_SCHEMA].contains(&self.schema.as_str())
             || !sha(&self.sha256)
-            || self.sha256 != data_sha(EVALUATION_SCHEMA, b)?
+            || self.sha256 != data_sha(&self.schema, b)?
             || [
                 &b.training_proof_sha256,
                 &b.held_out_evidence_sha256,
@@ -456,19 +465,19 @@ impl TemporalEvaluationReceiptData {
             ]
             .iter()
             .any(|s| !sha(s))
-            || b.role != DataRole::HeldOut
+            || b.role != if self.is_operator_eight_step() { DataRole::Validation } else { DataRole::HeldOut }
             || b.window_unit != "native_receiver_2s_window"
             || !b.train_lineage_checked
             || ns / 1_000_000 != b.evaluated_at_unix_ms
             || !b.identity.original_deadline.contains_receiver_ns(ns)
             || b.provenance != [CaptureProvenance::LiveReceiverObserved]
             || b.clock_claims != [ClockKind::ReceiverOnly]
-            || b.report.samples != 64
-            || b.report.declared_trial_count != 8
+            || b.report.samples != if self.is_operator_eight_step() { 16 } else { 64 }
+            || b.report.declared_trial_count != if self.is_operator_eight_step() { 4 } else { 8 }
             || b.report
                 .per_condition
                 .iter()
-                .any(|c| c.samples != 16 || c.declared_trial_count != 2)
+                .any(|c| c.samples != if self.is_operator_eight_step() { 4 } else { 16 } || c.declared_trial_count != if self.is_operator_eight_step() { 1 } else { 2 })
         {
             return invalid();
         }
@@ -482,7 +491,8 @@ impl TemporalEvaluationReceiptData {
         self.validate_data()?;
         held.validate_data_links(train)?;
         let b = &self.body;
-        if b.identity != held.body.identity
+        if self.is_operator_eight_step() != train.is_operator_eight_step()
+            || b.identity != held.body.identity
             || b.training_proof_sha256 != train.sha256
             || b.held_out_evidence_sha256 != held.sha256
             || b.complete_record_sha256 != held.body.complete_record_sha256
@@ -501,9 +511,10 @@ impl TemporalEvaluationReceiptData {
 // producer, current-store, evaluation, qualification or selection permission.
 impl TemporalTrainProofData {
     pub(super) fn from_body_data(body: TemporalTrainProofBodyData) -> Result<Self, String> {
+        let schema = if body.train_seal_sha256s.len() == 4 && body.declared_episodes_per_condition == [1; 4] { OPERATOR_TRAIN_SCHEMA } else { TRAIN_SCHEMA };
         let value = Self {
-            schema: TRAIN_SCHEMA.into(),
-            sha256: data_sha(TRAIN_SCHEMA, &body)?,
+            schema: schema.into(),
+            sha256: data_sha(schema, &body)?,
             body,
         };
         value.validate_data()?;
@@ -517,9 +528,10 @@ impl TemporalTrainProofData {
 }
 impl TemporalHeldOutEvidenceData {
     pub(super) fn from_body_data(body: TemporalHeldOutBodyData) -> Result<Self, String> {
+        let schema = if body.held_out_windows == 16 && body.held_out_seal_sha256s.len() == 4 { OPERATOR_CHECK_SCHEMA } else { HELD_OUT_SCHEMA };
         let value = Self {
-            schema: HELD_OUT_SCHEMA.into(),
-            sha256: data_sha(HELD_OUT_SCHEMA, &body)?,
+            schema: schema.into(),
+            sha256: data_sha(schema, &body)?,
             body,
         };
         value.validate_data()?;
@@ -533,9 +545,10 @@ impl TemporalHeldOutEvidenceData {
 }
 impl TemporalEvaluationReceiptData {
     pub(super) fn from_body_data(body: TemporalEvaluationBodyData) -> Result<Self, String> {
+        let schema = if body.role == DataRole::Validation { OPERATOR_EVALUATION_SCHEMA } else { EVALUATION_SCHEMA };
         let value = Self {
-            schema: EVALUATION_SCHEMA.into(),
-            sha256: data_sha(EVALUATION_SCHEMA, &body)?,
+            schema: schema.into(),
+            sha256: data_sha(schema, &body)?,
             body,
         };
         value.validate_data()?;

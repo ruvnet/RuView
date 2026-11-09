@@ -20,11 +20,12 @@ C3 = ['room_learner::lifecycle::temporal_control::fit_control::tests::c3_actual_
  'room_learner::lifecycle::temporal_control::fit_control::tests::c3_old_completion_cannot_fail_a_replacement_job_with_different_cancel_identity',
  'room_learner::lifecycle::temporal_control::fit_control::tests::c3_optional_actual_summary_failure_keeps_durable_diagnostic_model',
  'room_learner::lifecycle::temporal_control::fit_control::tests::c3_worker_unwind_keeps_saved_history_but_never_adopts_current_candidate']
+OPERATOR8 = PREFIX + 'full_run_tests::operator_eight_actual_reserved_checks_fit_complete_cold_and_evaluate'
 C4 = ['room_learner::lifecycle::temporal_control::full_run_tests::c4a_actual_seven_train_fit_frozen_ack_and_exact_cold_model',
  'room_learner::lifecycle::temporal_control::full_run_tests::c4a_actual_frozen_cold_missing_corrupt_wrong_kind_bytes_and_expiry_fail_closed',
  'room_learner::lifecycle::temporal_control::full_run_tests::c4a_owner_cancel_drains_actual_prepared_frozen_writer_before_synthetic_erase',
  'room_learner::lifecycle::temporal_control::full_run_tests::c4a_actual_frozen_lost_ack_same_intent_repair_installs_only_after_exact_ack',
- 'room_learner::lifecycle::temporal_control::full_run_tests::c4a_running_compute_cancel_cannot_produce_accepted_fit_or_frozen']
+ 'room_learner::lifecycle::temporal_control::full_run_tests::c4a_running_compute_cancel_cannot_produce_accepted_fit_or_frozen', OPERATOR8]
 
 C4B_PREFIX = PREFIX + "held_out_tests::"
 C4B = ['room_learner::lifecycle::temporal_control::held_out_tests::c4b_actual_complete_cold_restore_requires_model_owner_context_and_original_deadline', 'room_learner::lifecycle::temporal_control::held_out_tests::c4b_actual_complete_owner_cancel_and_retirement_deny_reactivation', 'room_learner::lifecycle::temporal_control::held_out_tests::c4b_actual_complete_rehashed_role_phase_binding_floor_and_deadline_negatives', 'room_learner::lifecycle::temporal_control::held_out_tests::c4b_actual_native_train_frozen_eight_heldout_two_cold_interruptions_complete']
@@ -34,7 +35,7 @@ def policy(root):
     source = root / 'v2/crates/wifi-densepose-sensing-server/src/room_learner'
     components = [('C2', source / 'lifecycle_temporal_tests.rs', [C2], [(C2, True, 1)])]
     components += [('C1', source / 'lifecycle_temporal_tests.rs', [C1], [(C1, True, 1)])]
-    components += [('C3', source / 'lifecycle_temporal_fit_tests.rs', C3, [(PREFIX + 'fit_control::tests::', False, 12)]), ('C4', source / 'lifecycle_temporal_full_run_tests.rs', C4, [(PREFIX + 'full_run_tests::', False, 8)]), ('budget343', source / 'temporal_budget_profile_tests.rs', BUDGET, [(name, True, 1) for name in BUDGET])]
+    components += [('C3', source / 'lifecycle_temporal_fit_tests.rs', C3, [(PREFIX + 'fit_control::tests::', False, 12)]), ('C4', source / 'lifecycle_temporal_full_run_tests.rs', C4, [(PREFIX + 'full_run_tests::', False, 9)]), ('budget343', source / 'temporal_budget_profile_tests.rs', BUDGET, [(name, True, 1) for name in BUDGET])]
     b_marker = source / 'lifecycle_temporal_held_out_tests.rs'
     if not b_marker.is_file():
         raise ValueError('C4B source marker is required; missing source is not coverage')

@@ -489,12 +489,23 @@ impl TemporalWorkflow {
             .iter()
             .find(|s| s.source_id == p.source_id)
             .ok_or("temporal_unbound_source")?;
-        if self.source_high.iter().any(|(id, _, last)| {
+        if let Some((_, _, last)) = self.source_high.iter().find(|(id, _, last)| {
             *id == p.source_id
                 && *last >= mapping.receiver_start_ns
                 && (t - *last > policy.max_gap_ns || t - *last < policy.min_packet_interval_ns)
         }) {
-            return Err("temporal_observed_gap_or_rate".into());
+            let interval_ns = t - *last;
+            let direction = if interval_ns < policy.min_packet_interval_ns {
+                "below_min"
+            } else {
+                "above_max"
+            };
+            // Receiver-processing interval only: no RF values, absolute time or
+            // source-clock claim. Keep the existing failure prefix and guards.
+            return Err(format!(
+                "temporal_observed_gap_or_rate: source={} direction={} receiver_interval_ns={} min_ns={} max_ns={}",
+                p.source_id, direction, interval_ns, policy.min_packet_interval_ns, policy.max_gap_ns
+            ));
         }
         let first_limit = native.max_first_packet_delay_ms() * 1_000_000;
         if let Some((_, _, last)) = self

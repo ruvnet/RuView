@@ -12,6 +12,7 @@ fn temporal_app(state: SharedState) -> Router {
         .route("/train", post(train_dispatch))
         .route("/evaluate", post(evaluate_dispatch))
         .route("/restore", post(restore_dispatch))
+        .route("/retry", post(retry_dispatch))
         .route("/discard", post(discard_dispatch))
         .route("/phase/cancel", post(pause_dispatch))
         .route("/train/cancel", post(cancel_operation_dispatch))
@@ -260,6 +261,7 @@ async fn temporal_selection_mutations_keep_the_existing_local_owner_gate() {
     for path in [
         "/api/v1/room-learner/qualify",
         "/api/v1/room-learner/select",
+        "/api/v1/room-learner/recovery/retry",
     ] {
         for (peer, token) in [
             ("127.0.0.1:41000", "synthetic-peer-read"),
@@ -594,4 +596,66 @@ async fn fullrun_priming_still_rejects_zero_nan_and_nonfinite_rate_metadata() {
         assert_eq!(rt.ingest_native(&p,rt.receiver_now_ns()),Err("acquisition_cadence_changed".into()));
         let s=decoded(app,&format!("/status?schema={STATUS_SCHEMA}"),None).await;assert_eq!(s["status"]["capture"]["retained_windows"],0);assert_eq!(s["status"]["capture"]["observed_ms"],0);
     }
+}
+
+#[tokio::test]
+async fn retry_owner_router_denies_anonymous_and_paired_grants_before_mutating_runtime(){
+    let (_dir,state)=fixture();let rt=state.read().await.room_learning.as_ref().unwrap().clone();
+    let auth=wifi_densepose_sensing_server::bearer_auth::AuthState::from_token("synthetic-owner");
+    let app=owner_selection_routes(auth).with_state(state);
+    let guard=rt.mutation_guard().unwrap();
+    let body=serde_json::json!({"schema":RECOVERY_RETRY_REQUEST_SCHEMA,"model_kind":"ruview.room-learner.managed-temporal-input.v3","expected":guard,"capture_generation_id":"c".repeat(64),"retry_confirmed":true});
+    for (token,paired) in [(None,false),(Some("synthetic-peer-read"),false),(Some("synthetic-owner"),true)] {
+        let mut builder=Request::builder().method(Method::POST).uri("/api/v1/room-learner/recovery/retry").header("content-type","application/json");
+        if let Some(token)=token{builder=builder.header("authorization",format!("Bearer {token}"));}
+        let mut request=builder.body(Body::from(serde_json::to_vec(&body).unwrap())).unwrap();
+        request.extensions_mut().insert(axum::extract::ConnectInfo("127.0.0.1:41000".parse::<SocketAddr>().unwrap()));
+        if paired {let(_,rx)=tokio::sync::watch::channel(false);request.extensions_mut().insert(wifi_densepose_sensing_server::companion::Grant{device_id:"synthetic-paired-readonly".into(),expires_at:chrono::Utc::now().timestamp().max(0)as u64+30,revoked:rx});}
+        assert_eq!(app.clone().oneshot(request).await.unwrap().status(),StatusCode::FORBIDDEN);
+        assert_eq!(rt.mutation_guard().unwrap(),guard);
+    }
+}
+
+#[tokio::test]
+async fn retry_command_refuses_imported_rows_and_wrong_cas_at_the_actual_dispatch(){
+    let (_dir,state)=fixture();let rt=state.read().await.room_learning.as_ref().unwrap().clone();let app=temporal_app(state);
+    let guard=rt.mutation_guard().unwrap();
+    let body=serde_json::json!({"schema":RECOVERY_RETRY_REQUEST_SCHEMA,"model_kind":"ruview.room-learner.managed-temporal-input.v3","expected":guard,"capture_generation_id":"c".repeat(64),"retry_confirmed":true});
+    for field in ["rows","recording_start","new_training","deadline","committed"]{
+        let mut invalid=body.clone();invalid[field]=serde_json::json!(true);
+        assert_eq!(request_raw(app.clone(),"/retry",Some(invalid)).await.0,StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(rt.mutation_guard().unwrap(),guard);
+    }
+    let mut wrong=body;wrong["expected"]["runtime_epoch"]=serde_json::json!("wrong-runtime");
+    let response=decoded(app,"/retry",Some(wrong)).await;
+    assert_eq!(response["success"],false);assert_eq!(rt.mutation_guard().unwrap(),guard);
+}
+
+#[tokio::test]
+async fn actual_owner_retry_http_returns_paused_same_capture_without_starting_recording(){
+    use wifi_densepose_sensing_server::room_learner::{observation::SourceSpec,recovery_store::RecoveryStore};
+    let(dir,state)=fixture();let owner="a".repeat(64);let path=dir.path().join(&owner).join("SensingServer");
+    let store=RecoveryStore::new(&path,&owner,"synthetic-install",Some(&[7;32])).unwrap();
+    let rt=Arc::new(RoomLearningRuntime::new_with_recovery(&path,&owner,"synthetic-install",store).unwrap());
+    let profile="native-2s-three-source-56bin-operator-eight-step-v1";
+    rt.temporal_select_profile_guarded_v2(Some(profile),&rt.mutation_guard().unwrap()).unwrap();
+    let sources=(15..=17u8).map(|id|SourceSpec{source_id:id,device_id:format!("esp32-node-{id}"),grid_id:"ant1-bins64-ppdu0-usable-drop2-linear-v2".into(),feature_count:56,signal_kind:ruview_unified::RfModality::WifiCsi,center_frequency_hz:2_437_000_000,bandwidth_hz:20_000_000,link_id:format!("synthetic-{id}"),link_index:0,geometry:None}).collect();
+    let context=rt.bind_context("b".repeat(64),1,sources).unwrap();
+    rt.temporal_configure_v2(&rt.mutation_guard().unwrap(),context,"synthetic-http-retry".into(),true,rt.receiver_now_ns()).unwrap();
+    let started=std::time::Instant::now();
+    loop{let status=rt.temporal_status_v2(rt.receiver_now_ns()).unwrap();if status["capture"]["stage"]=="ready"{break;}assert!(started.elapsed()<std::time::Duration::from_secs(10));tokio::time::sleep(std::time::Duration::from_millis(1)).await;}
+    rt.record_native_rejection(15,"ant1-bins64-ppdu0-usable-drop2-linear-v2","SYNTHETIC stopped capture for actual HTTP Retry");
+    let before=rt.temporal_status_v2(rt.receiver_now_ns()).unwrap();
+    assert_eq!(before["capture"]["stage"],"failed");
+    state.write().await.room_learning=Some(rt.clone());
+    let router=owner_selection_routes(wifi_densepose_sensing_server::bearer_auth::AuthState::from_token("synthetic-owner")).with_state(state);
+    let body=serde_json::json!({"schema":RECOVERY_RETRY_REQUEST_SCHEMA,"model_kind":"ruview.room-learner.managed-temporal-input.v3","expected":rt.mutation_guard().unwrap(),"capture_generation_id":before["capture"]["capture_generation_id"],"retry_confirmed":true});
+    let mut request=Request::builder().method(Method::POST).uri("/api/v1/room-learner/recovery/retry").header("content-type","application/json").header("authorization","Bearer synthetic-owner").body(Body::from(serde_json::to_vec(&body).unwrap())).unwrap();
+    request.extensions_mut().insert(axum::extract::ConnectInfo("127.0.0.1:41000".parse::<SocketAddr>().unwrap()));
+    let response=router.oneshot(request).await.unwrap();assert_eq!(response.status(),StatusCode::OK);
+    let bytes=axum::body::to_bytes(response.into_body(),65536).await.unwrap();let reply:serde_json::Value=serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(reply["success"],true,"{reply}");let after=&reply["status"]["capture"];
+    assert_eq!(after["stage"],"paused");assert_eq!(after["durability_pending"],false);assert!(after["failure"].is_null());
+    assert_eq!(after["capture_generation_id"],before["capture"]["capture_generation_id"]);assert_eq!(after["original_deadline"],before["capture"]["original_deadline"]);
+    assert_eq!(after["retained_windows"],0);assert_eq!(after["durable_windows"],0);assert_eq!(after["observed_ms"],0);
 }

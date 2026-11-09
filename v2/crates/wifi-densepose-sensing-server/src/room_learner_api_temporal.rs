@@ -80,6 +80,7 @@ pub(crate) async fn status_dispatch(
         Ok(rt) => rt,
         Err(e) => return e,
     };
+    if let Err(e)=rt.temporal_default_operator_profile_v2(){return failure("learner_profile_unavailable",e);}
     temporal_status(&state, &rt).await
 }
 fn temporal_selection(
@@ -175,7 +176,7 @@ pub(crate) async fn configure_dispatch(
     State(state): State<SharedState>,
     Json(command): Json<ConfigureCommand>,
 ) -> Json<serde_json::Value> {
-    let ConfigureCommand::Temporal(request) = command else {
+    let ConfigureCommand::Temporal(mut request) = command else {
         let ConfigureCommand::Legacy(request) = command else {
             unreachable!()
         };
@@ -201,6 +202,7 @@ pub(crate) async fn configure_dispatch(
         Ok(rt) => rt,
         Err(e) => return e,
     };
+    request.expected=match rt.temporal_select_profile_guarded_v2(request.profile_id.as_deref(),&request.expected){Ok(guard)=>guard,Err(e)=>return failure("learner_profile_rejected",e)};
     let s = state.read().await;
     if field_capture_active(&s) {
         return failure(
@@ -474,7 +476,7 @@ pub(crate) async fn restore_dispatch(
 ) -> Json<serde_json::Value> {
     match command {
         RestoreCommand::Legacy(request) => restore_capture(State(state), Json(request)).await,
-        RestoreCommand::Temporal(request) => {
+        RestoreCommand::Temporal(mut request) => {
             if let Err(e) = schema_matches(&request.schema, RECOVERY_RESTORE_REQUEST_SCHEMA) {
                 return e;
             }
@@ -482,6 +484,7 @@ pub(crate) async fn restore_dispatch(
                 Ok(rt) => rt,
                 Err(e) => return e,
             };
+            request.expected=match rt.temporal_select_profile_guarded_v2(request.profile_id.as_deref(),&request.expected){Ok(guard)=>guard,Err(e)=>return failure("learner_profile_rejected",e)};
             let now = now_ns(&rt);
             let context = match rt.temporal_recovery_context_v2(
                 &request.binding_digest,
@@ -617,4 +620,16 @@ pub(crate) async fn deselect_dispatch(
             }
         }
     }
+}
+
+
+pub(crate) async fn retry_dispatch(State(state):State<SharedState>,Json(request):Json<TemporalRetryRequestV2>)->Json<serde_json::Value>{
+    if let Err(e)=schema_matches(&request.schema,RECOVERY_RETRY_REQUEST_SCHEMA){return e;}
+    let rt=match runtime(&state).await{Ok(rt)=>rt,Err(e)=>return e};
+    {let s=state.read().await;if field_capture_active(&s){return failure("learner_capture_conflict","Finish active field calibration first.");}}
+    // Retry is metadata recovery, not capture. Its Runtime CAS still fences the
+    // owner/context/profile; never hold the UDP producer's SharedState lock
+    // across writer drain, filesystem barriers or cryptographic readback.
+    let result=rt.temporal_retry_v2(request,now_ns(&rt));
+    match result{Ok(())=>temporal_status(&state,&rt).await,Err(e)=>failure("learner_recovery_retry_failed",e)}
 }

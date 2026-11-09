@@ -239,10 +239,7 @@ impl RoomLearningRuntime {
         let executor = tokio::runtime::Handle::try_current()
             .map_err(|_| "temporal_fit_executor_unavailable")?;
         let store = self.store.clone();
-        let recovery = self
-            .recovery_store
-            .clone()
-            .ok_or("temporal_recovery_unavailable")?;
+        let recovery = self.temporal_store_arc()?;
         let retired_job;
         let retired_fit;
         let (input, identity, lifetime) = {

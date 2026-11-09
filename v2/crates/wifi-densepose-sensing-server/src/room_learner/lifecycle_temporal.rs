@@ -220,9 +220,11 @@ impl RoomLearningRuntime {
     pub(super) fn temporal_store(
         &self,
     ) -> Result<&super::super::recovery_store::RecoveryStore, String> {
-        self.recovery_store
-            .as_deref()
+        if self.operator_profile_selected.load(Ordering::Acquire) { self.operator_recovery_store.as_deref() } else { self.recovery_store.as_deref() }
             .ok_or("temporal_recovery_unavailable".into())
+    }
+    fn temporal_store_arc(&self) -> Result<Arc<super::super::recovery_store::RecoveryStore>, String> {
+        if self.operator_profile_selected.load(Ordering::Acquire) { self.operator_recovery_store.clone() } else { self.recovery_store.clone() }.ok_or("temporal_recovery_unavailable".into())
     }
     /// Deliberately PRIVATE: current public configure always constructs Legacy.
     /// Refuses to discard existing capture/candidate/selection/recovery state.
@@ -240,7 +242,7 @@ impl RoomLearningRuntime {
             now,
             |schedule, run, fit, now, _| {
                 // Existing-work guard precedes this off-lock producer.
-                let store=self.recovery_store.clone().ok_or("temporal_recovery_unavailable")?;
+                let store=self.temporal_store_arc()?;
                 TemporalTrainCapture::prepare_async(schedule, run, fit, now, store)
             },
         )
@@ -248,7 +250,7 @@ impl RoomLearningRuntime {
     /// Fresh genesis only; never upgrades a running old private capture.
     fn configure_temporal_full_run(&self,expected:&MutationGuard,context:CaptureContext,run:String,now:u64)->Result<(),String>{
         self.configure_temporal_capture_with_custody(expected,context,run,now,|s,r,f,n,_,w|{
-            let store=self.recovery_store.clone().ok_or("temporal_recovery_unavailable")?;
+            let store=self.temporal_store_arc()?;
             TemporalTrainCapture::prepare_full_run_async(s,r,f,n,store,w)
         })
     }
@@ -257,7 +259,7 @@ impl RoomLearningRuntime {
     /// metadata can chain a new343 generation in the SAME store.
     fn configure_fresh_train_343_capture(&self,expected:&MutationGuard,context:CaptureContext,run:String,now:u64)->Result<(),String>{
         self.configure_temporal_capture_with(expected,context,run,now,|schedule,run,fit,now,_|{
-            let store=self.recovery_store.clone().ok_or("temporal_recovery_unavailable")?;
+            let store=self.temporal_store_arc()?;
             TemporalTrainCapture::prepare_async_fresh_train_343(schedule,run,fit,now,store)
         })
     }
@@ -292,10 +294,7 @@ impl RoomLearningRuntime {
         {
             return Err("temporal_context_owner_or_clock".into());
         }
-        let schedule = ManagedScheduleContract::build(
-            context.clone(),
-            LeadInPolicy::Train5HeldOut15EngineeringV1,
-        )?;
+        let schedule = ManagedScheduleContract::build(context.clone(), if self.operator_profile_selected.load(Ordering::Acquire) { LeadInPolicy::OperatorEightStepV1 } else { LeadInPolicy::Train5HeldOut15EngineeringV1 })?;
         let fit = FitConfig::for_source_count(context.sources.len());
         fit.validate_context(&context)?;
         let mut state = self.command_state(expected)?;
@@ -589,9 +588,7 @@ impl RoomLearningRuntime {
             }
         };
         core.enable_async_restore(
-            self.recovery_store
-                .clone()
-                .ok_or("temporal_recovery_unavailable")?,
+            self.temporal_store_arc()?,
             now,
         )?;
         let mut state = self.inner.lock().map_err(|_| "learner state unavailable")?;
@@ -731,3 +728,38 @@ mod public_workflow;
 
 #[path="lifecycle_temporal_selection.rs"]
 pub(super) mod selected_control;
+
+impl RoomLearningRuntime {
+    fn retry_failed_temporal_capture(&self, expected:&MutationGuard, capture_generation:&str, now:u64) -> Result<(),String> {
+        let (snapshot,writer,context,post_guard,generation)={
+            let mut state=self.command_state(expected)?;
+            if busy(&state.job) {return Err("temporal_retry_operation_busy".into());}
+            let generation=state.generation;
+            let Some(CaptureWorkflow::Temporal(c))=state.capture.as_mut()else{return Err(PRIVATE_KIND.into())};
+            if c.owner_generation!=generation || c.fit_job.is_some() || c.evidence_job.is_some() {return Err("temporal_retry_operation_busy".into());}
+            let core=c.core.as_mut().ok_or("temporal_initial_barrier_unconfirmed")?;
+            if core.public_generation_id()!=capture_generation {return Err("learner_capture_identity_changed".into());}
+            let snapshot=core.failed_retry_state()?;
+            let writer=core.writer().ok_or("temporal_writer_required")?;
+            let context=c.context.clone();
+            (snapshot,writer,context,self.guard_for(&state),generation)
+        };
+        // Never join/repair/recertify while holding the ingress mutex. Terminal
+        // owner drain fences captured Writer Arcs before account erasure.
+        writer.reconcile_failed(now)?;
+        let at=self.receiver_now_ns().max(now);
+        let witness=FullRunRecoveryWitness{runtime_epoch:self.runtime_epoch.clone(),generation,context:context.clone()};
+        let mut core=TemporalTrainCapture::cold_restore_full_run(self.temporal_store()?,self.store.clone(),&context,at,&self.runtime_epoch,at,witness)?;
+        core.apply_failed_retry_state(snapshot,at)?;
+        core.enable_async_restore(self.temporal_store_arc()?,at)?;
+        let mut state=self.inner.lock().map_err(|_|"learner state unavailable")?;
+        if self.guard_for(&state)!=post_guard || state.generation!=generation || state.capture_context()!=Some(&context) {
+            drop(state);drop(core);return Err("learner_state_changed".into());
+        }
+        let Some(CaptureWorkflow::Temporal(c))=state.capture.as_mut()else{drop(state);drop(core);return Err("learner_state_changed".into())};
+        let retired=c.core.replace(core);c.lead_in_until=None;c.failure=None;c.last_now_ns=at;c.public_train_requested=false;
+        state.input_error=None;
+        drop(state);drop(retired);
+        Ok(())
+    }
+}

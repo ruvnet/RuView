@@ -36,9 +36,11 @@ pub struct LoadedRecovery {
 }
 pub struct RecoveryStore {
     directory: PathBuf,
+    owner_directory: PathBuf,
     owner: String,
     installation: String,
-    key: Option<aead::LessSafeKey>,
+    key: Option<std::sync::Arc<aead::LessSafeKey>>,
+    operator_key: Option<std::sync::Arc<aead::LessSafeKey>>,
     serial: Mutex<()>,
 }
 fn id(value: &str) -> bool {
@@ -114,6 +116,15 @@ fn managed_seed(stable: Option<&str>, value: Option<&str>) -> Option<[u8; 32]> {
     Some(bytes)
 }
 impl RecoveryStore {
+    /// Same account-owned recovery root, isolated ciphertext/key/commitment
+    /// namespace. Creating its empty private directory grants no capture consent.
+    pub(crate) fn operator_eight_scope(&self) -> Result<Self, String> {
+        self.verify_directory()?;
+        if self.directory!=self.owner_directory.join("room-learner-recovery"){return Err("recovery_profile_scope_invalid".into());}
+        let directory = self.directory.join("operator-eight-step-v1");
+        private_directory(&directory)?;
+        Ok(Self { directory, owner_directory:self.owner_directory.clone(), owner:self.owner.clone(), installation:self.installation.clone(), key:self.operator_key.clone(), operator_key:None, serial:Mutex::new(()) })
+    }
     pub fn new(
         data_dir: &Path,
         owner: &str,
@@ -171,12 +182,28 @@ impl RecoveryStore {
                 material.fill(0);
                 result
             })
-            .transpose()?;
+            .transpose()?.map(std::sync::Arc::new);
+        // Purpose-separated key for the explicitly versioned operator plan;
+        // old ciphertext and its derivation remain unchanged/readable.
+        let operator_key = seed.map(|seed| {
+            let mut info = Vec::new();
+            for item in [b"ruview.capture-recovery.operator-eight-step.aes256gcm.v1".as_slice(), owner.as_bytes(), installation.as_bytes()] {
+                info.extend_from_slice(&(item.len() as u32).to_be_bytes()); info.extend_from_slice(item);
+            }
+            let salt = hkdf::Salt::new(hkdf::HKDF_SHA256, b"ruview.capture-recovery.hkdf.v1");
+            let prk = salt.extract(seed); let infos = [info.as_slice()];
+            let okm = prk.expand(&infos, &aead::AES_256_GCM).map_err(|_| "recovery_key_unavailable")?;
+            let mut material = [0u8; 32]; okm.fill(&mut material).map_err(|_| "recovery_key_unavailable")?;
+            let result = aead::UnboundKey::new(&aead::AES_256_GCM, &material).map(aead::LessSafeKey::new).map(std::sync::Arc::new).map_err(|_| "recovery_key_unavailable");
+            material.fill(0); result
+        }).transpose()?;
         Ok(Self {
             directory,
+            owner_directory:owned,
             owner: owner.into(),
             installation: installation.into(),
             key,
+            operator_key,
             serial: Mutex::new(()),
         })
     }
@@ -202,7 +229,7 @@ impl RecoveryStore {
         self.key.is_some()
     }
     fn verify_directory(&self) -> Result<(), String> {
-        let owned = self.directory.parent().ok_or("recovery_owner_mismatch")?;
+        let owned = self.owner_directory.as_path();
         for (path, is_directory) in [
             (owned.to_path_buf(), true),
             (owned.join("account-owner-v1.json"), false),
@@ -227,14 +254,16 @@ impl RecoveryStore {
         if verified != owned {
             return Err("recovery_owner_mismatch".into());
         }
+        private_directory(&owned.join("room-learner-recovery"))?;
+        if self.directory!=owned.join("room-learner-recovery")&&self.directory!=owned.join("room-learner-recovery/operator-eight-step-v1"){return Err("recovery_profile_scope_invalid".into());}
         private_directory(&self.directory)
     }
     /// Non-repairing owner validation for read-scoped status discovery.
     /// Unlike prepare_directory this never creates directories or chmods them.
     fn verify_directory_read_only(&self)->Result<(),String>{
-        let owned=self.directory.parent().ok_or("recovery_owner_mismatch")?;
+        let owned=self.owner_directory.as_path();
         if !hex(&self.owner)||owned.file_name().and_then(|v|v.to_str())!=Some("SensingServer")||owned.parent().and_then(Path::file_name).and_then(|v|v.to_str())!=Some(self.owner.as_str())||owned.canonicalize().map_err(|_|"recovery_owner_mismatch")?!=owned{return Err("recovery_owner_mismatch".into());}
-        for(path,directory)in[(owned.to_path_buf(),true),(owned.join("account-owner-v1.json"),false),(self.directory.clone(),true)]{
+        for(path,directory)in[(owned.to_path_buf(),true),(owned.join("account-owner-v1.json"),false),(owned.join("room-learner-recovery"),true),(self.directory.clone(),true)]{
             let m=fs::symlink_metadata(&path).map_err(|_|"recovery_owner_mismatch")?;
             if m.file_type().is_symlink()||(directory&&!m.is_dir())||(!directory&&!m.is_file()){return Err("recovery_unsafe_owner_path".into());}private_metadata(&m,directory)?;
         }
