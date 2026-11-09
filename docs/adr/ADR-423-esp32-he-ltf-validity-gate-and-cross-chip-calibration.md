@@ -192,7 +192,9 @@ This tightens the repository's existing rule; it doesn't replace it.
 From a clone, against an ESP32-C6 on an 11ax AP:
 
 ```bash
-git apply docs/adr/ADR-423/he-quality-diag.patch
+# --3way: the patch was cut before D1 landed. The overlay sets
+# CSI_HE_INVALID_POLICY_PASS so vld=0 frames still reach the diagnostic.
+git apply --3way docs/adr/ADR-423/he-quality-diag.patch
 cp docs/adr/ADR-423/sdkconfig.diag.overlay firmware/esp32-csi-node/
 MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd)/firmware/esp32-csi-node:/project" -w /project \
   espressif/idf:v5.5.2 bash -c "cat sdkconfig.defaults sdkconfig.defaults.esp32c6 \
