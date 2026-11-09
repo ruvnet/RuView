@@ -12,6 +12,8 @@ use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
+mod node_labels;
+pub(crate) use node_labels::Update as NodeLabelsUpdate;
 const MAX_SAFE: u64 = 9_007_199_254_740_991;
 const SLOTS: &[&str] = &[
     "north_west",
@@ -33,6 +35,7 @@ pub struct Envelope {
 }
 pub struct SharedRoomStore {
     path: PathBuf,
+    labels: node_labels::Labels,
     current: Mutex<Envelope>,
     worldgraph_cursor: Mutex<crate::managed_worldgraph::Cursor>,
 }
@@ -199,6 +202,10 @@ fn digest(room: &Value, installation: &str, revision: u64) -> String {
 }
 impl SharedRoomStore {
     pub fn load(dir: &Path, installation_id: &str) -> std::io::Result<Arc<Self>> {
+        Self::load_for_account(dir, installation_id, None)
+    }
+    pub fn load_for_account(dir: &Path, installation_id: &str, owner_scope: Option<&str>) -> std::io::Result<Arc<Self>> {
+        if owner_scope.is_some_and(|scope| scope.len() != 64 || !scope.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))) { return Err(invalid()); }
         if !text(&json!(installation_id), 1, 128) {
             return Err(invalid());
         }
@@ -239,6 +246,7 @@ impl SharedRoomStore {
             Err(e) => return Err(e),
         };
         Ok(Arc::new(Self {
+            labels: node_labels::Labels::load(dir, installation_id, owner_scope),
             path,
             current: Mutex::new(current),
             worldgraph_cursor: Mutex::new(crate::managed_worldgraph::Cursor::default()),

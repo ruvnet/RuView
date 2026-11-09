@@ -93,7 +93,7 @@ impl Integration {
                 .map_err(std::io::Error::other)?,
             )
         };
-        let room = companion_room::SharedRoomStore::load(&dir, &identity.installation_id)?;
+        let room = companion_room::SharedRoomStore::load_for_account(&dir, &identity.installation_id, auth.owner_account_scope())?;
         state.write().await.current_room_store = Some(room.clone());
         let control = Control {
             state: state.clone(),
@@ -121,6 +121,7 @@ impl Integration {
         companion::owner_router(self.service.clone())
             .merge(companion_sensors::owner_router(self.sensors.clone()))
             .merge(companion_room::owner_router(self.room.clone()))
+            .merge(node_labels_router(self.room.clone(), self.control.state.clone(), true))
             .merge(self.spatial.as_ref().map(|s| companion_spatial::owner_router(s.clone())).unwrap_or_default())
             .layer(axum::middleware::from_fn_with_state(
                 self.control.clone(),
@@ -138,10 +139,11 @@ impl Integration {
                 serialize_control,
             ))
     }
-    pub async fn start(self, app: Router) {
-        let app = attach_peer_artifacts(
+    fn peer_router(&self, app: Router) -> Router {
+        attach_peer_artifacts(
             app.merge(companion_sensors::companion_router(self.sensors.clone()))
-                .merge(companion_room::read_router(self.room.clone())),
+                .merge(companion_room::read_router(self.room.clone()))
+                .merge(node_labels_router(self.room.clone(), self.control.state.clone(), false)),
             self.spatial.as_ref().map(|s| companion_spatial::peer_router(s.clone())).unwrap_or_default(),
             self.control.clone(),
         )
@@ -149,9 +151,12 @@ impl Integration {
                 self.service.clone(),
                 require_companion,
             ))
-            .merge(companion::public_router(self.service))
-            .layer(axum::middleware::from_fn_with_state(self.auth, companion::require_account_ownership))
-            .layer(axum::extract::DefaultBodyLimit::max(64 * 1024));
+            .merge(companion::public_router(self.service.clone()))
+            .layer(axum::middleware::from_fn_with_state(self.auth.clone(), companion::require_account_ownership))
+            .layer(axum::extract::DefaultBodyLimit::max(64 * 1024))
+    }
+    pub async fn start(self, app: Router) {
+        let app = self.peer_router(app);
         tokio::spawn(async move {
             let _advertiser = self.advertiser;
             if let Err(error) = companion_tls::serve(self.listener, self.tls, app).await {
@@ -160,6 +165,94 @@ impl Integration {
         });
     }
 }
+// Cosmetic metadata is attached only to the matching listener, never the shared
+// pre-clone app: a TLS peer must not inherit the owner PUT handler.
+#[derive(Clone)]
+struct NodeLabelsControl {
+    room: Arc<companion_room::SharedRoomStore>,
+    state: SharedState,
+}
+fn node_labels_error(status: StatusCode) -> Response {
+    let code = match status {
+        StatusCode::BAD_REQUEST => "invalid_request",
+        StatusCode::CONFLICT => "conflict",
+        StatusCode::FORBIDDEN => "forbidden",
+        _ => "labels_unavailable",
+    };
+    (status, Json(serde_json::json!({"schema":"ruview.companion.room-node-labels.v1","success":false,"error_code":code}))).into_response()
+}
+fn labels_allowed(state: &SharedState) -> bool {
+    // A contended state is unavailable, never authority borrowed after an await.
+    state.try_read().is_ok_and(|s| !s.privacy_mode)
+}
+fn labels_grant_current(grant: Option<&Grant>) -> bool {
+    grant.is_none_or(|g| {
+        !*g.revoked.borrow() && g.expires_at > chrono::Utc::now().timestamp().max(0) as u64
+    })
+}
+async fn node_labels_admission(
+    State(control): State<NodeLabelsControl>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let grant = request.extensions().get::<Grant>().cloned();
+    if control.state.read().await.privacy_mode || !labels_grant_current(grant.as_ref()) {
+        return node_labels_error(StatusCode::FORBIDDEN);
+    }
+    let response = next.run(request).await;
+    if control.state.read().await.privacy_mode || !labels_grant_current(grant.as_ref()) {
+        return node_labels_error(StatusCode::FORBIDDEN);
+    }
+    response
+}
+async fn read_node_labels(State(control): State<NodeLabelsControl>) -> Response {
+    match control.room.node_labels_snapshot() {
+        Ok(value) => Json(value).into_response(),
+        Err(status) => node_labels_error(status),
+    }
+}
+async fn put_node_labels(
+    State(control): State<NodeLabelsControl>,
+    body: axum::body::Bytes,
+) -> Response {
+    let request = match serde_json::from_slice::<companion_room::NodeLabelsUpdate>(&body) {
+        Ok(request) => request,
+        Err(_) => return node_labels_error(StatusCode::BAD_REQUEST),
+    };
+    // Serialized file IO is off the async executor and all AppState/room locks.
+    let result = tokio::task::spawn_blocking(move || {
+        control
+            .room
+            .update_node_labels(request, || labels_allowed(&control.state))
+    })
+    .await;
+    match result {
+        Ok(Ok(value)) => Json(value).into_response(),
+        Ok(Err(status)) => node_labels_error(status),
+        Err(_) => node_labels_error(StatusCode::SERVICE_UNAVAILABLE),
+    }
+}
+fn node_labels_router(
+    room: Arc<companion_room::SharedRoomStore>,
+    state: SharedState,
+    owner: bool,
+) -> Router {
+    let control = NodeLabelsControl { room, state };
+    let methods = if owner {
+        axum::routing::get(read_node_labels).put(put_node_labels)
+    } else {
+        axum::routing::get(read_node_labels)
+    };
+    Router::new()
+        .route("/api/v1/companion/room/node-labels", methods)
+        .layer(axum::extract::DefaultBodyLimit::max(8 * 1024))
+        .layer(axum::middleware::from_fn_with_state(
+            control.clone(),
+            node_labels_admission,
+        ))
+        .with_state(control)
+}
+
 // Existing calibration routes already use protect_control. Layering their
 // router a second time would reacquire the same non-reentrant mutex.
 fn attach_peer_artifacts(app: Router, artifacts: Router, control: Control) -> Router {
@@ -263,6 +356,7 @@ fn policy(method: &axum::http::Method, path: &str) -> Option<bool> {
                 | "/api/v1/calibration/status"
                 | "/api/v1/pose/calibration/status"
                 | "/ws/sensing"
+                | "/api/v1/companion/room/node-labels"
                 | "/companion/v1/room"
                 | "/companion/v1/sensors"
                 | "/companion/v1/spatial"
@@ -463,3 +557,7 @@ mod tests {
 #[cfg(test)]
 #[path = "paired_progress_auth_tests.rs"]
 mod paired_progress_auth_tests;
+
+#[cfg(test)]
+#[path = "paired_node_labels_tests.rs"]
+mod paired_node_labels_tests;
