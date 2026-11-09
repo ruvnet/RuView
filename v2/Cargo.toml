@@ -3,7 +3,7 @@ resolver = "2"
 members = [
     # Checksum-verified dependency patches; keep their upstream tests in CI.
     "vendor/security/zip-0.6.6",
-    "vendor/security/wasmtime-internal-cache-36.0.19",
+    "vendor/security/wasmtime-internal-cache-36.0.20",
     "crates/wifi-densepose-core",
     "crates/wifi-densepose-physics", # ADR-323 bounded pose assessment/correction
     "crates/wifi-densepose-signal",
@@ -346,4 +346,4 @@ debug = true
 # See each directory's RUVIEW-PROVENANCE.md for archive digests and scope.
 [patch.crates-io]
 zip-legacy = { package = "zip", path = "vendor/security/zip-0.6.6" }
-wasmtime-internal-cache = { path = "vendor/security/wasmtime-internal-cache-36.0.19" }
+wasmtime-internal-cache = { path = "vendor/security/wasmtime-internal-cache-36.0.20" }
