@@ -98,6 +98,9 @@ fn temporal_selection(
             }),
         None => rt.temporal_selection_v2(now, None, Some(&state.calibration_boot_epoch)),
     }?;
+    validate_temporal_selection(projection)
+}
+fn validate_temporal_selection(projection: serde_json::Value) -> Result<serde_json::Value, String> {
     if projection["schema"] != SELECTION_SCHEMA
         || projection["success"] != true
         || projection["model_selection"]["schema"] != SELECTION_STATUS_SCHEMA
@@ -110,22 +113,88 @@ async fn temporal_status(
     state: &SharedState,
     rt: &Arc<RoomLearningRuntime>,
 ) -> Json<serde_json::Value> {
-    // Polling a durable ACK advances the capture clock. Serialize before
-    // sampling receiver time, just like native ingress and owner mutations.
-    let state = state.write().await;
-    if state.privacy_mode {
-        return failure(
-            "learner_privacy_mode",
-            "Room learning unavailable in privacy mode.",
-        );
+    temporal_status_with_reader(state, rt, |reader, now| reader.temporal_status_snapshot_v2(now)).await
+}
+// The reader seam keeps the blocking boundary explicit and allows a
+// deterministic concurrency regression without a production runtime hook.
+pub(super) async fn temporal_status_with_reader<F>(
+    state: &SharedState,
+    rt: &Arc<RoomLearningRuntime>,
+    read_snapshot: F,
+) -> Json<serde_json::Value>
+where
+    F: FnOnce(Arc<RoomLearningRuntime>, u64) -> Result<serde_json::Value, String> + Send + 'static,
+{
+    // Concurrent polls wait as async futures, without owning an RF lock or
+    // spawning another blocking worker. Explicit cancellation removes a waiter.
+    let permit = match rt.acquire_temporal_status_reader().await {
+        Ok(permit) => permit,
+        Err(error) => return failure("learner_status_unavailable", error),
+    };
+    // Clock advancement stays ordered with native ingress, but recovery disk
+    // discovery must never hold the shared RF lock while waiting on fsync.
+    let (now, expected, room_store, room_binding, boot_epoch) = {
+        let current = state.write().await;
+        if current.privacy_mode {
+            return failure("learner_privacy_mode", "Room learning unavailable in privacy mode.");
+        }
+        if !current.room_learning.as_ref().is_some_and(|live| Arc::ptr_eq(live, rt)) {
+            return failure("learner_state_changed", "learner_state_changed");
+        }
+        let now = now_ns(rt);
+        if let Err(error) = rt.temporal_poll_status_v2(now) {
+            return failure("learner_status_unavailable", error);
+        }
+        let expected = match rt.mutation_guard() {
+            Ok(expected) => expected,
+            Err(error) => return failure("learner_status_unavailable", error),
+        };
+        let room_binding = match current.current_room_store.as_ref().map(|room| room.current_binding_digest()).transpose() {
+            Ok(binding) => binding,
+            Err(_) => return failure("learner_state_changed", "current_room_binding_unavailable"),
+        };
+        (now, expected, current.current_room_store.clone(), room_binding, current.calibration_boot_epoch.clone())
+    };
+    let reader = rt.clone();
+    let read_binding = room_binding.clone();
+    let read_epoch = boot_epoch.clone();
+    let snapshot = tokio::task::spawn_blocking(move || {
+        // Cancellation of the awaiting HTTP request cannot drop this permit.
+        let _permit = permit;
+        let mut status = read_snapshot(reader.clone(), now)?;
+        let projection = reader.temporal_selection_v2(now, read_binding.as_ref().and_then(|binding| binding.as_deref()), Some(&read_epoch))?;
+        status["model_selection"] = validate_temporal_selection(projection)?["model_selection"].clone();
+        Ok::<_, String>(status)
+    }).await;
+    let current = state.write().await;
+    if current.privacy_mode {
+        return failure("learner_privacy_mode", "Room learning unavailable in privacy mode.");
     }
-    let now = now_ns(rt);
-    match rt.temporal_status_v2(now).and_then(|mut status| {
-        status["model_selection"] = temporal_selection(&state, rt, now)?["model_selection"].clone();
+    let same_room_store = match (&room_store, &current.current_room_store) {
+        (None, None) => true,
+        (Some(before), Some(after)) => Arc::ptr_eq(before, after),
+        _ => false,
+    };
+    if !current.room_learning.as_ref().is_some_and(|live| Arc::ptr_eq(live, rt))
+        || !same_room_store
+        || current.calibration_boot_epoch != boot_epoch
+        || current.current_room_store.as_ref().map(|room| room.current_binding_digest()).transpose().ok().as_ref() != Some(&room_binding)
+        || rt.mutation_guard().as_ref() != Ok(&expected)
+    {
+        return failure("learner_state_changed", "learner_state_changed");
+    }
+    let result = match snapshot {
+        Ok(result) => result,
+        Err(_) => return failure("learner_status_unavailable", "learner_status_worker_unavailable"),
+    };
+    match result.and_then(|status| {
+        if status["mutation_guard"] != serde_json::to_value(&expected).map_err(|_| "learner_status_guard_invalid")? {
+            return Err("learner_state_changed".into());
+        }
         Ok(status)
     }) {
         Ok(status) => Json(serde_json::json!({"success":true,"status":status})),
-        Err(e) => failure("learner_status_unavailable", e),
+        Err(error) => failure("learner_status_unavailable", error),
     }
 }
 async fn operation_status(

@@ -425,7 +425,18 @@ impl RoomLearningRuntime {
         self.start_temporal_evidence(&request.expected, now, EvidencePurpose::HeldOutEvaluation)
             .map(|attempt| attempt.to_string())
     }
+    /// The permit must live inside the blocking read, not its cancellable HTTP
+    /// future: one stuck filesystem read cannot accumulate retry workers.
+    pub async fn acquire_temporal_status_reader(&self) -> Result<tokio::sync::OwnedSemaphorePermit, String> {
+        self.status_reader.clone().acquire_owned().await.map_err(|_| "learner_status_reader_unavailable".into())
+    }
     pub fn temporal_status_v2(self: &Arc<Self>, now: u64) -> Result<Value, String> {
+        self.temporal_poll_status_v2(now)?;
+        self.temporal_status_snapshot_v2(now)
+    }
+    /// Caller serializes this clock-advancing poll with live ingress. No disk
+    /// discovery runs here; it belongs in the separately fenced snapshot.
+    pub fn temporal_poll_status_v2(self: &Arc<Self>, now: u64) -> Result<(), String> {
         // ACKs may already be ready. This tick does not issue new consent,
         // source samples, fit/proof/evaluation jobs or immutable metadata writes.
         let temporal = {
@@ -435,6 +446,11 @@ impl RoomLearningRuntime {
         if temporal {
             let _ = self.tick_temporal_capture(&self.mutation_guard()?, now);
         }
+        Ok(())
+    }
+    /// Read-only recovery discovery may wait for a durable writer. Callers
+    /// must not hold the shared RF ingress lock across this operation.
+    pub fn temporal_status_snapshot_v2(self: &Arc<Self>, now: u64) -> Result<Value, String> {
         let (generation,workflow_revision,operator_profile) = {
             let state=self.inner.lock().map_err(|_| "learner state unavailable")?;
             (state.generation,state.workflow_revision,self.operator_profile_selected.load(Ordering::Acquire))

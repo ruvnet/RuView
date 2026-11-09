@@ -13,7 +13,7 @@ use wifi_densepose_sensing_server::room_learner::{
 #[path = "room_learner_ingress.rs"]
 mod ingress;
 use ingress::native_candidates;
-pub(super) use ingress::{observe, LiveSource, NativeSourceKey};
+pub(super) use ingress::{observe, observe_with_receiver_timing, ReceiverIngressTiming, LiveSource, NativeSourceKey};
 
 fn failure(code: &str, error: impl ToString) -> Json<serde_json::Value> {
     let message = error.to_string();

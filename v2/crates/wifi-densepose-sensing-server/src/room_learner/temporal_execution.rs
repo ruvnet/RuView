@@ -837,3 +837,25 @@ impl TemporalWorkflow {
         Ok(())
     }
 }
+
+
+/// Failure-only receiver pipeline metadata. No clock value or RF row is exported.
+/// Unknown/oversized durations stay unknown; the original failure is never cut.
+pub(crate) fn receiver_pipeline_failure_detail(
+    primary: &str,
+    durations: [Option<u32>; 4],
+) -> Option<String> {
+    if primary.len() > 256 || !primary.starts_with("temporal_observed_gap_or_rate:") { return None; }
+    const KEYS: [&str; 4] = ["deq_us", "parse_us", "lock_us", "stamp_age_us"];
+    let digits = |value: Option<u32>| -> usize { value.map_or(2, |n| if n == 0 { 1 } else { n.ilog10() as usize + 1 }) };
+    let length = primary.len() + KEYS.iter().zip(durations).map(|(key, value)| key.len() + 2 + digits(value)).sum::<usize>();
+    if length > 256 { return None; }
+    let mut detail = String::with_capacity(length);
+    detail.push_str(primary);
+    for (key, value) in KEYS.iter().zip(durations) {
+        detail.push(' '); detail.push_str(key); detail.push('=');
+        if let Some(value) = value { use std::fmt::Write; write!(&mut detail, "{value}").ok()?; }
+        else { detail.push_str("na"); }
+    }
+    Some(detail)
+}

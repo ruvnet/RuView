@@ -1082,6 +1082,13 @@ impl TemporalTrainCapture {
             .len();
         Ok(())
     }
+    /// Metadata-only update after the exact packet has already failed admission.
+    pub(crate) fn annotate_receiver_failure(&mut self, expected: &str, detail: String) -> bool {
+        if self.stage() != TemporalCaptureStage::Failed || self.failure.as_deref() != Some(expected)
+            || detail.len() > 256 || !detail.starts_with(expected) { return false; }
+        self.failure = Some(detail);
+        true
+    }
     pub(crate) fn invalidate(&mut self, reason: &str) {
         if let Some(state)=&self.workflow.async_state{state.writer.cancel();}
         self.failure = Some(
@@ -1259,3 +1266,7 @@ impl TemporalTrainCapture {
 impl TemporalTrainCapture {
     pub(crate) fn test_corrupt_retry_prefix(&mut self){self.workflow.async_state.as_mut().unwrap().row_prefix_sha256=Some("f".repeat(64));}
 }
+
+#[cfg(test)]
+#[path = "receiver_failure_annotation_tests.rs"]
+mod receiver_failure_annotation_tests;

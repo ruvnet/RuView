@@ -1,5 +1,37 @@
 //! Managed capture controls and source/provenance admission.
 use super::*;
+
+/// Transient metadata for one exact native packet. Deliberately not Serialize.
+/// Relative receiver durations are not a source measurement clock.
+///
+/// ```compile_fail
+/// use wifi_densepose_sensing_server::room_learner::lifecycle::ReceiverPipelineTiming;
+/// fn requires_serialize<T: serde::Serialize>() {}
+/// requires_serialize::<ReceiverPipelineTiming<'static>>();
+/// ```
+#[derive(Clone, Copy)]
+pub struct ReceiverPipelineTiming<'a> {
+    source_id: u8,
+    sequence: u32,
+    frame_id: u128,
+    grid_id: &'a str,
+    frequency_hz: u64,
+    bandwidth_hz: u64,
+    durations: [Option<u32>; 4],
+}
+impl<'a> ReceiverPipelineTiming<'a> {
+    pub fn for_packet(packet: &'a crate::room_learner::native::CanonicalPacket,
+        dequeue_interval_us: Option<u32>, parse_us: Option<u32>, state_lock_wait_us: Option<u32>, dequeue_to_stamp_us: Option<u32>) -> Self {
+        Self { source_id: packet.source_id, sequence: packet.sequence, frame_id: packet.native_frame.frame_id,
+            grid_id: &packet.grid_id, frequency_hz: packet.frequency_hz, bandwidth_hz: packet.bandwidth_hz,
+            durations: [dequeue_interval_us, parse_us, state_lock_wait_us, dequeue_to_stamp_us] }
+    }
+    fn failure_detail(&self, packet: &crate::room_learner::native::CanonicalPacket, primary: &str) -> Option<String> {
+        if self.source_id != packet.source_id || self.sequence != packet.sequence || self.frame_id != packet.native_frame.frame_id
+            || self.grid_id != packet.grid_id || self.frequency_hz != packet.frequency_hz || self.bandwidth_hz != packet.bandwidth_hz { return None; }
+        crate::room_learner::temporal_model_input::managed::execution::receiver_pipeline_failure_detail(primary, self.durations)
+    }
+}
 impl RoomLearningRuntime {
     pub fn bind_context(
         &self,
@@ -88,6 +120,14 @@ impl RoomLearningRuntime {
         packet: &crate::room_learner::native::CanonicalPacket,
         now_ns: u64,
     ) -> Result<(), String> {
+        self.ingest_native_with_receiver_timing(packet, now_ns, None)
+    }
+    pub fn ingest_native_with_receiver_timing(
+        &self,
+        packet: &crate::room_learner::native::CanonicalPacket,
+        now_ns: u64,
+        receiver_timing: Option<ReceiverPipelineTiming<'_>>,
+    ) -> Result<(), String> {
         if packet.provenance
             != crate::room_learner::observation::CaptureProvenance::LiveReceiverObserved
             || packet.native_frame.provenance.class
@@ -118,7 +158,12 @@ impl RoomLearningRuntime {
         let owner_generation=state.generation;
         if let Some(CaptureWorkflow::Temporal(capture)) = state.capture.as_mut() {
             if capture.owner_generation()!=owner_generation {capture.invalidate_owner();return Err("temporal_owner_generation_changed".into());}
-            let result = capture.ingest(self.temporal_store()?, &self.runtime_epoch, packet, now_ns,&mut retired);
+            let mut result = capture.ingest(self.temporal_store()?, &self.runtime_epoch, packet, now_ns,&mut retired);
+            if let (Err(primary), Some(timing)) = (&result, receiver_timing) {
+                if let Some(detail) = timing.failure_detail(packet, primary) {
+                    if capture.annotate_receiver_failure(primary, detail.clone()) { result = Err(detail); }
+                }
+            }
             #[cfg(test)] if retired.has_ack() && self.panic_after_reclamation_ack.swap(false,Ordering::AcqRel){panic!("synthetic panic after actual ACK admission");}
             if let Err(error) = &result { state.input_error = Some(bounded(error.clone())); }
             return result;
@@ -253,3 +298,7 @@ impl RoomLearningRuntime {
         Ok(state.job.phase)
     }
 }
+
+#[cfg(test)]
+#[path = "receiver_pipeline_timing_tests.rs"]
+mod receiver_timing_tests;

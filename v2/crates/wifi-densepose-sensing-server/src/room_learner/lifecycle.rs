@@ -94,6 +94,7 @@ pub struct RoomLearningRuntime {
     operator_recovery_store: Option<std::sync::Arc<super::recovery_store::RecoveryStore>>,
     operator_profile_selected: AtomicBool,
     operator_profile_initialized: AtomicBool,
+    status_reader: Arc<tokio::sync::Semaphore>,
     inner: Mutex<Inner>,
     #[cfg(test)]
     reclamation_probe:Mutex<Option<Arc<dyn Fn(super::temporal_model_input::managed::execution::ReclamationStats)+Send+Sync>>>,
@@ -203,6 +204,7 @@ impl RoomLearningRuntime {
             operator_recovery_store,
             operator_profile_selected: AtomicBool::new(false),
             operator_profile_initialized: AtomicBool::new(false),
+            status_reader: Arc::new(tokio::sync::Semaphore::new(1)),
             #[cfg(test)] reclamation_probe:Mutex::new(None),
             #[cfg(test)] panic_after_reclamation_ack:AtomicBool::new(false),
             #[cfg(test)] temporal_fit_hook:Mutex::new(None),
@@ -528,6 +530,7 @@ mod tests;
 
 #[path = "lifecycle_capture.rs"]
 mod capture_control;
+pub use capture_control::ReceiverPipelineTiming;
 
 #[path = "command.rs"]
 mod command;

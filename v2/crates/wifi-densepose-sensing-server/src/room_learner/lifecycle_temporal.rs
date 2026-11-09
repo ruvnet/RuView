@@ -182,6 +182,10 @@ impl RuntimeTemporalCapture {
             _ => Ok(()), // No automatic start, confirmation or new phase from packet arrival.
         }
     }
+    /// Annotates only the already failed current capture; no failure transition is rerun.
+    pub(super) fn annotate_receiver_failure(&mut self, expected: &str, detail: String) -> bool {
+        self.core.as_mut().is_some_and(|core| core.annotate_receiver_failure(expected, detail))
+    }
     pub(super) fn reject(&mut self, source_id: u8, grid_id: &str, reason: &str) {
         if self
             .context

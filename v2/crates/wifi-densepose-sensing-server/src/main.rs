@@ -13438,6 +13438,8 @@ async fn udp_receiver_task(
     loop {
         match socket.recv_from(&mut buf).await {
             Ok((len, src)) => {
+                // Host dequeue coordinate only, not kernel or RF measurement time.
+                let receiver_dequeued_at = std::time::Instant::now();
                 UDP_INGRESS
                     .datagrams
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -14032,13 +14034,18 @@ async fn udp_receiver_task(
                     continue;
                 }
 
-                if let Some(frame) = parse_esp32_frame(&buf[..len]) {
+                let receiver_parse_started_at = std::time::Instant::now();
+                let csi_frame = parse_esp32_frame(&buf[..len]);
+                let receiver_parse_finished_at = std::time::Instant::now();
+                if let Some(frame) = csi_frame {
                     debug!(
                         "ESP32 frame from {src}: node={}, subs={}, seq={}",
                         frame.node_id, frame.n_subcarriers, frame.sequence
                     );
 
+                    let receiver_lock_requested_at = std::time::Instant::now();
                     let mut s = state.write().await;
+                    let receiver_lock_acquired_at = std::time::Instant::now();
                     s.source = "esp32".to_string();
                     let observed_at = std::time::Instant::now();
                     s.last_esp32_frame = Some(observed_at);
@@ -14047,7 +14054,10 @@ async fn udp_receiver_task(
                         .entry(frame.node_id)
                         .or_insert_with(NodeState::new)
                         .observe_raw_grid(grid_key, observed_at);
-                    room_learner_api::observe(&mut s, &frame, &buf[..len], observed_at);
+                    room_learner_api::observe_with_receiver_timing(&mut s, &frame, &buf[..len], observed_at,
+                        Some(room_learner_api::ReceiverIngressTiming::new(receiver_dequeued_at,
+                            receiver_parse_finished_at.checked_duration_since(receiver_parse_started_at),
+                            receiver_lock_acquired_at.checked_duration_since(receiver_lock_requested_at))));
 
                     // The field model owns a separate, frozen grid path. Feed
                     // it before the global inference grid gate so a stable
