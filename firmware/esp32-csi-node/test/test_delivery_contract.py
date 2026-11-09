@@ -96,6 +96,14 @@ class FirmwareDeliveryContractTests(unittest.TestCase):
                     verify_app(path, "1.2.3", target)
             with self.assertRaisesRegex(ValueError, "version"):
                 verify_app(path, "1.2.4", "esp32c5")
+    def test_additional_usb_onboarding_preserves_uart_and_limits_default_profiles(self) -> None:
+        for filename in ("sdkconfig.defaults.4mb", "sdkconfig.defaults.esp32c5"):
+            self.assertIn("CONFIG_RUVIEW_ONBOARDING_NATIVE_USB=y", (FIRMWARE_ROOT / filename).read_text())
+        self.assertIn("CONFIG_ESP_CONSOLE_UART_DEFAULT=y", (FIRMWARE_ROOT / "sdkconfig.defaults.esp32c5").read_text())
+        self.assertNotIn("CONFIG_RUVIEW_ONBOARDING_NATIVE_USB=y", (FIRMWARE_ROOT / "sdkconfig.defaults").read_text())
+        kconfig = (FIRMWARE_ROOT / "main/Kconfig.projbuild").read_text()
+        self.assertIn("depends on (IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32C5) && ESP_CONSOLE_UART", kconfig)
+
     def test_c6_uses_native_usb_serial_jtag_as_primary_console(self) -> None:
         config = (FIRMWARE_ROOT / "sdkconfig.defaults.esp32c6").read_text(encoding="utf-8")
         self.assertIn("CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y", config)
