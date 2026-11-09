@@ -19,6 +19,16 @@ menu "CSI Node Configuration"
             external antenna. Leave this disabled for generic ESP32-C6 boards
             because GPIO3 and GPIO14 may have unrelated functions there.
 
+    config C6_XIAO_MR60BHA2
+        bool "Use the Seeed XIAO ESP32-C6 MR60BHA2 carrier UART"
+        depends on IDF_TARGET_ESP32C6
+        default n
+        help
+            Enable only for the assembled Seeed MR60BHA2 kit with a XIAO
+            ESP32-C6. The carrier routes the radar UART to XIAO TX GPIO16 and
+            RX GPIO17. The standard C6 profile keeps the generic GPIO4/GPIO5
+            assignment so existing DevKit wiring is not changed.
+
     choice C6_XIAO_ANTENNA_PATH
         prompt "Seeed XIAO ESP32-C6 antenna path"
         depends on C6_XIAO_ANTENNA_SELECT
