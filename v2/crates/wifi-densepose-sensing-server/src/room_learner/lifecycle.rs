@@ -572,3 +572,5 @@ pub(crate) use temporal_control::FullRunRecoveryWitness;
 #[cfg(test)]
 #[path="lifecycle_legacy_byte_probe.rs"]
 mod legacy_byte_probe;
+
+pub use temporal_control::{ReferenceScope,TemporalComparisonReadback};

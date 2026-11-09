@@ -184,6 +184,25 @@ impl<'a> Accumulator<'a> {
 }
 impl EvaluationReport {
     pub(crate) fn compute(model: &RoomModel, rows: &[CaptureCohort]) -> Result<Self, String> {
+        Self::compute_inner(model, rows, false).map(|(report, _)| report)
+    }
+    /// Comparison recording is opt-in. Ordinary evaluation neither allocates a
+    /// prediction ledger nor hashes/retains per-cohort metadata.
+    pub(crate) fn compute_recorded(
+        model: &RoomModel,
+        rows: &[CaptureCohort],
+    ) -> Result<(Self, Vec<RoomPrediction>), String> {
+        let (report, predictions) = Self::compute_inner(model, rows, true)?;
+        Ok((
+            report,
+            predictions.ok_or("comparison predictions unavailable")?,
+        ))
+    }
+    fn compute_inner(
+        model: &RoomModel,
+        rows: &[CaptureCohort],
+        record: bool,
+    ) -> Result<(Self, Option<Vec<RoomPrediction>>), String> {
         model.validate()?;
         if rows.is_empty() || rows.len() > MAX_COHORTS {
             return Err("invalid bounded evaluation cohort count".into());
@@ -195,6 +214,7 @@ impl EvaluationReport {
         let mut ids = HashSet::new();
         let mut total = Accumulator::default();
         let mut conditions: [Accumulator; 4] = Default::default();
+        let mut predictions = record.then(|| Vec::with_capacity(rows.len()));
         let digest = model.context().digest();
         for row in rows {
             if row.role != role || row.label == RoomLabel::Unknown {
@@ -220,6 +240,9 @@ impl EvaluationReport {
                 .ok_or("unknown evaluation condition")?;
             total.observe(row, &prediction);
             conditions[condition].observe(row, &prediction);
+            if let Some(recorded) = &mut predictions {
+                recorded.push(prediction);
+            }
         }
         let summary = total.condition(RoomLabel::Unknown);
         let report = Self {
@@ -242,7 +265,7 @@ impl EvaluationReport {
             independence_verified: false,
         };
         report.validate()?;
-        Ok(report)
+        Ok((report, predictions))
     }
     pub(crate) fn validate(&self) -> Result<(), String> {
         if !(1..=MAX_COHORTS).contains(&self.samples)

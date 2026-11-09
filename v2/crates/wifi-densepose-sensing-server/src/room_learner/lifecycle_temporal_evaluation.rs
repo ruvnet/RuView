@@ -106,6 +106,12 @@ impl RoomLearningRuntime {
         now: u64,
         purpose: EvidencePurpose,
     ) -> Result<u64, String> {
+        self.start_temporal_evidence_with_references(expected, now, purpose, None)
+    }
+    pub(super) fn start_temporal_evidence_with_references(
+        self:&Arc<Self>, expected:&MutationGuard, now:u64, purpose:EvidencePurpose,
+        references:Option<crate::companion_references::ReferenceSnapshot>,
+    )->Result<u64,String>{
         let executor = tokio::runtime::Handle::try_current()
             .map_err(|_| "temporal_evaluation_executor_unavailable")?;
         let recovery = self
@@ -124,7 +130,7 @@ impl RoomLearningRuntime {
         executor.spawn_blocking(move || {
             let mut completion = completion;
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                Self::compute_temporal_evidence(&store, &recovery, input, &identity, &lifetime)
+                Self::compute_temporal_evidence(&store, &recovery, input, &identity, &lifetime, references)
             }))
             .unwrap_or_else(|_| Err("temporal_evaluation_worker_failed_safely".into()));
             completion.owner = completion.runtime.upgrade();
@@ -251,7 +257,7 @@ impl RoomLearningRuntime {
             lifetime: lifetime.clone(),
         };
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            Self::compute_temporal_evidence(&store, &recovery, input, &identity, &lifetime)
+            Self::compute_temporal_evidence(&store, &recovery, input, &identity, &lifetime, None)
         }))
         .unwrap_or_else(|_| Err("temporal_selection_worker_failed_safely".into()));
         let failure = result.as_ref().err().cloned();
@@ -273,6 +279,7 @@ impl RoomLearningRuntime {
         input: PendingTemporalEvidenceSource,
         identity: &EvidenceIdentity,
         lifetime: &FitLifetime,
+        references: Option<crate::companion_references::ReferenceSnapshot>,
     ) -> Result<EvidenceOutcome, String> {
         lifetime.at("evidence_before_validate");
         let now = lifetime.allowed()?;
@@ -370,15 +377,16 @@ impl RoomLearningRuntime {
                     .lock()
                     .map_err(|_| "temporal_evaluation_publication_unavailable")?;
                 lifetime.at("evidence_publication_entered");
-                let receipt = store.evaluate_temporal_snapshot(
-                    source,
-                    &lifetime.cancel,
-                    &mut || lifetime.allowed(),
-                    &mut |stage| {
-                        lifetime.allowed()?;
-                        lifetime.io(stage)
-                    },
-                )?;
+                let receipt = match references {
+                    Some(snapshot) => store.evaluate_temporal_snapshot_with_comparison(
+                        source, snapshot, &lifetime.cancel, &mut || lifetime.allowed(),
+                        &mut |stage| { lifetime.allowed()?; lifetime.io(stage) },
+                    )?,
+                    None => store.evaluate_temporal_snapshot(
+                        source, &lifetime.cancel, &mut || lifetime.allowed(),
+                        &mut |stage| { lifetime.allowed()?; lifetime.io(stage) },
+                    )?,
+                };
                 lifetime.allowed()?;
                 Ok(EvidenceOutcome::Evaluation(receipt))
             }

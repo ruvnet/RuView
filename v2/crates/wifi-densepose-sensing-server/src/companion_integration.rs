@@ -43,6 +43,7 @@ pub struct Integration {
     control: Control,
     sensors: companion_sensors::Shared,
     spatial: Option<Arc<companion_spatial::SpatialStore>>,
+    references: Option<companion_reference_api::ReferenceApi>,
     advertiser: Option<wifi_densepose_sensing_server::discovery::DiscoveryAdvertiser>,
 }
 impl Integration {
@@ -98,9 +99,18 @@ impl Integration {
         let control = Control {
             state: state.clone(),
             serial: Arc::new(tokio::sync::Mutex::new(())),
+            #[cfg(test)] publication_barrier:None,
         };
         let sensors = companion_sensors::SensorStore::new(service.clone());
         let spatial = auth.owner_account_scope().map(|scope| companion_spatial::SpatialStore::load(&dir, scope, &identity.installation_id, service.clone(), room.clone())).transpose()?;
+        // No new global activation flag: route availability grants no purpose.
+        // Explicit owner purpose + recording consent remain mandatory per device.
+        let references = if state.read().await.room_learning.is_some() {
+            let references = wifi_densepose_sensing_server::companion_references::ReferenceStore::new(service.clone());
+            references.spawn_expiry_sweeper();
+            state.write().await.calibration_references = Some(references.clone());
+            Some(companion_reference_api::ReferenceApi { state: state.clone(), room: room.clone(), references })
+        } else { None };
         Ok(Some(Self {
             service,
             authority,
@@ -112,13 +122,19 @@ impl Integration {
             control,
             sensors,
             spatial,
+            references,
         }))
     }
     pub fn authority(&self) -> &str {
         &self.authority
     }
     pub fn owner_router(&self) -> Router {
-        companion::owner_router(self.service.clone())
+        let pairing=match &self.references {
+            Some(reference)=>companion::owner_router(self.service.clone()).layer(Extension(reference.references.clone())),
+            None=>companion::owner_router(self.service.clone()),
+        };
+        pairing
+            .merge(self.references.as_ref().map(|r| companion_reference_api::owner_router(r.clone())).unwrap_or_default())
             .merge(companion_sensors::owner_router(self.sensors.clone()))
             .merge(companion_room::owner_router(self.room.clone()))
             .merge(self.spatial.as_ref().map(|s| companion_spatial::owner_router(s.clone())).unwrap_or_default())
@@ -140,7 +156,8 @@ impl Integration {
     }
     pub async fn start(self, app: Router) {
         let app = attach_peer_artifacts(
-            app.merge(companion_sensors::companion_router(self.sensors.clone()))
+            app.merge(self.references.as_ref().map(|r| companion_reference_api::peer_router(r.clone())).unwrap_or_default())
+                .merge(companion_sensors::companion_router(self.sensors.clone()))
                 .merge(companion_room::read_router(self.room.clone())),
             self.spatial.as_ref().map(|s| companion_spatial::peer_router(s.clone())).unwrap_or_default(),
             self.control.clone(),
@@ -170,6 +187,8 @@ fn attach_peer_artifacts(app: Router, artifacts: Router, control: Control) -> Ro
 struct Control {
     state: SharedState,
     serial: Arc<tokio::sync::Mutex<()>>,
+    #[cfg(test)]
+    publication_barrier:Option<Arc<(tokio::sync::Notify,tokio::sync::Notify)>>,
 }
 async fn serialize_control(
     State(control): State<Control>,
@@ -189,33 +208,53 @@ async fn serialize_control(
     }
     // Do not let a permitted phone hold the shared calibration lock while
     // streaming an unfinished body. Bound and time-limit it before locking.
-    let request = if artifact {
+    let mut publication_body=None;
+    let request = if artifact || publish {
         let (parts, body) = request.into_parts();
         let bytes = match tokio::time::timeout(std::time::Duration::from_secs(5), axum::body::to_bytes(body, 64 * 1024)).await {
             Ok(Ok(bytes)) => bytes,
             Ok(Err(_)) => return StatusCode::PAYLOAD_TOO_LARGE.into_response(),
             Err(_) => return StatusCode::REQUEST_TIMEOUT.into_response(),
         };
+        if publish {publication_body=Some(bytes.clone());}
         Request::from_parts(parts, axum::body::Body::from(bytes))
     } else { request };
     let _guard = control.serial.lock().await;
+    let mut publication_lease=None;
     if publish {
-        let state = control.state.read().await;
-        let now = chrono::Utc::now().timestamp_millis().max(0) as u64;
-        if state.field_model_status_at(now).is_some_and(|status| {
-            matches!(
-                status,
-                CalibrationStatus::Collecting | CalibrationStatus::Uncalibrated
-            )
-        }) {
-            return (
-                StatusCode::CONFLICT,
-                "Calibration is active; stop it before publishing another room revision",
-            )
-                .into_response();
+        let (room,references)={
+            let state=control.state.read().await;
+            let now=chrono::Utc::now().timestamp_millis().max(0) as u64;
+            if state.field_model_status_at(now).is_some_and(|status|matches!(status,CalibrationStatus::Collecting|CalibrationStatus::Uncalibrated)){
+                return (StatusCode::CONFLICT,"Calibration is active; stop it before publishing another room revision").into_response();
+            }
+            (state.current_room_store.clone(),state.calibration_references.clone())
+        };
+        if let Some(references)=references {
+            let Some(room)=room else{return StatusCode::CONFLICT.into_response();};
+            // An invalid or stale-CAS request must not discard reference rows.
+            let Some(bytes)=publication_body.as_ref() else{return StatusCode::BAD_REQUEST.into_response();};
+            if let Err(status)=room.preflight_reference_publication(bytes){return status.into_response();}
+            let stop=references.clone();
+            publication_lease=match tokio::task::spawn_blocking(move||stop.suspend_publication()).await{
+                Ok(Ok(lease))=>Some(lease),_=>return StatusCode::SERVICE_UNAVAILABLE.into_response(),
+            };
+            // Drain completed off all App/Room/Runtime locks. Keep the existing
+            // control serialization across this check and the actual CAS write.
+            let state=control.state.read().await;
+            if !state.current_room_store.as_ref().is_some_and(|current|Arc::ptr_eq(current,&room))
+                || !state.calibration_references.as_ref().is_some_and(|current|Arc::ptr_eq(current,&references)){
+                return StatusCode::CONFLICT.into_response();
+            }
         }
     }
-    next.run(request).await
+    #[cfg(test)]
+    if publish {if let Some(barrier)=&control.publication_barrier{
+        barrier.0.notify_one();barrier.1.notified().await;
+    }}
+    let response=next.run(request).await;
+    drop(publication_lease);
+    response
 }
 
 fn bearer(request: &Request) -> Option<&str> {
@@ -270,7 +309,7 @@ fn policy(method: &axum::http::Method, path: &str) -> Option<bool> {
             return Some(false);
         }
     }
-    if *method == Method::POST && path == "/companion/v1/spatial" { return Some(false); }
+    if *method == Method::POST && matches!(path, "/companion/v1/spatial" | "/companion/v1/calibration-references") { return Some(false); }
     if *method == Method::POST
         && matches!(
             path,
@@ -403,7 +442,7 @@ mod tests {
     async fn peer_composition_never_takes_the_calibration_lock_twice() {
         use tower::ServiceExt;
         use axum::body::Body;
-        let control=Control{state:Arc::new(RwLock::new(AppStateInner::minimal())),serial:Arc::new(tokio::sync::Mutex::new(()))};
+        let control=Control{state:Arc::new(RwLock::new(AppStateInner::minimal())),serial:Arc::new(tokio::sync::Mutex::new(())),publication_barrier:None};
         let existing=Router::new().route("/api/v1/calibration/start",post(||async{StatusCode::OK}))
             .layer(axum::middleware::from_fn_with_state(control.clone(),serialize_control));
         let artifacts=Router::new().route("/companion/v1/spatial",post(||async{StatusCode::OK}));
@@ -419,7 +458,7 @@ mod tests {
         use tower::ServiceExt;
         use axum::body::Body;
         let serial=Arc::new(tokio::sync::Mutex::new(()));
-        let control=Control{state:Arc::new(RwLock::new(AppStateInner::minimal())),serial:serial.clone()};
+        let control=Control{state:Arc::new(RwLock::new(AppStateInner::minimal())),serial:serial.clone(),publication_barrier:None};
         let router=Router::new().route("/companion/v1/spatial",post(||async{StatusCode::OK}))
             .layer(axum::middleware::from_fn_with_state(control,serialize_control));
         let stream=futures_util::stream::pending::<Result<String,std::io::Error>>();
@@ -463,3 +502,7 @@ mod tests {
 #[cfg(test)]
 #[path = "paired_progress_auth_tests.rs"]
 mod paired_progress_auth_tests;
+
+#[cfg(test)]
+#[path="companion_reference_auth_tests.rs"]
+mod reference_auth_tests;

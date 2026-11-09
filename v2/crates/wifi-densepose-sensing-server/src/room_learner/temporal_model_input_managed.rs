@@ -579,6 +579,24 @@ impl TemporalModel {
         &self,
         source:&execution::full_run::VerifiedTemporalEvaluationSnapshot,
     )->Result<crate::room_learner::training::EvaluationReport,String>{
+        self.validate_evaluation_source(source)?;
+        let rows=source.evaluation_rows();
+        crate::room_learner::training::EvaluationReport::compute(&self.model,&rows)
+    }
+    /// Recording reuses the SAME bounded inference traversal. This private
+    /// method requires the actual opaque whole-model source, not imported DATA.
+    pub(crate) fn evaluate_managed_held_out_recorded(
+        &self,
+        source:&execution::full_run::VerifiedTemporalEvaluationSnapshot,
+    )->Result<(crate::room_learner::training::EvaluationReport,Vec<RoomPrediction>),String>{
+        self.validate_evaluation_source(source)?;
+        let rows=source.evaluation_rows();
+        crate::room_learner::training::EvaluationReport::compute_recorded(&self.model,&rows)
+    }
+    fn validate_evaluation_source(
+        &self,
+        source:&execution::full_run::VerifiedTemporalEvaluationSnapshot,
+    )->Result<(),String>{
         source.require_same_model(self)?;
         self.validate_managed()?;
         source.held_out().validate_data_links(source.proof())?;
@@ -590,9 +608,6 @@ impl TemporalModel {
             ||binding.input_evidence_sha256!=source.proof().body.training_evidence_sha256
             ||binding.identity_evidence_sha256.as_ref()!=Some(&source.proof().body.training_identities_sha256)
         {return Err("temporal_evaluation_whole_model_lineage_changed".into());}
-        // This bounded64-row temporary copy exists only off ingress lock and
-        // is not retained in another datastore or used for fitting/normalizing.
-        let rows=source.evaluation_rows();
-        crate::room_learner::training::EvaluationReport::compute(&self.model,&rows)
+        Ok(())
     }
 }

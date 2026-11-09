@@ -277,6 +277,24 @@ impl SharedRoomStore {
         Ok(operation(room.binding_digest.as_deref()))
     }
 
+    /// Stable publication for comparison admission; callback never republishes
+    /// or performs filesystem IO. Existing WorldGraph cursor stays separate.
+    pub fn with_reference_publication<T>(&self, operation:impl FnOnce(&Envelope)->T)->Result<T,StatusCode>{
+        let room=self.current.lock().map_err(|_|StatusCode::SERVICE_UNAVAILABLE)?;
+        Ok(operation(&room))
+    }
+    /// Same parser/geometry/CAS checks as publish, without IO or mutation.
+    /// The caller serializes publication, then drains references off-lock;
+    /// actual publish repeats CAS before installing the new revision.
+    pub fn preflight_reference_publication(&self,bytes:&[u8])->Result<(),StatusCode>{
+        let request:Publication=serde_json::from_slice(bytes).map_err(|_|StatusCode::BAD_REQUEST)?;
+        validate(request.room).map_err(|_|StatusCode::BAD_REQUEST)?;
+        let current=self.current.lock().map_err(|_|StatusCode::SERVICE_UNAVAILABLE)?;
+        if current.revision!=request.expected_revision || request.expected_revision>=MAX_SAFE {
+            return Err(StatusCode::CONFLICT);
+        }
+        Ok(())
+    }
     pub fn current_binding_digest(&self) -> Result<Option<String>, StatusCode> {
         self.current.lock().map(|room| room.binding_digest.clone())
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)

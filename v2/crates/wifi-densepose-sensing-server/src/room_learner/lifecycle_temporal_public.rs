@@ -372,6 +372,16 @@ impl RoomLearningRuntime {
         request: TemporalEvaluateRequestV2,
         now: u64,
     ) -> Result<String, String> {
+        if request.record_comparison_evidence { return Err("reference_recording_scope_required".into()); }
+        self.temporal_evaluate_with_references_v2(request, now, None)
+    }
+    pub fn temporal_evaluate_with_references_v2(
+        self:&Arc<Self>, request:TemporalEvaluateRequestV2, now:u64,
+        references:Option<crate::companion_references::ReferenceSnapshot>,
+    )->Result<String,String>{
+        if request.record_comparison_evidence != references.is_some() {
+            return Err("reference_recording_scope_required".into());
+        }
         schema(&request.schema, EVALUATE_REQUEST_SCHEMA)?;
         self.public_generation_matches(&request.capture_generation_id)?;
         {
@@ -392,7 +402,7 @@ impl RoomLearningRuntime {
                 return Err("learner_evidence_identity_changed".into());
             }
         }
-        self.start_temporal_evidence(&request.expected, now, EvidencePurpose::HeldOutEvaluation)
+        self.start_temporal_evidence_with_references(&request.expected, now, EvidencePurpose::HeldOutEvaluation, references)
             .map(|attempt| attempt.to_string())
     }
     pub fn temporal_status_v2(self: &Arc<Self>, now: u64) -> Result<Value, String> {
