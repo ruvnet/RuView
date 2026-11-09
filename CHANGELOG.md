@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **ESP32 firmware 0.8.18: HE-LTF validity gate for C5/C6 and node mDNS discovery (ADR-423).**
+  On the ESP32-C6 bench, 77-90 % of HE-SU CSI frames arrived with
+  `rx_ctrl.rx_channel_estimate_info_vld = 0` and an unstable estimate (MEASURED).
+  HE-capable targets now drop those frames by default before edge DSP and
+  streaming (Kconfig `CSI_HE_INVALID_POLICY`: drop / tag via ADR-018 byte 19
+  bit 5 / pass). On COM11 the gate dropped 78.3 % of HE frames with no faults,
+  and the streamed frame rate stayed at 36-42 per second (MEASURED). Nodes also
+  advertise `_ruview-node._tcp` with TXT `node_id`, `fw`, `chip`,
+  `csi_target`. The node never follows a discovered server. mDNS is on for the
+  C6 4 MB and S3 4 MB images and off where the image would exceed its CI size
+  gate (S3 8 MB 1176/1200 KiB, XIAO C6, C5). No sensing-accuracy claim.
+- **Presence benchmark harness (ADR-423 D3).** `scripts/radar_window_logger.py`,
+  `scripts/csi_presence_recorder.py` and `scripts/presence_benchmark.py` record
+  60 GHz radar reference labels and per-node CSI presence, then score presence
+  with a leave-one-room-out threshold against a majority-class baseline;
+  protocol in `docs/adr/ADR-423/presence-benchmark-protocol.md`. Tests use
+  SYNTHETIC data; no hardware result yet.
+- **HA blueprints state which primitives the server cannot publish yet.**
+  `bed_exit`, `meeting_in_progress` and `bathroom_occupied` have no server
+  source, so blueprints 03/05/06 now say so; the validator reads the MQTT
+  planner and fails on a mismatch, and now runs when blueprints change.
+
 - **CLI calibration commands accept merged-LTF CSI frames (192 subcarriers, refs #1000).**
   ESP32-S3 firmware enables L-LTF + HT-LTF + STBC HT-LTF, so HT frames carry 192
   complex values. `parse_csi_packet` passed them through whole, and every frame
