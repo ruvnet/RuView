@@ -366,14 +366,46 @@ operation_dispatch!(
     temporal_train_v2,
     "learner_train_rejected"
 );
-operation_dispatch!(
-    evaluate_dispatch,
-    EvaluateCommand,
-    evaluate,
-    EVALUATE_REQUEST_SCHEMA,
-    temporal_evaluate_v2,
-    "learner_evaluation_rejected"
-);
+pub(crate) async fn evaluate_dispatch(
+    State(state):State<SharedState>, Json(command):Json<EvaluateCommand>,
+)->Json<serde_json::Value>{
+    match command {
+        EvaluateCommand::Legacy(request)=>evaluate(State(state),Json(request)).await,
+        EvaluateCommand::Temporal(mut request)=>{
+            if let Err(e)=schema_matches(&request.schema,EVALUATE_REQUEST_SCHEMA){return e;}
+            let rt=match runtime(&state).await{Ok(rt)=>rt,Err(e)=>return e};
+            let result=if request.record_comparison_evidence {
+                let s=state.read().await;
+                if s.privacy_mode || !s.room_learning.as_ref().is_some_and(|current|Arc::ptr_eq(current,&rt)) {
+                    return failure("learner_evaluation_rejected","learner_state_changed");
+                }
+                let comparison:Result<wifi_densepose_sensing_server::companion_references::ReferenceSnapshot,String>=(||{
+                    let refs=s.calibration_references.as_ref().ok_or("reference_purpose_unavailable")?;
+                    let snapshot=refs.snapshot(now_ns(&rt)/1_000_000_000)?;
+                    let room=s.current_room_store.as_ref().ok_or("reference_publication_missing")?;
+                    room.with_reference_publication(|publication|{
+                        if !snapshot.matches_publication(publication.binding_digest.as_deref().unwrap_or(""),publication.revision){
+                            return Err("reference_publication_changed".into());
+                        }
+                        Ok(snapshot)
+                    }).map_err(|_|"reference_publication_unavailable")?
+                })();
+                match comparison {
+                    Ok(snapshot)=>rt.temporal_evaluate_with_references_v2(request,now_ns(&rt),Some(snapshot)),
+                    Err(error)=>{
+                        tracing::warn!(%error,"Optional reference comparison unavailable; evaluating RF only");
+                        request.record_comparison_evidence=false;
+                        rt.temporal_evaluate_v2(request,now_ns(&rt))
+                    }
+                }
+            } else {rt.temporal_evaluate_v2(request,now_ns(&rt))};
+            match result {
+                Ok(id)=>operation_status(&state,&rt,id,"evaluate").await,
+                Err(e)=>failure("learner_evaluation_rejected",e),
+            }
+        }
+    }
+}
 
 pub(crate) async fn qualify_dispatch(
     State(state): State<SharedState>,
@@ -618,3 +650,7 @@ pub(crate) async fn deselect_dispatch(
         }
     }
 }
+
+#[cfg(test)]
+#[path="reference_revision_domain_tests.rs"]
+mod reference_revision_tests;

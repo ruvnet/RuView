@@ -329,3 +329,7 @@ pub(crate) use temporal_evaluation_store::{StoredTemporalEvaluation,StoredTempor
 #[path="temporal_selection_store.rs"]
 mod temporal_selection_store;
 pub(crate) use temporal_selection_store::StoredTemporalSelection;
+
+#[path="temporal_comparison.rs"]
+mod temporal_comparison;
+pub(crate) use temporal_comparison::RecordedTemporalComparison;

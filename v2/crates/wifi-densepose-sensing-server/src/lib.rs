@@ -82,3 +82,6 @@ pub mod companion_sensors;
 
 /// Account-bound multi-source room learning and managed lifecycle.
 pub mod room_learner;
+
+/// Bounded explicitly permitted paired references; comparison only.
+pub mod companion_references;

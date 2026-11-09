@@ -626,6 +626,7 @@ async fn finish_public_checks(directory: &Path, now: u64) {
     assert!(status["evaluation"].is_null());
     rt.temporal_evaluate_v2(
         TemporalEvaluateRequestV2 {
+            record_comparison_evidence: false,
             schema: EVALUATE_REQUEST_SCHEMA.into(),
             expected: rt.mutation_guard().unwrap(),
             capture_generation_id: c.capture_generation_id.clone(),

@@ -177,10 +177,13 @@ pub struct TemporalPhaseFinishRequestV2 {
     pub confirmation_challenge: String,
     pub conditions_confirmed: bool,
 }
+fn comparison_disabled(value:&bool)->bool { !*value }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TemporalEvaluateRequestV2 {
     pub schema: String,
+    #[serde(default,skip_serializing_if="comparison_disabled")]
+    pub record_comparison_evidence: bool,
     pub expected: MutationGuard,
     pub capture_generation_id: String,
     pub refs: TemporalCompleteRefsWire,

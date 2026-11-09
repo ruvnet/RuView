@@ -489,8 +489,12 @@ pub(crate) struct VerifiedTemporalEvaluationResult {
     train: data::TemporalTrainProofData,
     held: data::TemporalHeldOutEvidenceData,
     receipt: data::TemporalEvaluationReceiptData,
+    recorded: Option<crate::room_learner::artifact::RecordedTemporalComparison>,
 }
 impl VerifiedTemporalEvaluationResult {
+    pub(crate) fn recorded(&self) -> Option<crate::room_learner::artifact::RecordedTemporalComparison> {
+        self.recorded.as_ref().map(|r| r.clone_metadata())
+    }
     pub(crate) fn require_same_store(&self, store: &ArtifactStore) -> Result<(), String> {
         if !std::ptr::eq(store, self.artifact.as_ref()) {
             return Err("temporal_evaluation_same_store_required".into());
@@ -516,6 +520,16 @@ impl VerifiedTemporalEvaluationSnapshot {
         cancel: &AtomicBool,
         clock: &mut dyn FnMut() -> Result<u64, String>,
     ) -> Result<VerifiedTemporalEvaluationResult, String> {
+        self.compute_verified_mode(cancel, clock, false)
+    }
+    pub(crate) fn compute_verified_recorded(
+        &self, cancel: &AtomicBool, clock: &mut dyn FnMut() -> Result<u64, String>,
+    ) -> Result<VerifiedTemporalEvaluationResult, String> {
+        self.compute_verified_mode(cancel, clock, true)
+    }
+    fn compute_verified_mode(
+        &self, cancel: &AtomicBool, clock: &mut dyn FnMut() -> Result<u64, String>, record: bool,
+    ) -> Result<VerifiedTemporalEvaluationResult, String> {
         let before = clock()?;
         if cancel.load(Ordering::Acquire) {
             return Err("temporal_evaluation_cancelled".into());
@@ -524,7 +538,14 @@ impl VerifiedTemporalEvaluationSnapshot {
         if before / 1_000_000 >= deadline.expires_at_unix_ms {
             return Err("temporal_evaluation_original_deadline_expired".into());
         }
-        let report = self.model().evaluate_managed_held_out(self)?;
+        let (report, recorded) = if record {
+            let (report, predictions)=self.model().evaluate_managed_held_out_recorded(self)?;
+            let metadata=match crate::room_learner::artifact::RecordedTemporalComparison::from_actual(self,&predictions) {
+                Ok(metadata)=>Some(metadata),
+                Err(error)=>{tracing::warn!(%error,"Optional comparison metadata unavailable; RF evaluation preserved");None}
+            };
+            (report,metadata)
+        } else {(self.model().evaluate_managed_held_out(self)?,None)};
         // Existing compute is bounded64 rows. Cancellation withdraws admission
         // and drains the entire call; no per-row interruption is claimed.
         let after = clock()?;
@@ -560,6 +581,7 @@ impl VerifiedTemporalEvaluationSnapshot {
             train: self.proof().clone(),
             held: self.held_out().clone(),
             receipt,
+            recorded,
         })
     }
 }

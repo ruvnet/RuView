@@ -731,3 +731,11 @@ mod public_workflow;
 
 #[path="lifecycle_temporal_selection.rs"]
 pub(super) mod selected_control;
+
+#[path="reference_admission.rs"]
+mod reference_admission;
+pub use reference_admission::{ReferenceScope,TemporalComparisonReadback};
+
+#[cfg(test)]
+#[path="temporal_reference_fixture_tests.rs"]
+mod reference_fixture_tests;

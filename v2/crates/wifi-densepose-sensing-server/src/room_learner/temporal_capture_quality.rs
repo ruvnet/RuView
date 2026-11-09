@@ -761,6 +761,17 @@ impl TemporalTrainCapture {
             TemporalCaptureStage::Ready
         }
     }
+    /// Read-only custody from the actual current producer, never a JSON flag.
+    pub(crate) fn reference_phase(&self, now: u64) -> Result<(String, String), String> {
+        self.ensure_live()?;
+        let w = &self.workflow;
+        if self.stage() != TemporalCaptureStage::Observing
+            || self.schedule.episodes().get(w.episode).is_none_or(|e| e.role != DataRole::HeldOut)
+            || now / 1_000_000 >= w.descriptor.expires_at_ms
+            || !w.full_run.as_ref().is_some_and(|m| m.is_frozen())
+        { return Err("reference_phase_not_collecting".into()); }
+        self.phase_identity().ok_or_else(|| "reference_phase_identity_missing".into())
+    }
     pub(crate) fn phase_identity(&self) -> Option<(String, String)> {
         let w = &self.workflow;
         let schedule = &self.schedule;

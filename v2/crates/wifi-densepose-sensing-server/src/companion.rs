@@ -171,6 +171,10 @@ pub struct Grant {
     pub revoked: watch::Receiver<bool>,
 }
 impl Companion {
+    pub(crate) fn reference_owner_matches(&self, owner: &str, installation: &str) -> bool {
+        self.owner_account_scope.as_deref() == Some(owner) && self.installation_id == installation
+    }
+
     pub fn load_for_account(path: &Path, installation_id: String, cert_sha256: String, origin: String, owner_account_scope: Option<String>) -> io::Result<Shared> {
         if owner_account_scope.as_ref().is_some_and(|key| key.len() != 64 || !key.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))) {
             return Err(io::Error::other("invalid owner account namespace"));
@@ -505,22 +509,31 @@ async fn snapshot(State(s): State<Shared>) -> ApiResult {
         json!({"installation_id":s.installation_id,"origin":s.origin,"cert_sha256":s.cert_sha256,"requests":requests,"devices":devices}),
     ))
 }
-async fn revoke(State(s): State<Shared>, RoutePath(id): RoutePath<String>) -> ApiResult {
-    let mut i = s
-        .inner
-        .lock()
-        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
-    let mut devices = i.devices.clone();
-    if devices.remove(&id).is_none() {
-        return Err(StatusCode::NOT_FOUND);
+async fn revoke(State(s):State<Shared>,RoutePath(id):RoutePath<String>,
+    references:Option<axum::Extension<Arc<crate::companion_references::ReferenceStore>>>,
+)->ApiResult{
+    // Close durable device authority and its live watch before waiting for an
+    // entered optional recording. No Companion guard crosses the drain await.
+    let removed={
+        let mut inner=s.inner.lock().map_err(|_|StatusCode::SERVICE_UNAVAILABLE)?;
+        let mut devices=inner.devices.clone();
+        if devices.remove(&id).is_some(){
+            s.persist(&devices,&inner)?;
+            inner.devices=devices;
+            inner.access.retain(|_,a|a.device_id!=id);
+            inner.calibration.remove(&id);
+            if let Some(watch)=inner.revocations.remove(&id){let _=watch.send(true);}
+            true
+        }else{false}
+    };
+    if let Some(axum::Extension(references))=references{
+        let target=id.clone();
+        tokio::task::spawn_blocking(move||references.revoke(&target)).await
+            .map_err(|_|StatusCode::SERVICE_UNAVAILABLE)?
+            .map_err(|_|StatusCode::SERVICE_UNAVAILABLE)?;
     }
-    s.persist(&devices, &i)?;
-    i.devices = devices;
-    i.access.retain(|_, a| a.device_id != id);
-    i.calibration.remove(&id);
-    if let Some(tx) = i.revocations.remove(&id) {
-        let _ = tx.send(true);
-    }
+    // A repeated/not-found delete still drains this exact device before reply.
+    if !removed{return Err(StatusCode::NOT_FOUND);}
     Ok(Json(json!({"status":"revoked"})))
 }
 async fn calibration(State(s): State<Shared>, RoutePath(id): RoutePath<String>) -> ApiResult {
@@ -641,7 +654,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(reloaded.inner.lock().unwrap().devices.len(), 16);
-        let _ = revoke(State(s.clone()), RoutePath("last-slot".into()))
+        let _ = revoke(State(s.clone()), RoutePath("last-slot".into()), None)
             .await
             .unwrap();
         let _ = approve(
@@ -698,7 +711,7 @@ mod tests {
             .await
             .unwrap();
         assert!(s.authorize("installation", token, true).is_ok());
-        revoke(State(s.clone()), RoutePath("phone".into()))
+        revoke(State(s.clone()), RoutePath("phone".into()), None)
             .await
             .unwrap();
         assert!(*grant.revoked.borrow());

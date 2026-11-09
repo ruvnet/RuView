@@ -232,3 +232,24 @@ fn nonmissing_abstention_probabilities_must_all_contribute_to_bce() {
         "nonmissing uncertain probabilities cannot disappear from BCE"
     );
 }
+
+/// SAME actual model/outcomes; recording cannot change aggregate bytes or drop
+/// unavailable windows from the denominator. Synthetic software inputs only.
+#[test]
+fn recorded_evaluation_preserves_plain_report_and_all_window_outcomes() {
+    let ds = dataset(8);
+    let model = model();
+    let mut rows = ds.held_out().to_vec();
+    rows.reverse();
+    rows[0].views.clear();
+    let plain = EvaluationReport::compute(&model, &rows).unwrap();
+    let (recorded, outcomes) = EvaluationReport::compute_recorded(&model, &rows).unwrap();
+    assert_eq!(serde_json::to_vec(&plain).unwrap(), serde_json::to_vec(&recorded).unwrap());
+    assert_eq!(outcomes.len(), rows.len());
+    assert_eq!(recorded.samples, rows.len());
+    assert!(recorded.missing >= 1);
+    for (row, outcome) in rows.iter().zip(outcomes) {
+        assert_eq!(serde_json::to_vec(&outcome).unwrap(), serde_json::to_vec(&model.infer(row)).unwrap());
+        assert!(!outcome.physically_validated);
+    }
+}

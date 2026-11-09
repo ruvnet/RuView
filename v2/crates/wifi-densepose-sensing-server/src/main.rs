@@ -9,6 +9,7 @@
 //! Replaces both ws_server.py and the Python HTTP server.
 #![allow(dead_code)]
 
+mod companion_reference_api;
 mod adaptive_classifier;
 mod companion_integration;
 mod companion_room;
@@ -2220,6 +2221,7 @@ struct AppStateInner {
     room_learning: Option<Arc<wifi_densepose_sensing_server::room_learner::lifecycle::RoomLearningRuntime>>,
     room_learning_sources: HashMap<room_learner_api::NativeSourceKey, room_learner_api::LiveSource>,
     current_room_store: Option<Arc<companion_room::SharedRoomStore>>,
+    calibration_references: Option<Arc<wifi_densepose_sensing_server::companion_references::ReferenceStore>>,
     /// Stable installation identity used only to bind local persisted state.
     installation_id: Option<String>,
     /// Metadata for the privacy reduced empty room image, when available.
@@ -3160,6 +3162,7 @@ impl AppStateInner {
             room_learning: None,
             room_learning_sources: HashMap::new(),
             current_room_store: None,
+            calibration_references: None,
             installation_id: None,
             bootstrap_baseline: None,
             bootstrap_baseline_active: false,
@@ -15994,6 +15997,7 @@ async fn main() {
         room_learning,
         room_learning_sources: HashMap::new(),
         current_room_store: None,
+        calibration_references: None,
         installation_id: args.installation_id.clone(),
         bootstrap_baseline: bootstrap_metadata.clone(),
         bootstrap_baseline_active,

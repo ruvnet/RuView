@@ -89,6 +89,7 @@ fn public_identity_kind_is_required_and_legacy_numeric_version_is_not_an_alias()
 #[test]
 fn command_inputs_reject_rows_reports_and_verified_booleans() {
     let command = TemporalEvaluateRequestV2 {
+            record_comparison_evidence: false,
         schema: EVALUATE_REQUEST_SCHEMA.into(),
         expected: guard(),
         capture_generation_id: h('0'),
@@ -298,7 +299,7 @@ fn export_canonical_structural_wire_examples_without_runtime_authority() {
         blocker: Some("context_mismatch".into()),
     };
     println!("C4C_CANONICAL_PROGRESS_EXAMPLES={}",serde_json::to_string(&serde_json::json!({"fixture_kind":"SYNTHETIC_STRUCTURAL_SERIALIZATION_ONLY_NOT_AUTHORITY","matching_complete":matching,"context_mismatch_redacted":mismatch,"selected_temporal_idle":{"schema":SELECTION_SCHEMA,"success":true,"progress_schema":PAIRED_PROGRESS_SCHEMA,"model_selection":selection}})).unwrap());
-    let examples = serde_json::json!({"fixture_kind":"SYNTHETIC_STRUCTURAL_SERIALIZATION_ONLY_NOT_AUTHORITY","idle_response":{"success":true,"status":idle},"candidate_identity":TemporalCandidateIdentityWire{model_kind:WholeTemporalKind::ManagedTemporalV3,model_sha256:h('a'),verified_fit_record_sha256:h('b'),context_digest:h('4'),room_digest:h('5'),persisted:false},"selected_identity":selected,"qualification_summary":qualification,"configure_request":TemporalConfigureRequestV2{schema:CONFIGURE_REQUEST_SCHEMA.into(),model_kind:WholeTemporalKind::ManagedTemporalV3,expected:guard(),binding_digest:h('4'),revision:1,source_node_ids:vec![15,16,17],new_training:true,recovery_consent:true},"evaluate_request":TemporalEvaluateRequestV2{schema:EVALUATE_REQUEST_SCHEMA.into(),expected:guard(),capture_generation_id:h('0'),refs:complete()},"qualify_request":TemporalQualifyRequestV2{schema:QUALIFY_REQUEST_SCHEMA.into(),expected:guard(),capture_generation_id:h('0'),refs:eval()}});
+    let examples = serde_json::json!({"fixture_kind":"SYNTHETIC_STRUCTURAL_SERIALIZATION_ONLY_NOT_AUTHORITY","idle_response":{"success":true,"status":idle},"candidate_identity":TemporalCandidateIdentityWire{model_kind:WholeTemporalKind::ManagedTemporalV3,model_sha256:h('a'),verified_fit_record_sha256:h('b'),context_digest:h('4'),room_digest:h('5'),persisted:false},"selected_identity":selected,"qualification_summary":qualification,"configure_request":TemporalConfigureRequestV2{schema:CONFIGURE_REQUEST_SCHEMA.into(),model_kind:WholeTemporalKind::ManagedTemporalV3,expected:guard(),binding_digest:h('4'),revision:1,source_node_ids:vec![15,16,17],new_training:true,recovery_consent:true},"evaluate_request":TemporalEvaluateRequestV2{record_comparison_evidence:false,schema:EVALUATE_REQUEST_SCHEMA.into(),expected:guard(),capture_generation_id:h('0'),refs:complete()},"qualify_request":TemporalQualifyRequestV2{schema:QUALIFY_REQUEST_SCHEMA.into(),expected:guard(),capture_generation_id:h('0'),refs:eval()}});
     println!(
         "C4C_CANONICAL_PUBLIC_WIRE_EXAMPLES={}",
         serde_json::to_string(&examples).unwrap()

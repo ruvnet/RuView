@@ -36,7 +36,7 @@ impl StoredTemporalEvaluation {
         &self.lookup_sha256
     }
 }
-fn lookup(source: &VerifiedTemporalEvaluationSnapshot) -> Result<String, String> {
+pub(super) fn lookup(source: &VerifiedTemporalEvaluationSnapshot) -> Result<String, String> {
     let identity = &source.proof().body.identity;
     crate::room_learner::qualification::hash(&(
         data::EVALUATION_SCHEMA,
@@ -187,7 +187,7 @@ impl ArtifactStore {
         let computed = source.compute_verified(cancel, clock)?;
         self.persist_temporal_evaluation_result(&source, &computed, &key, cancel, clock, io)
     }
-    fn persist_temporal_evaluation_result(
+    pub(super) fn persist_temporal_evaluation_result(
         &self,
         source: &VerifiedTemporalEvaluationSnapshot,
         result: &VerifiedTemporalEvaluationResult,
