@@ -157,6 +157,26 @@ cargo tauri build
 
 The installer/bundle will be in `target/release/bundle/` (`.msi` on Windows, `.dmg` on macOS, `.deb`/`.AppImage` on Linux).
 
+### Windows GNU backend checks
+
+From `v2/`, with the GNU Rust toolchain and MinGW-w64 tools on `PATH`:
+
+```powershell
+cargo +1.89.0-x86_64-pc-windows-gnu test -p wifi-densepose-desktop --no-default-features --locked
+```
+
+The build disables MinGW's automatic exports for the desktop `cdylib`; explicit
+exports remain supported. Otherwise a debug build with no explicit exports can
+exceed the PE export ordinal limit. Library and integration test executables also
+receive Tauri's Common Controls v6 manifest so `TaskDialogIndirect` can load.
+These checks exercise the Rust backend, not the frontend or attached hardware.
+
+Some WinLibs GCC 16 bundles inject a default manifest even when the application
+already supplies one, producing duplicate manifest resources. If resource merging
+fails, see the compiler distributor's
+[known issue and reversible workaround](https://github.com/brechtsanders/winlibs_mingw/issues/299).
+Keep any toolchain workaround local; do not remove Tauri's application manifest.
+
 ## Domain Types
 
 | Type | Fields | Description |
