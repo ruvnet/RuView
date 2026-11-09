@@ -2409,7 +2409,11 @@ mod adr424_zone_fusion_http_tests {
         assert_eq!((zone["room"].as_str(), zone["zone"].as_str()), (Some("office"), Some("desk")));
         assert!(zone["presence_probability"].as_f64().unwrap() > 0.7);
         assert_eq!(zone["agreement"], true);
-        assert_eq!(zone["evidence"], "MEASURED");
+        // The CSI node is the server's own hardware reading; the radar line
+        // came over the open ingest route, so the fused result is a claim.
+        assert_eq!(zone["evidence"], "CLAIMED");
+        assert_eq!(zone["sources"][0]["verified"], true);
+        assert_eq!(zone["sources"][1]["verified"], false);
         assert_eq!(zone["weights_measured"], false);
         let sources: Vec<&str> =
             zone["sources"].as_array().unwrap().iter().map(|s| s["source"].as_str().unwrap()).collect();
@@ -2419,6 +2423,13 @@ mod adr424_zone_fusion_http_tests {
         let (_, legacy) = call(&app, get_req("/api/v1/pose/zones/summary")).await;
         assert_eq!(legacy["zones"][0]["zone"], "desk");
         assert!(legacy["zones"].as_array().unwrap().len() == 1);
+    }
+
+    #[tokio::test]
+    async fn hardware_csi_alone_is_measured() {
+        let app = app("esp32", Some(csi_update("esp32", true, 0.0)));
+        let (_, body) = call(&app, get_req("/api/v1/zones")).await;
+        assert_eq!(body["zones"][0]["evidence"], "MEASURED");
     }
 
     #[tokio::test]
@@ -2453,6 +2464,7 @@ mod adr424_zone_fusion_http_tests {
         let (_, body) = call(&app, get_req("/api/v1/zones")).await;
         assert!(body["zones"][0]["presence_probability"].is_null());
         assert_eq!(body["zones"][0]["confidence"], 0.0);
+        assert_eq!(body["zones"][0]["evidence"], "NONE");
     }
 
     #[tokio::test]

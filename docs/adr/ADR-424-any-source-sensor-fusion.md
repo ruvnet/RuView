@@ -97,8 +97,13 @@ A source moves from tier 2 to tier 1 only with a descriptor and a measured relia
 3. **Reliability comes from a benchmark, not a datasheet.** A source's fusion weight is the
    reliability measured under ADR-423's held-out-room protocol or the track-aware protocol (D7).
    Until measured, it uses a conservative default weight and the result says so.
-4. Every published number carries its evidence grade (MEASURED / CLAIMED / SYNTHETIC) and the
-   list of sources that contributed.
+4. Every published number carries its evidence grade and the list of sources that contributed.
+   A fused zone is `SYNTHETIC` if any contributing reading is simulated or replayed; otherwise
+   `CLAIMED` if any contributing reading came from an unauthenticated sender; `MEASURED` only when
+   every contributing source is verified hardware; `NONE` when no source is live.
+5. **A sender cannot verify itself.** `verified` is set by the server for readings it produced
+   from its own authenticated or in-process sources and is never read from the wire. Everything
+   posted to the open ingest route is a claim until a transport authenticates the sender.
 
 ### D5 — Fused per-zone presence replaces the stub
 
@@ -108,7 +113,7 @@ A source moves from tier 2 to tier 1 only with a descriptor and a measured relia
 - `confidence`, lowered by stale or missing sources;
 - `sources[]`: each contributing source with its own probability, weight, age and health;
 - `agreement`: whether healthy sources agree, and which disagree;
-- `evidence`: MEASURED or SYNTHETIC.
+- `evidence`: MEASURED, CLAIMED, SYNTHETIC or NONE (D4).
 
 Fusion is **late**: each source yields a presence probability, and they are combined in log-odds
 space weighted by reliability and discounted by age. Late fusion is chosen because sources differ

@@ -81,6 +81,12 @@ pub struct SourceReading {
     pub health: Health,
     #[serde(default)]
     pub synthetic: bool,
+    /// True only for readings the server produced itself from an
+    /// authenticated or in-process source. Never read from the wire, so a
+    /// sender cannot assert it: everything posted to the ingest route is a
+    /// claim until the transport authenticates the sender.
+    #[serde(skip)]
+    pub verified: bool,
 }
 
 fn valid_name(s: &str) -> bool {
@@ -193,6 +199,7 @@ pub struct SourceContribution {
     pub weight: f64,
     pub contributing: bool,
     pub synthetic: bool,
+    pub verified: bool,
 }
 
 /// Fused presence for one zone (ADR-424 D5).
@@ -206,10 +213,25 @@ pub struct ZonePresence {
     pub confidence: f64,
     /// `Some(false)` when contributing sources fall on both sides of 0.5.
     pub agreement: Option<bool>,
+    /// `MEASURED` only when every contributing source is verified hardware;
+    /// `CLAIMED` when any came from an unauthenticated sender; `SYNTHETIC`
+    /// when any is simulated or replayed; `NONE` with no live source.
     pub evidence: &'static str,
     /// False while any contributing weight is a placeholder.
     pub weights_measured: bool,
     pub sources: Vec<SourceContribution>,
+}
+
+/// Evidence grade of a fused zone. Synthetic input dominates; otherwise any
+/// contributing reading from an unauthenticated sender makes it a claim.
+/// With no live source there is no measurement to grade.
+fn evidence_grade(live: bool, any_synthetic: bool, any_unverified: bool) -> &'static str {
+    match (live, any_synthetic, any_unverified) {
+        (false, _, _) => "NONE",
+        (true, true, _) => "SYNTHETIC",
+        (true, false, true) => "CLAIMED",
+        (true, false, false) => "MEASURED",
+    }
 }
 
 fn logit(p: f64) -> f64 {
@@ -287,6 +309,7 @@ impl SourceFusion {
         let mut sources = Vec::with_capacity(readings.len());
         let (mut num, mut w_live, mut w_all) = (0.0, 0.0, 0.0);
         let (mut any_synth, mut measured, mut above, mut below) = (false, true, false, false);
+        let mut any_unverified = false;
         for r in readings {
             let Some(d) = self.descriptor(&r.kind) else { continue };
             let age_ms = (now_ms - r.timestamp_ms).max(0);
@@ -299,6 +322,7 @@ impl SourceFusion {
                 num += w * logit(p);
                 w_live += w;
                 any_synth |= r.synthetic;
+                any_unverified |= !r.verified;
                 measured &= d.weight_measured;
                 above |= p > 0.5;
                 below |= p < 0.5;
@@ -312,6 +336,7 @@ impl SourceFusion {
                 weight: d.weight,
                 contributing: p.is_some(),
                 synthetic: r.synthetic,
+                verified: r.verified,
             });
         }
         let live = w_live > 0.0;
@@ -321,7 +346,7 @@ impl SourceFusion {
             presence_probability: live.then(|| 1.0 / (1.0 + (-num / w_live).exp())),
             confidence: if w_all > 0.0 { (w_live / w_all).clamp(0.0, 1.0) } else { 0.0 },
             agreement: live.then_some(!(above && below)),
-            evidence: if any_synth || !live { "SYNTHETIC" } else { "MEASURED" },
+            evidence: evidence_grade(live, any_synth, any_unverified),
             weights_measured: live && measured,
             sources,
         }
@@ -443,6 +468,7 @@ impl FusionState {
                 quality: conf.is_finite().then(|| conf.clamp(0.0, 1.0)),
                 health: if nf.stale || offline { Health::Stale } else { Health::Ok },
                 synthetic: !is_hardware_source(source),
+                verified: true,
             });
         }
     }
@@ -491,7 +517,8 @@ mod tests {
         assert!(p > 0.8 && p < 0.9, "weighted log-odds mean of 0.8 and 0.9, got {p}");
         assert_eq!(z.agreement, Some(true));
         assert_eq!(z.confidence, 1.0);
-        assert_eq!(z.evidence, "MEASURED");
+        assert_eq!(z.evidence, "CLAIMED", "wire readings are unverified");
+        assert!(z.sources.iter().all(|s| !s.verified));
         assert!(!z.weights_measured, "built-in weights are placeholders");
     }
 
@@ -526,6 +553,7 @@ mod tests {
         assert_eq!(z.presence_probability, None);
         assert_eq!(z.agreement, None);
         assert_eq!(z.confidence, 0.0);
+        assert_eq!(z.evidence, "NONE");
     }
 
     #[test]
@@ -542,6 +570,21 @@ mod tests {
         f.ingest_line(&line("csi-1", "wifi_csi", "desk", r#"{"presence_probability":0.8}"#, ""), NOW).unwrap();
         f.ingest_line(&line("sim-1", "mmwave_radar", "desk", r#"{"presence":1}"#, r#","synthetic":true"#), NOW).unwrap();
         assert_eq!(f.zones(NOW)[0].evidence, "SYNTHETIC");
+    }
+
+    #[test]
+    fn a_sender_cannot_assert_verified_and_only_server_readings_are_measured() {
+        let mut f = fusion();
+        f.ingest_line(&line("radar-1", "mmwave_radar", "desk", r#"{"presence":1}"#, r#","verified":true"#), NOW).unwrap();
+        assert_eq!(f.zones(NOW)[0].evidence, "CLAIMED");
+
+        let mut own = parse_reading(&line("csi-node-1", "wifi_csi", "sofa", r#"{"presence":1}"#, ""), NOW).unwrap();
+        own.verified = true;
+        f.ingest(own);
+        let zones = f.zones(NOW);
+        let sofa = zones.iter().find(|z| z.zone == "sofa").unwrap();
+        assert_eq!(sofa.evidence, "MEASURED");
+        assert_eq!(evidence_grade(true, true, true), "SYNTHETIC");
     }
 
     #[test]
