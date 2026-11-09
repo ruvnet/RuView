@@ -35,6 +35,7 @@ mod rvf_container;
 // (including `/ws/train/progress`) into the live router below.
 mod training_api;
 mod rvf_pipeline;
+mod source_fusion;
 mod tracker_bridge;
 pub mod types;
 mod vital_signs;
