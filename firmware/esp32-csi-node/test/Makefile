@@ -141,6 +141,7 @@ test_onboarding_identity: test_onboarding_identity.c $(MAIN_DIR)/onboarding_iden
 
 run_onboarding_identity: test_onboarding_identity
 	./test_onboarding_identity
+	python3 test_onboarding_hello_identity.py
 
 run_onboarding_console:
 	python3 test_onboarding_console.py
