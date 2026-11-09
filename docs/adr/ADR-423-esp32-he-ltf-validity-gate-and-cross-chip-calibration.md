@@ -163,7 +163,9 @@ PPDU class, bin count)`:
 **Acceptance:**
 1. Reproduce OpenCSI's zero-shot presence result on its public dataset (Zenodo
    19861032, CC BY 4.0) before claiming anything.
-2. Then run it on RuView's own S3, C3 and C6 nodes with a held-out room.
+2. Then run it on RuView's own S3, C3 and C6 nodes with a held-out room, following
+   [`ADR-423/presence-benchmark-protocol.md`](ADR-423/presence-benchmark-protocol.md)
+   (radar-gated labels, leave-one-room-out threshold, majority-class baseline).
 
 ### D4 — Claims policy for ESP32 CSI
 
