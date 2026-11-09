@@ -22,6 +22,9 @@ dependencies:
   # 3.1.0 needs the IDF >= 5.5 API rmt_tx_switch_gpio; stay on 3.0.x for IDF 5.4
   espressif/led_strip: "~3.0.3"
 
+  ## mDNS responder for node discovery (node_mdns.c). Out of tree since IDF 5.0.
+  espressif/mdns: "^1.8.0"
+
   ## cJSON for config_api.c.
   ## Bundled as the `json` component up to ESP-IDF 5.x and moved out to the
   ## component manager in v6, so it is pulled ONLY on the v6+ lane -- on 5.4
