@@ -328,6 +328,143 @@ impl SourceFusion {
     }
 }
 
+/// Most lines accepted in one ingest request.
+pub const MAX_LINES_PER_REQUEST: usize = 256;
+/// Environment variable mapping CSI node ids to zones:
+/// `1=office/desk,2=office/sofa` (`room/zone`, or just `zone`).
+pub const NODE_ZONES_ENV: &str = "RUVIEW_NODE_ZONES";
+
+/// Hardware CSI sources as named by the server's `effective_source()`.
+const HARDWARE_SOURCE_PREFIXES: [&str; 4] = ["esp32", "realtek", "mediatek", "qualcomm"];
+
+/// Outcome of one ingest request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct IngestReport {
+    pub accepted: usize,
+    pub rejected: usize,
+    /// First few rejection reasons, `line N: reason`.
+    pub errors: Vec<String>,
+}
+
+/// Parse `1=office/desk,2=sofa`. Malformed entries are skipped, not guessed.
+pub fn parse_node_zones(spec: &str) -> BTreeMap<u8, (Option<String>, String)> {
+    let mut out = BTreeMap::new();
+    for item in spec.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+        let Some((node, place)) = item.split_once('=') else { continue };
+        let Ok(node) = node.trim().parse::<u8>() else { continue };
+        let (room, zone) = match place.trim().split_once('/') {
+            Some((r, z)) => (Some(r), z),
+            None => (None, place.trim()),
+        };
+        if valid_name(zone) && room.map_or(true, valid_name) {
+            out.insert(node, (room.map(str::to_string), zone.to_string()));
+        }
+    }
+    out
+}
+
+/// True for a live hardware CSI source; false for simulated, test, host-WiFi
+/// and `*:offline` sources.
+pub fn is_hardware_source(source: &str) -> bool {
+    !source.ends_with(":offline")
+        && HARDWARE_SOURCE_PREFIXES.iter().any(|p| source.starts_with(p))
+}
+
+/// Server-side fusion state: external readings plus the CSI nodes' own
+/// classifications, mapped to zones by configuration.
+#[derive(Debug)]
+pub struct FusionState {
+    fusion: SourceFusion,
+    node_zones: BTreeMap<u8, (Option<String>, String)>,
+}
+
+impl Default for FusionState {
+    fn default() -> Self {
+        Self::new(BTreeMap::new())
+    }
+}
+
+impl FusionState {
+    pub fn new(node_zones: BTreeMap<u8, (Option<String>, String)>) -> Self {
+        Self { fusion: SourceFusion::new(builtin_descriptors()), node_zones }
+    }
+
+    pub fn from_env() -> Self {
+        Self::new(std::env::var(NODE_ZONES_ENV).map(|s| parse_node_zones(&s)).unwrap_or_default())
+    }
+
+    /// Ingest newline-separated readings. A bad line is rejected on its own;
+    /// the request fails only when it carries too many lines.
+    pub fn ingest_lines(&mut self, text: &str, now_ms: i64) -> Result<IngestReport, String> {
+        let lines: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+        if lines.len() > MAX_LINES_PER_REQUEST {
+            return Err(format!("more than {MAX_LINES_PER_REQUEST} lines in one request"));
+        }
+        let mut report = IngestReport { accepted: 0, rejected: 0, errors: Vec::new() };
+        for (i, line) in lines.iter().enumerate() {
+            match self.fusion.ingest_line(line, now_ms) {
+                Ok(()) => report.accepted += 1,
+                Err(e) => {
+                    report.rejected += 1;
+                    if report.errors.len() < 5 {
+                        report.errors.push(format!("line {}: {e}", i + 1));
+                    }
+                }
+            }
+        }
+        Ok(report)
+    }
+
+    /// Turn each zone-mapped CSI node's classification into a `wifi_csi`
+    /// reading. The node's confidence is used as the reading's quality, so an
+    /// unsure classification is pulled toward "no information" whatever the
+    /// confidence was meant to describe. A stale node entry or an offline
+    /// source reports `health: stale`, which stops it contributing.
+    pub fn refresh_csi(&mut self, update: Option<&crate::SensingUpdate>, source: &str) {
+        let Some(update) = update else { return };
+        let Some(nodes) = update.node_features.as_ref() else { return };
+        let timestamp_ms = (update.timestamp * 1000.0).round() as i64;
+        if timestamp_ms <= 0 {
+            return;
+        }
+        let offline = source.ends_with(":offline");
+        for nf in nodes {
+            let Some((room, zone)) = self.node_zones.get(&nf.node_id) else { continue };
+            let conf = nf.classification.confidence;
+            let mut values = BTreeMap::new();
+            values.insert("presence".to_string(), if nf.classification.presence { 1.0 } else { 0.0 });
+            self.fusion.ingest(SourceReading {
+                timestamp_ms,
+                source: format!("csi-node-{}", nf.node_id),
+                kind: "wifi_csi".to_string(),
+                room: room.clone(),
+                zone: Some(zone.clone()),
+                values,
+                quality: conf.is_finite().then(|| conf.clamp(0.0, 1.0)),
+                health: if nf.stale || offline { Health::Stale } else { Health::Ok },
+                synthetic: !is_hardware_source(source),
+            });
+        }
+    }
+
+    pub fn zones(&self, now_ms: i64) -> Vec<ZonePresence> {
+        self.fusion.zones(now_ms)
+    }
+
+    /// Response body of `GET /api/v1/zones`.
+    pub fn zones_json(&self, now_ms: i64) -> serde_json::Value {
+        let zones = self.zones(now_ms);
+        serde_json::json!({
+            "task": "presence",
+            "configured": !zones.is_empty() || !self.node_zones.is_empty(),
+            "timestamp_ms": now_ms,
+            "stale_after_ms": STALE_AFTER_MS,
+            "rejected_readings": self.fusion.rejected(),
+            "zones": zones,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
