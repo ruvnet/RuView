@@ -68,3 +68,8 @@ CONFIG_ESP_WIFI_EXTRA_IRAM_OPT=y
 # Was present in sdkconfig.defaults.template but missing here — fixed
 # in the v0.6.5-esp32 release.
 CONFIG_FREERTOS_TIMER_TASK_STACK_DEPTH=8192
+
+# Node mDNS (_ruview-node._tcp) costs ~43 KB of app image. The S3 8 MB
+# image is 1176 KiB against a 1200 KiB gate, so it is off in this shared
+# base; target overlays with headroom (esp32c6) re-enable it.
+CONFIG_CSI_NODE_MDNS=n
