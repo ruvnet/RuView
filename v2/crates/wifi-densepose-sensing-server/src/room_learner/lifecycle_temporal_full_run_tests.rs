@@ -280,6 +280,8 @@ fn record_train_uncached(root: &Path) -> (Arc<RoomLearningRuntime>, u64) {
     .unwrap();
     let mut sequence = 0;
     let mut starts = 0;
+    let mut forced_pause = false;
+    let mut forced_resume = false;
     for episode in schedule
         .episodes()
         .iter()
@@ -289,17 +291,69 @@ fn record_train_uncached(root: &Path) -> (Arc<RoomLearningRuntime>, u64) {
             let progress = fixture::snapshot(&runtime, now);
             match progress["stage"].as_str().unwrap() {
                 "ready" | "paused" => {
+                    let resume_revision = if progress["stage"] == "paused"
+                        && forced_pause && !forced_resume
+                    {
+                        Some((runtime.temporal_store().unwrap().load_temporal(now)
+                            .unwrap().unwrap().token.data().revision,
+                            progress["durable_windows"].as_u64().unwrap()))
+                    } else { None };
                     now = fixture::async_lead_end(&runtime, now);
                     starts += 1;
                     runtime
                         .tick_temporal_capture(&runtime.mutation_guard().unwrap(), now)
                         .unwrap();
+                    if let Some((before, durable_rows)) = resume_revision {
+                        // Lead readiness is only recertification. Admit the
+                        // actual SEGMENT ACK while every source remains live.
+                        let wait = Instant::now();
+                        loop {
+                            sequence += 1;
+                            for source in 1..=3 {
+                                runtime.ingest_native(
+                                    &packet(source, sequence, now, episode.condition), now,
+                                ).unwrap();
+                            }
+                            let pending = fixture::snapshot(&runtime, now)["durability_pending"] == true;
+                            now += fixture::PERIOD;
+                            if !pending { break; }
+                            assert!(wait.elapsed() < Duration::from_secs(30));
+                            std::thread::sleep(Duration::from_nanos(fixture::PERIOD));
+                        }
+                        let after = runtime.temporal_store().unwrap().load_temporal(now)
+                            .unwrap().unwrap().token.data().revision;
+                        assert_eq!(after, before.checked_add(1).unwrap(),
+                            "the explicit resumed segment is exactly one durable transition");
+                        let resumed = fixture::snapshot(&runtime, now);
+                        assert_eq!(resumed["stage"], "observing");
+                        assert_eq!(resumed["durable_windows"], durable_rows);
+                        assert_eq!(resumed["retained_rows"], durable_rows,
+                            "the SEGMENT ACK must not be confused with a new WINDOW ACK");
+                        forced_resume = true;
+                    }
                 }
                 "needs_confirmation" => break,
                 "failed" => panic!("synthetic C4A phase{} failed: {progress}", episode.index),
                 _ => {}
             }
             let pending = fixture::snapshot(&runtime, now)["durability_pending"] == true;
+            if !forced_pause && episode.index == 0 && !pending
+                && progress["stage"] == "observing"
+                && progress["durable_windows"].as_u64().is_some_and(|n| n >= 1)
+                && progress["retained_rows"] == progress["durable_windows"]
+            {
+                let before = runtime.temporal_store().unwrap().load_temporal(now)
+                    .unwrap().unwrap().token.data().revision;
+                runtime.pause_temporal_capture(&runtime.mutation_guard().unwrap(), now).unwrap();
+                now = fixture::settle_async_boundary(&runtime, now);
+                assert_eq!(fixture::snapshot(&runtime, now)["stage"], "paused");
+                let after = runtime.temporal_store().unwrap().load_temporal(now)
+                    .unwrap().unwrap().token.data().revision;
+                assert_eq!(after, before.checked_add(1).unwrap(),
+                    "the explicit legal pause is exactly one durable transition");
+                forced_pause = true;
+                continue;
+            }
             sequence += 1;
             for source in 1..=3 {
                 match runtime.ingest_native(&packet(source, sequence, now, episode.condition), now)
@@ -324,6 +378,8 @@ fn record_train_uncached(root: &Path) -> (Arc<RoomLearningRuntime>, u64) {
         now = fixture::settle_async_boundary(&runtime, now);
     }
     let complete = fixture::snapshot(&runtime, now);
+    assert!(forced_pause && forced_resume,
+        "the native producer must exercise an actual durable pause and resume");
     assert_eq!(complete["stage"], "complete");
     assert_eq!(
         complete["sealed_train_episodes"],
@@ -420,11 +476,9 @@ async fn c4a_actual_seven_train_fit_frozen_ack_and_exact_cold_model() {
         .load_temporal(now)
         .unwrap()
         .unwrap();
-    assert_eq!(
-        loaded.token.data().revision,
-        78,
-        "actual genesis +7 segments +64 windows +7 seals"
-    );
+    let train_revision = loaded.token.data().revision;
+    assert!(train_revision >= 80,
+        "all initial segments, 64 windows and 7 seals plus the forced pause/resume must be durable; extra legal pauses add transitions");
     let (compute_tx, compute_rx) = std::sync::mpsc::sync_channel(1);
     let (compute_release_tx, compute_release_rx) = std::sync::mpsc::sync_channel(1);
     let mut compute_gate = ReleaseGate(Some(compute_release_tx));
@@ -599,7 +653,7 @@ async fn c4a_actual_seven_train_fit_frozen_ack_and_exact_cold_model() {
         .unwrap();
     assert_eq!(
         loaded.token.data().revision,
-        79,
+        train_revision.checked_add(1).unwrap(),
         "one actual durable Frozen transition"
     );
     let data: serde_json::Value = serde_json::from_slice(loaded.prefix.unwrap().bytes()).unwrap();
@@ -687,7 +741,7 @@ async fn c4a_actual_seven_train_fit_frozen_ack_and_exact_cold_model() {
             .token
             .data()
             .revision,
-        79
+        train_revision.checked_add(1).unwrap()
     );
     drop(runtime);
     let cold_now = post_ack + 1_000_000_000;
@@ -895,6 +949,8 @@ async fn c4a_owner_cancel_drains_actual_prepared_frozen_writer_before_synthetic_
 async fn c4a_actual_frozen_lost_ack_same_intent_repair_installs_only_after_exact_ack() {
     let directory = tempfile::tempdir().unwrap();
     let (rt, now) = record_train(directory.path());
+    let train_revision = rt.temporal_store().unwrap().load_temporal(now)
+        .unwrap().unwrap().token.data().revision;
     let at = fit_ready(&rt, now).await;
     let writer = {
         let s = rt.inner.lock().unwrap();
@@ -924,7 +980,8 @@ async fn c4a_actual_frozen_lost_ack_same_intent_repair_installs_only_after_exact
         .unwrap()
         .unwrap()
         .token;
-    assert_eq!(token.data().revision, 79);
+    assert_eq!(token.data().revision, train_revision.checked_add(1).unwrap(),
+        "Frozen adds exactly one transition to the actual completed Train prefix");
     rt.repair_temporal_capture(&rt.mutation_guard().unwrap(), now)
         .unwrap();
     now = fixture::settle_async_boundary(&rt, now);
