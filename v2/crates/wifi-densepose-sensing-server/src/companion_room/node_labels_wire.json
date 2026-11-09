@@ -1,0 +1,168 @@
+{
+  "schema": "ruview.test.room-node-labels-contract.v1",
+  "evidence": "SYNTHETIC_CONTRACT_FIXTURE_PENDING_ACTUAL_RUST_SERIALIZER_AND_ROUTER_CHECK",
+  "cases": {
+    "current": {
+      "schema": "ruview.companion.room-node-labels.v1",
+      "success": true,
+      "installation_id": "installation-1",
+      "publication": {
+        "binding_digest": "4b9276991f7d676f220ea053c3474e120f52698682c246cc92f2c66109a6be28",
+        "publication_revision": 1,
+        "node_ids": [
+          1
+        ]
+      },
+      "status": "current",
+      "metadata_revision": 2,
+      "labels": [
+        {
+          "node_id": 1,
+          "display_name": "West transmitter"
+        }
+      ]
+    },
+    "empty_current": {
+      "schema": "ruview.companion.room-node-labels.v1",
+      "success": true,
+      "installation_id": "installation-1",
+      "publication": {
+        "binding_digest": "4b9276991f7d676f220ea053c3474e120f52698682c246cc92f2c66109a6be28",
+        "publication_revision": 1,
+        "node_ids": [
+          1
+        ]
+      },
+      "status": "current",
+      "metadata_revision": 3,
+      "labels": []
+    },
+    "not_reported": {
+      "schema": "ruview.companion.room-node-labels.v1",
+      "success": true,
+      "installation_id": "installation-1",
+      "publication": {
+        "binding_digest": "4b9276991f7d676f220ea053c3474e120f52698682c246cc92f2c66109a6be28",
+        "publication_revision": 1,
+        "node_ids": [
+          1
+        ]
+      },
+      "status": "not_reported",
+      "metadata_revision": 0,
+      "labels": []
+    },
+    "unavailable": {
+      "schema": "ruview.companion.room-node-labels.v1",
+      "success": true,
+      "installation_id": "installation-1",
+      "publication": {
+        "binding_digest": "4b9276991f7d676f220ea053c3474e120f52698682c246cc92f2c66109a6be28",
+        "publication_revision": 1,
+        "node_ids": [
+          1
+        ]
+      },
+      "status": "unavailable",
+      "metadata_revision": null,
+      "labels": null
+    },
+    "room_required": {
+      "schema": "ruview.companion.room-node-labels.v1",
+      "success": true,
+      "installation_id": "installation-1",
+      "publication": null,
+      "status": "room_required",
+      "metadata_revision": null,
+      "labels": null
+    },
+    "update": {
+      "schema": "ruview.companion.room-node-labels-update.v1",
+      "installation_id": "installation-1",
+      "expected_publication": {
+        "binding_digest": "4b9276991f7d676f220ea053c3474e120f52698682c246cc92f2c66109a6be28",
+        "publication_revision": 1,
+        "node_ids": [
+          1
+        ]
+      },
+      "expected_metadata_revision": 1,
+      "labels": [
+        {
+          "node_id": 1,
+          "display_name": "West transmitter"
+        }
+      ]
+    },
+    "updated": {
+      "schema": "ruview.companion.room-node-labels-update.v1",
+      "success": true,
+      "effect": "updated",
+      "snapshot": {
+        "schema": "ruview.companion.room-node-labels.v1",
+        "success": true,
+        "installation_id": "installation-1",
+        "publication": {
+          "binding_digest": "4b9276991f7d676f220ea053c3474e120f52698682c246cc92f2c66109a6be28",
+          "publication_revision": 1,
+          "node_ids": [
+            1
+          ]
+        },
+        "status": "current",
+        "metadata_revision": 2,
+        "labels": [
+          {
+            "node_id": 1,
+            "display_name": "West transmitter"
+          }
+        ]
+      }
+    },
+    "already_current": {
+      "schema": "ruview.companion.room-node-labels-update.v1",
+      "success": true,
+      "effect": "already_current",
+      "snapshot": {
+        "schema": "ruview.companion.room-node-labels.v1",
+        "success": true,
+        "installation_id": "installation-1",
+        "publication": {
+          "binding_digest": "4b9276991f7d676f220ea053c3474e120f52698682c246cc92f2c66109a6be28",
+          "publication_revision": 1,
+          "node_ids": [
+            1
+          ]
+        },
+        "status": "current",
+        "metadata_revision": 2,
+        "labels": [
+          {
+            "node_id": 1,
+            "display_name": "West transmitter"
+          }
+        ]
+      }
+    },
+    "invalid_request": {
+      "schema": "ruview.companion.room-node-labels.v1",
+      "success": false,
+      "error_code": "invalid_request"
+    },
+    "conflict": {
+      "schema": "ruview.companion.room-node-labels.v1",
+      "success": false,
+      "error_code": "conflict"
+    },
+    "labels_unavailable": {
+      "schema": "ruview.companion.room-node-labels.v1",
+      "success": false,
+      "error_code": "labels_unavailable"
+    },
+    "forbidden": {
+      "schema": "ruview.companion.room-node-labels.v1",
+      "success": false,
+      "error_code": "forbidden"
+    }
+  }
+}
