@@ -147,6 +147,16 @@ static void mr60_process_frame(uint16_t type, const uint8_t *data, uint16_t len)
     case MR60_TYPE_PRESENCE:
         if (len >= 1) {
             s_state.person_present = (data[0] != 0);
+            /* MR60BHA2 exposes a single-target vital-sign presence flag rather
+             * than a reliable people-count frame. Keep the public count in
+             * lockstep with that authoritative flag so downstream clients do
+             * not report zero targets while fresh radar vitals are arriving. */
+            s_state.target_count = mmwave_mr60_target_count(s_state.person_present);
+            if (!s_state.person_present) {
+                s_state.heart_rate_bpm = 0.0f;
+                s_state.breathing_rate = 0.0f;
+                s_state.distance_cm = 0.0f;
+            }
         }
         break;
 

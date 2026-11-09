@@ -4121,6 +4121,30 @@ fn parse_edge_fused_vitals(buf: &[u8]) -> Option<EdgeFusedVitalsPacket> {
     })
 }
 
+fn edge_fused_vitals_message(fused: &EdgeFusedVitalsPacket) -> serde_json::Value {
+    serde_json::json!({
+        "type": "edge_fused_vitals",
+        "node_id": fused.node_id,
+        "breathing_rate_bpm": fused.breathing_rate_bpm,
+        "heartrate_bpm": fused.heartrate_bpm,
+        "n_persons": fused.n_persons,
+        "person_count_valid": fused.person_count_valid,
+        "fusion_confidence": fused.fusion_confidence,
+        "mmwave": {
+            "present": fused.flags & 0x08 != 0,
+            "hr_bpm": fused.mmwave_hr_bpm,
+            "br_bpm": fused.mmwave_br_bpm,
+            "distance_cm": fused.mmwave_distance_cm,
+            "targets": fused.mmwave_targets,
+            "confidence": fused.mmwave_confidence,
+            "type": fused.mmwave_type,
+        },
+        "motion_energy": fused.motion_energy,
+        "presence_score": fused.presence_score,
+        "timestamp_ms": fused.timestamp_ms,
+    })
+}
+
 #[cfg(test)]
 mod issue_928_magic_collision_tests {
     //! Issue #928 — `0xC511_0004` was being parsed as WASM output, eating the
@@ -4140,7 +4164,7 @@ mod issue_928_magic_collision_tests {
         buf[8..12].copy_from_slice(&720_000u32.to_le_bytes());  // heartrate 72.0 BPM
         buf[12] = (-55i8) as u8;                                // rssi
         buf[13] = 1;                                            // n_persons
-        buf[14] = 2;                                            // mmwave_type
+        buf[14] = 1;                                            // mmwave_type (MR60BHA2)
         buf[15] = 85;                                           // fusion_confidence
         buf[16..20].copy_from_slice(&0.42f32.to_le_bytes());    // motion_energy
         buf[20..24].copy_from_slice(&0.95f32.to_le_bytes());    // presence_score
@@ -4165,7 +4189,7 @@ mod issue_928_magic_collision_tests {
         assert_eq!(pkt.rssi, -55);
         assert_eq!(pkt.n_persons, 1);
         assert!(pkt.person_count_valid);
-        assert_eq!(pkt.mmwave_type, 2);
+        assert_eq!(pkt.mmwave_type, 1);
         assert_eq!(pkt.fusion_confidence, 85);
         assert!((pkt.motion_energy - 0.42).abs() < 1e-6);
         assert!((pkt.presence_score - 0.95).abs() < 1e-6);
@@ -4175,6 +4199,11 @@ mod issue_928_magic_collision_tests {
         assert!((pkt.mmwave_distance_cm - 182.0).abs() < 1e-6);
         assert_eq!(pkt.mmwave_targets, 1);
         assert_eq!(pkt.mmwave_confidence, 90);
+
+        let message = edge_fused_vitals_message(&pkt);
+        assert_eq!(message["mmwave"]["present"], true);
+        assert_eq!(message["mmwave"]["targets"], 1);
+        assert_eq!(message["mmwave"]["type"], 1);
     }
 
     #[test]
@@ -13987,26 +14016,7 @@ async fn udp_receiver_task(
                         fused.mmwave_targets, fused.fusion_confidence,
                     );
                     let s = state.write().await;
-                    if let Ok(json) = serde_json::to_string(&serde_json::json!({
-                        "type": "edge_fused_vitals",
-                        "node_id": fused.node_id,
-                        "breathing_rate_bpm": fused.breathing_rate_bpm,
-                        "heartrate_bpm": fused.heartrate_bpm,
-                        "n_persons": fused.n_persons,
-                        "person_count_valid": fused.person_count_valid,
-                        "fusion_confidence": fused.fusion_confidence,
-                        "mmwave": {
-                            "hr_bpm": fused.mmwave_hr_bpm,
-                            "br_bpm": fused.mmwave_br_bpm,
-                            "distance_cm": fused.mmwave_distance_cm,
-                            "targets": fused.mmwave_targets,
-                            "confidence": fused.mmwave_confidence,
-                            "type": fused.mmwave_type,
-                        },
-                        "motion_energy": fused.motion_energy,
-                        "presence_score": fused.presence_score,
-                        "timestamp_ms": fused.timestamp_ms,
-                    })) {
+                    if let Ok(json) = serde_json::to_string(&edge_fused_vitals_message(&fused)) {
                         let _ = s.tx.send(json);
                     }
                     continue;
