@@ -20,6 +20,8 @@ set(SRCS
     "c6_sync_espnow.c"
     # ADR-110 B1/B2 unblock — soft-AP HE/TWT (C6-only when enabled)
     "c6_softap_he.c"
+    # Node discovery over mDNS (runtime-gated by CONFIG_CSI_NODE_MDNS)
+    "node_mdns.c"
 )
 
 # ESP-IDF v6+: headers must resolve via explicit REQUIRES (no implicit deps).
@@ -46,6 +48,7 @@ set(REQUIRES
     mbedtls
     efuse
     led_strip
+    mdns                  # node_mdns.c (espressif/mdns managed component)
 )
 
 if(IDF_TARGET STREQUAL "esp32c5" AND

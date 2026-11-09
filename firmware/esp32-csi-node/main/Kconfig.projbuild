@@ -504,6 +504,36 @@ menu "ADR-018 frame extensions (ADR-110)"
             about this extension see the bytes as zero — fully
             backwards compatible.
 
+    choice CSI_HE_INVALID_POLICY
+        prompt "HE frames with an invalid channel estimate (ADR-423 D1)"
+        default CSI_HE_INVALID_POLICY_DROP
+        help
+            HE-capable targets (C5/C6) flag each CSI frame with
+            rx_channel_estimate_info_vld. ADR-423 measured vld=0 HE-SU
+            frames as ~16x less stable than vld=1 on an ESP32-C6.
+            Ignored on targets without HE support.
+
+        config CSI_HE_INVALID_POLICY_DROP
+            bool "Drop (default): never stream or process them"
+        config CSI_HE_INVALID_POLICY_TAG
+            bool "Tag: stream with ADR-018 byte 19 bit 5 set, skip edge DSP"
+        config CSI_HE_INVALID_POLICY_PASS
+            bool "Pass: pre-ADR-423 behaviour, for A/B comparison only"
+    endchoice
+
+endmenu
+
+menu "Node discovery"
+
+    config CSI_NODE_MDNS
+        bool "Advertise this node over mDNS (_ruview-node._tcp)"
+        default y
+        help
+            Announce the node on the LAN with TXT records node_id, fw, chip
+            and csi_target, on the OTA/control port. Advertising only: the
+            node never adopts a server it discovers, so a LAN host cannot
+            redirect CSI by answering mDNS.
+
 endmenu
 
 menu "Mock CSI (QEMU Testing)"

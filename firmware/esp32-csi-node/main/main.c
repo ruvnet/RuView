@@ -44,6 +44,7 @@
 #include "c6_antenna_select.h"     /* XIAO C6 RF switch (opt-in; generic C6 no-op) */
 #include "c6_sync_espnow.h"        /* ADR-110 D1 workaround: ESP-NOW sync */
 #include "c6_softap_he.h"          /* ADR-110 B1/B2: HE/TWT soft-AP (no-op when disabled) */
+#include "node_mdns.h"             /* LAN discovery of this node */
 #ifdef CONFIG_CSI_MOCK_ENABLED
 #include "mock_csi.h"
 #endif
@@ -597,6 +598,11 @@ void app_main(void)
     if (ota_ret != ESP_OK) {
         ESP_LOGW(TAG, "OTA server init failed: %s", esp_err_to_name(ota_ret));
     }
+#ifdef CONFIG_CSI_NODE_MDNS
+    /* Non-fatal: a node that cannot advertise still captures and streams. */
+    (void)node_mdns_start(g_nvs_config.node_id, g_nvs_config.target_ip,
+                          g_nvs_config.target_port, OTA_UPDATE_PORT);
+#endif
 #else
     esp_err_t ota_ret = ESP_ERR_NOT_SUPPORTED;
     ESP_LOGI(TAG, "Mock CSI mode: skipping OTA server (no network)");

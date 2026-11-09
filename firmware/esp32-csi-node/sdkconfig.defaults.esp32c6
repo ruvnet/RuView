@@ -102,3 +102,7 @@ CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=160
 # both transports and the 15.4 branch is #ifdef-gated on this symbol, so the
 # working ESP-NOW path keeps setting it.
 CONFIG_C6_TIMESYNC_ENABLE=n
+
+# Node mDNS discovery: C6 4 MB image has headroom (~1088 KiB with it,
+# 1152 KiB gate; MEASURED on COM11, IDF v5.4).
+CONFIG_CSI_NODE_MDNS=y
