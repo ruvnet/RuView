@@ -41,11 +41,16 @@ static const char *chip_name(void)
 #endif
 }
 
-static void emit_hello(const char *nonce)
+static bool emit_hello(const char *nonce)
 {
     const esp_app_desc_t *description = esp_app_get_description();
     char digest[17] = {0};
     ruview_onboarding_device_digest(digest);
+    if (strcmp(digest, "0000000000000000") == 0) {
+        printf("RUVIEW_HELLO_ERR_V1 nonce=%s reason=identity_unavailable\n", nonce);
+        fflush(stdout);
+        return false;
+    }
     const bool configured = s_current_config.wifi_ssid[0] != '\0' &&
                             s_current_config.target_ip[0] != '\0';
     printf("RUVIEW_HELLO_OK_V1 nonce=%s chip=%s version=%s node_id=%u "
@@ -54,6 +59,7 @@ static void emit_hello(const char *nonce)
            (unsigned)s_current_config.node_id, s_current_config.target_ip,
            (unsigned)s_current_config.target_port, configured ? 1U : 0U, digest);
     fflush(stdout);
+    return true;
 }
 
 static esp_err_t commit_config(const ruview_onboarding_config_t *config)
@@ -77,9 +83,13 @@ static void process_line(char *line)
 {
     char nonce[RUVIEW_ONBOARDING_NONCE_HEX_LEN + 1] = {0};
     if (ruview_onboarding_parse_hello(line, nonce)) {
-        memcpy(s_issued_nonce, nonce, sizeof(s_issued_nonce));
-        s_nonce_issued_at_us = esp_timer_get_time();
-        emit_hello(nonce);
+        // A failed identity must neither mint nor retain provisioning authority.
+        s_issued_nonce[0] = '\0';
+        s_nonce_issued_at_us = 0;
+        if (emit_hello(nonce)) {
+            memcpy(s_issued_nonce, nonce, sizeof(s_issued_nonce));
+            s_nonce_issued_at_us = esp_timer_get_time();
+        }
         return;
     }
     if (strncmp(line, "RUVIEW_CONFIG_V1 ", 17) != 0) return;
