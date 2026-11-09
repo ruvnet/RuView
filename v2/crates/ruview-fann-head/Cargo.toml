@@ -1,0 +1,31 @@
+[package]
+name = "ruview-fann-head"
+description = "Default-off ruv-FANN presence head for RuView: parity, bounded fit, shadow scoring and replay (ADR-425)"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+# Depends on an exact ruv-FANN source revision (the prepared/autograd APIs are
+# not in a crates.io release yet), so this crate cannot be published.
+publish = false
+
+[dependencies]
+thiserror.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+sha2.workspace = true
+# ADR-425: exact pin of merged ruv-FANN PR 202. No default features: no rayon,
+# bincode, flate2, wgpu or wasm in the sensing helper.
+ruv-fann = { git = "https://github.com/ruvnet/ruv-FANN", rev = "d94b47d8e3a5dcb92d6a1f0b966593233b40458c", default-features = false, features = ["std", "serde"] }
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "head"
+harness = false
+
+[[bin]]
+name = "ruview-fann-replay"
+path = "src/bin/ruview-fann-replay.rs"

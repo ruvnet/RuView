@@ -9199,6 +9199,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ruv-fann"
+version = "0.2.2"
+source = "git+https://github.com/ruvnet/ruv-FANN?rev=d94b47d8e3a5dcb92d6a1f0b966593233b40458c#d94b47d8e3a5dcb92d6a1f0b966593233b40458c"
+dependencies = [
+ "getrandom 0.2.17",
+ "num-traits",
+ "rand 0.8.5",
+ "rand_distr 0.4.3",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "ruvector-attention"
 version = "0.1.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9427,6 +9441,18 @@ version = "0.3.1"
 dependencies = [
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "ruview-fann-head"
+version = "0.3.1"
+dependencies = [
+ "criterion",
+ "ruv-fann",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
  "thiserror 2.0.18",
 ]
 

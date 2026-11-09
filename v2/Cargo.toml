@@ -115,6 +115,7 @@ members = [
     # ADR-300 phase 2 — unified world-model core:
     "crates/ruview-hal",        # ADR-320 sensor HAL (any modality -> Observation)
     "crates/ruview-groundtruth",# ADR-303 ground-truth synchronization / validation plane
+    "crates/ruview-fann-head",  # ADR-425 default-off ruv-FANN presence head (shadow + replay)
     "crates/ruview-track",      # ADR-307 persistent privacy-preserving tracking
     "crates/ruview-fusion",     # ADR-311 uncertainty-aware fusion -> one world state
     # ADR-300 phase 3 — higher-ceiling primitives (on the fused world state):
