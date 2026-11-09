@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 const SCHEMA: &str = "ruview.room-learner.trial-schedule.v2";
 const PROFILE: &str = "native-2s-three-source-56bin-option-a-engineering-v1";
+pub(crate) const OPERATOR_EIGHT_PROFILE: &str = "native-2s-three-source-56bin-operator-eight-step-v1";
 const MAX_BYTES: usize = 65_536;
 const MAX_PROFILE_ROWS: usize = 77;
 const MAX_TRAIN_WINDOWS: usize = 64;
@@ -20,9 +21,13 @@ const MAX_TRAIN_WINDOWS: usize = 64;
 #[serde(rename_all = "snake_case")]
 pub enum LeadInPolicy {
     Train5HeldOut15EngineeringV1,
+    OperatorEightStepV1,
 }
 impl LeadInPolicy {
-    fn milliseconds(self, role: DataRole) -> u64 {
+    fn milliseconds(self, role: DataRole, condition: RoomLabel) -> u64 {
+        if self == Self::OperatorEightStepV1 {
+            return if matches!(condition, RoomLabel::Empty | RoomLabel::AdjacentOnly) { 15_000 } else { 5_000 };
+        }
         match role {
             DataRole::Train => 5_000,
             DataRole::HeldOut => 15_000,
@@ -246,6 +251,28 @@ impl ManagedScheduleContract {
         }
         let reserved = native.max_observed_span_ms() + native.max_first_packet_delay_ms();
         let mut episodes = Vec::new();
+        if lead_in_policy == LeadInPolicy::OperatorEightStepV1 {
+            for condition in [RoomLabel::Empty, RoomLabel::OccupiedStatic, RoomLabel::OccupiedMoving, RoomLabel::AdjacentOnly] {
+                for role in [DataRole::Train, DataRole::Validation] {
+                    let duration = if role == DataRole::Validation { 15_000 } else if condition == RoomLabel::Empty { 600_000 } else { 60_000 };
+                    let count = if role == DataRole::Train { 16 } else { 4 };
+                    episodes.push(Episode {
+                        index: episodes.len(),
+                        episode_key: format!("operator-{role:?}-{condition:?}-episode-0"),
+                        role,
+                        condition,
+                        target_active_recording_ms: duration,
+                        lead_in_ms: lead_in_policy.milliseconds(role, condition),
+                        requires_explicit_operator_start: true,
+                        requires_conditions_held_confirmation: true,
+                        separately_executed_episode_required: true,
+                        slots: slots(duration, count, reserved)?,
+                        retained_nominal_window_ms: count as u64 * native.target_span_ms(),
+                        retained_maximum_window_ms: count as u64 * native.max_observed_span_ms(),
+                    });
+                }
+            }
+        } else {
         for role in [DataRole::Train, DataRole::HeldOut] {
             for condition in [
                 RoomLabel::Empty,
@@ -263,7 +290,7 @@ impl ManagedScheduleContract {
                         role,
                         condition,
                         target_active_recording_ms: duration,
-                        lead_in_ms: lead_in_policy.milliseconds(role),
+                        lead_in_ms: lead_in_policy.milliseconds(role, condition),
                         requires_explicit_operator_start: true,
                         requires_conditions_held_confirmation: true,
                         separately_executed_episode_required: true,
@@ -273,6 +300,7 @@ impl ManagedScheduleContract {
                     });
                 }
             }
+        }
         }
         let role_counts = |role| episodes.iter().filter(|e| e.role == role).count();
         let role_windows = |role| {
@@ -297,29 +325,34 @@ impl ManagedScheduleContract {
                 .sum::<u64>()
         };
         let train = role_windows(DataRole::Train);
-        let held = role_windows(DataRole::HeldOut);
+        let check_role = if lead_in_policy == LeadInPolicy::OperatorEightStepV1 { DataRole::Validation } else { DataRole::HeldOut };
+        let held = role_windows(check_role);
         let total = add(train, held)?;
         let (rows, values) = capacity(&context, native.source_policies(), train, total)?;
-        let resources = native.resources().clone();
+        let resources = if lead_in_policy == LeadInPolicy::OperatorEightStepV1 {
+            let views = mul(total, context.sources.len())?;
+            let serialized = add(add(add(mul(values, 25)?, mul(rows, 86)?)?, mul(views, 4096)?)?, add(mul(total, 4096)?, 8 * 1024 * 1024)?)?;
+            ResourcePreflight { cohorts: total, source_views: views, max_retained_rows: rows, max_numeric_values: values, serialized_upper_bound_bytes: serialized }
+        } else { native.resources().clone() };
         if resources.cohorts != total
             || resources.max_retained_rows != rows
             || resources.max_numeric_values != values
         {
             return Err("managed_schedule_resource_contract_changed".into());
         }
-        let active = role_time(DataRole::Train) + role_time(DataRole::HeldOut);
-        let lead = role_lead(DataRole::Train) + role_lead(DataRole::HeldOut);
+        let active = role_time(DataRole::Train) + role_time(check_role);
+        let lead = role_lead(DataRole::Train) + role_lead(check_role);
         let counts = ScheduleCounts {
             train_episodes: role_counts(DataRole::Train),
-            held_out_episodes: role_counts(DataRole::HeldOut),
+            held_out_episodes: role_counts(check_role),
             train_windows: train,
             held_out_windows: held,
             total_windows: total,
             train_active_recording_ms: role_time(DataRole::Train),
-            held_out_active_recording_ms: role_time(DataRole::HeldOut),
+            held_out_active_recording_ms: role_time(check_role),
             active_recording_ms: active,
             train_lead_in_ms: role_lead(DataRole::Train),
-            held_out_lead_in_ms: role_lead(DataRole::HeldOut),
+            held_out_lead_in_ms: role_lead(check_role),
             total_lead_in_ms: lead,
             nominal_recording_and_lead_in_ms: active + lead,
             nominal_joint_window_ms: total as u64 * native.target_span_ms(),
@@ -329,7 +362,7 @@ impl ManagedScheduleContract {
             verified_independent_trial_count: None,
         };
         let body = Body {
-            profile_id: PROFILE,
+            profile_id: if lead_in_policy == LeadInPolicy::OperatorEightStepV1 { OPERATOR_EIGHT_PROFILE } else { PROFILE },
             context,
             lead_in_policy,
             native_input: NativeInputPolicy {
@@ -351,7 +384,7 @@ impl ManagedScheduleContract {
                 full_episode_quality_monitoring_implemented: false,
                 independence_verified: false,
                 scientific_adequacy_claimed: false,
-                user_facing_default: false,
+                user_facing_default: lead_in_policy == LeadInPolicy::OperatorEightStepV1,
             },
         };
         let result = Self {
@@ -379,7 +412,7 @@ impl ManagedScheduleContract {
         }
         let value: Import =
             serde_json::from_slice(bytes).map_err(|_| "managed_schedule_invalid_schema")?;
-        if value.schema != SCHEMA || value.body["profile_id"] != PROFILE {
+        if value.schema != SCHEMA || (value.body["profile_id"] != PROFILE && value.body["profile_id"] != OPERATOR_EIGHT_PROFILE) {
             return Err("managed_schedule_unsupported_profile".into());
         }
         let context = serde_json::from_value(value.body["context"].clone())
@@ -403,6 +436,8 @@ impl ManagedScheduleContract {
         let model=bound.frozen_artifact_sha256.as_ref().and_then(|sha|FrozenModelIdentity::from_runtime_verified_artifact(self,sha.clone()).ok());
         self.bind_episode_start(run,bound.episode.index,bound.attempt_ordinal,bound.segment_ordinal,model.as_ref()).ok().is_some_and(|expected|serde_json::to_vec(&expected).ok()==serde_json::to_vec(bound).ok())
     }
+    pub fn is_operator_eight_step(&self) -> bool { self.body.profile_id == OPERATOR_EIGHT_PROFILE }
+    pub fn profile_id(&self) -> &str { self.body.profile_id }
     pub fn sha256(&self) -> &str {
         &self.sha256
     }
@@ -450,6 +485,7 @@ impl ManagedScheduleContract {
                 }
             }
             DataRole::Train => {}
+            DataRole::Validation if self.is_operator_eight_step() && frozen.is_none() => {}
             _ => return Err("managed_schedule_invalid_role".into()),
         }
         let identity = |kind: &str, parts: &[serde_json::Value]| -> Result<String, String> {

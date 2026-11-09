@@ -12,6 +12,7 @@ fn temporal_app(state: SharedState) -> Router {
         .route("/train", post(train_dispatch))
         .route("/evaluate", post(evaluate_dispatch))
         .route("/restore", post(restore_dispatch))
+        .route("/retry", post(retry_dispatch))
         .route("/discard", post(discard_dispatch))
         .route("/phase/cancel", post(pause_dispatch))
         .route("/train/cancel", post(cancel_operation_dispatch))
@@ -260,6 +261,7 @@ async fn temporal_selection_mutations_keep_the_existing_local_owner_gate() {
     for path in [
         "/api/v1/room-learner/qualify",
         "/api/v1/room-learner/select",
+        "/api/v1/room-learner/recovery/retry",
     ] {
         for (peer, token) in [
             ("127.0.0.1:41000", "synthetic-peer-read"),
@@ -594,4 +596,186 @@ async fn fullrun_priming_still_rejects_zero_nan_and_nonfinite_rate_metadata() {
         assert_eq!(rt.ingest_native(&p,rt.receiver_now_ns()),Err("acquisition_cadence_changed".into()));
         let s=decoded(app,&format!("/status?schema={STATUS_SCHEMA}"),None).await;assert_eq!(s["status"]["capture"]["retained_windows"],0);assert_eq!(s["status"]["capture"]["observed_ms"],0);
     }
+}
+
+#[tokio::test]
+async fn retry_owner_router_denies_anonymous_and_paired_grants_before_mutating_runtime(){
+    let (_dir,state)=fixture();let rt=state.read().await.room_learning.as_ref().unwrap().clone();
+    let auth=wifi_densepose_sensing_server::bearer_auth::AuthState::from_token("synthetic-owner");
+    let app=owner_selection_routes(auth).with_state(state);
+    let guard=rt.mutation_guard().unwrap();
+    let body=serde_json::json!({"schema":RECOVERY_RETRY_REQUEST_SCHEMA,"model_kind":"ruview.room-learner.managed-temporal-input.v3","expected":guard,"capture_generation_id":"c".repeat(64),"retry_confirmed":true});
+    for (token,paired) in [(None,false),(Some("synthetic-peer-read"),false),(Some("synthetic-owner"),true)] {
+        let mut builder=Request::builder().method(Method::POST).uri("/api/v1/room-learner/recovery/retry").header("content-type","application/json");
+        if let Some(token)=token{builder=builder.header("authorization",format!("Bearer {token}"));}
+        let mut request=builder.body(Body::from(serde_json::to_vec(&body).unwrap())).unwrap();
+        request.extensions_mut().insert(axum::extract::ConnectInfo("127.0.0.1:41000".parse::<SocketAddr>().unwrap()));
+        if paired {let(_,rx)=tokio::sync::watch::channel(false);request.extensions_mut().insert(wifi_densepose_sensing_server::companion::Grant{device_id:"synthetic-paired-readonly".into(),expires_at:chrono::Utc::now().timestamp().max(0)as u64+30,revoked:rx});}
+        assert_eq!(app.clone().oneshot(request).await.unwrap().status(),StatusCode::FORBIDDEN);
+        assert_eq!(rt.mutation_guard().unwrap(),guard);
+    }
+}
+
+#[tokio::test]
+async fn retry_command_refuses_imported_rows_and_wrong_cas_at_the_actual_dispatch(){
+    let (_dir,state)=fixture();let rt=state.read().await.room_learning.as_ref().unwrap().clone();let app=temporal_app(state);
+    let guard=rt.mutation_guard().unwrap();
+    let body=serde_json::json!({"schema":RECOVERY_RETRY_REQUEST_SCHEMA,"model_kind":"ruview.room-learner.managed-temporal-input.v3","expected":guard,"capture_generation_id":"c".repeat(64),"retry_confirmed":true});
+    for field in ["rows","recording_start","new_training","deadline","committed"]{
+        let mut invalid=body.clone();invalid[field]=serde_json::json!(true);
+        assert_eq!(request_raw(app.clone(),"/retry",Some(invalid)).await.0,StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(rt.mutation_guard().unwrap(),guard);
+    }
+    let mut wrong=body;wrong["expected"]["runtime_epoch"]=serde_json::json!("wrong-runtime");
+    let response=decoded(app,"/retry",Some(wrong)).await;
+    assert_eq!(response["success"],false);assert_eq!(rt.mutation_guard().unwrap(),guard);
+}
+
+#[tokio::test]
+async fn actual_owner_retry_http_returns_paused_same_capture_without_starting_recording(){
+    use wifi_densepose_sensing_server::room_learner::{observation::SourceSpec,recovery_store::RecoveryStore};
+    let(dir,state)=fixture();let owner="a".repeat(64);let path=dir.path().join(&owner).join("SensingServer");
+    let store=RecoveryStore::new(&path,&owner,"synthetic-install",Some(&[7;32])).unwrap();
+    let rt=Arc::new(RoomLearningRuntime::new_with_recovery(&path,&owner,"synthetic-install",store).unwrap());
+    let profile="native-2s-three-source-56bin-operator-eight-step-v1";
+    rt.temporal_select_profile_guarded_v2(Some(profile),&rt.mutation_guard().unwrap()).unwrap();
+    let sources=(15..=17u8).map(|id|SourceSpec{source_id:id,device_id:format!("esp32-node-{id}"),grid_id:"ant1-bins64-ppdu0-usable-drop2-linear-v2".into(),feature_count:56,signal_kind:ruview_unified::RfModality::WifiCsi,center_frequency_hz:2_437_000_000,bandwidth_hz:20_000_000,link_id:format!("synthetic-{id}"),link_index:0,geometry:None}).collect();
+    let context=rt.bind_context("b".repeat(64),1,sources).unwrap();
+    rt.temporal_configure_v2(&rt.mutation_guard().unwrap(),context,"synthetic-http-retry".into(),true,rt.receiver_now_ns()).unwrap();
+    let started=std::time::Instant::now();
+    loop{let status=rt.temporal_status_v2(rt.receiver_now_ns()).unwrap();if status["capture"]["stage"]=="ready"{break;}assert!(started.elapsed()<std::time::Duration::from_secs(10));tokio::time::sleep(std::time::Duration::from_millis(1)).await;}
+    rt.record_native_rejection(15,"ant1-bins64-ppdu0-usable-drop2-linear-v2","SYNTHETIC stopped capture for actual HTTP Retry");
+    let before=rt.temporal_status_v2(rt.receiver_now_ns()).unwrap();
+    assert_eq!(before["capture"]["stage"],"failed");
+    state.write().await.room_learning=Some(rt.clone());
+    let router=owner_selection_routes(wifi_densepose_sensing_server::bearer_auth::AuthState::from_token("synthetic-owner")).with_state(state);
+    let body=serde_json::json!({"schema":RECOVERY_RETRY_REQUEST_SCHEMA,"model_kind":"ruview.room-learner.managed-temporal-input.v3","expected":rt.mutation_guard().unwrap(),"capture_generation_id":before["capture"]["capture_generation_id"],"retry_confirmed":true});
+    let mut request=Request::builder().method(Method::POST).uri("/api/v1/room-learner/recovery/retry").header("content-type","application/json").header("authorization","Bearer synthetic-owner").body(Body::from(serde_json::to_vec(&body).unwrap())).unwrap();
+    request.extensions_mut().insert(axum::extract::ConnectInfo("127.0.0.1:41000".parse::<SocketAddr>().unwrap()));
+    let response=router.oneshot(request).await.unwrap();assert_eq!(response.status(),StatusCode::OK);
+    let bytes=axum::body::to_bytes(response.into_body(),65536).await.unwrap();let reply:serde_json::Value=serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(reply["success"],true,"{reply}");let after=&reply["status"]["capture"];
+    assert_eq!(after["stage"],"paused");assert_eq!(after["durability_pending"],false);assert!(after["failure"].is_null());
+    assert_eq!(after["capture_generation_id"],before["capture"]["capture_generation_id"]);assert_eq!(after["original_deadline"],before["capture"]["original_deadline"]);
+    assert_eq!(after["retained_windows"],0);assert_eq!(after["durable_windows"],0);assert_eq!(after["observed_ms"],0);
+}
+
+/// SYNTHETIC real recovery file-lock contention through the production status
+/// composer. The handshake runs inside the actual blocking reader; there is no
+/// timing sleep or production Runtime hook standing in for contention.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn temporal_status_recovery_wait_releases_ingress_and_rechecks_authority() {
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    use wifi_densepose_sensing_server::room_learner::recovery_store::RecoveryStore;
+    for change in ["none", "privacy", "runtime", "profile", "epoch"] {
+        let (dir, state) = fixture();
+        let owner = "a".repeat(64);
+        let path = dir.path().join(&owner).join("SensingServer");
+        let recovery = RecoveryStore::new(&path, &owner, "synthetic-install", Some(&[7; 32])).unwrap();
+        let rt = Arc::new(RoomLearningRuntime::new_with_recovery(&path, &owner, "synthetic-install", recovery).unwrap());
+        state.write().await.room_learning = Some(rt.clone());
+        let recovery_path = path.join("room-learner-recovery");
+        let prefix_path = recovery_path.join("temporal-prefix-commitment-v1");
+        std::fs::create_dir(&prefix_path).unwrap();
+        std::fs::set_permissions(&prefix_path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let held = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false)
+            .mode(0o600).open(recovery_path.join("temporal-prefix.lock")).unwrap();
+        held.lock().unwrap();
+        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+        let reader_state = state.clone();
+        let reader_runtime = rt.clone();
+        let task = tokio::spawn(async move {
+            temporal_status_with_reader(&reader_state, &reader_runtime, move |reader, now| {
+                entered_tx.send(()).unwrap();
+                reader.temporal_status_snapshot_v2(now)
+            }).await.0
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(2), entered_rx).await.unwrap().unwrap();
+        // This is exactly the shared write acquisition the live UDP path needs.
+        // Before the repair it could not complete until held was unlocked.
+        let mut ingress = tokio::time::timeout(std::time::Duration::from_secs(2), state.write()).await
+            .expect("recovery file I/O must not hold the RF ingress lock");
+        assert!(!task.is_finished(), "the real recovery reader must still be blocked");
+        match change {
+            "none" => {},
+            "privacy" => ingress.privacy_mode = true,
+            "runtime" => ingress.room_learning = None,
+            "profile" => { rt.temporal_select_profile_guarded_v2(Some("native-2s-three-source-56bin-operator-eight-step-v1"), &rt.mutation_guard().unwrap()).unwrap(); },
+            "epoch" => ingress.calibration_boot_epoch.push_str("-changed"),
+            _ => unreachable!(),
+        }
+        drop(ingress);
+        held.unlock().unwrap();
+        let result = tokio::time::timeout(std::time::Duration::from_secs(2), task).await.unwrap().unwrap();
+        if change == "none" {
+            assert_eq!(result["success"], true, "{result}");
+            assert_eq!(result["status"]["mutation_guard"], serde_json::to_value(rt.mutation_guard().unwrap()).unwrap());
+        } else {
+            assert_eq!(result["success"], false, "{change}: {result}");
+            assert!(result.get("status").is_none(), "{change}: stale snapshot must not escape");
+            assert_eq!(result["error_code"], if change == "privacy" {"learner_privacy_mode"} else {"learner_state_changed"});
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancelled_status_retains_one_reader_permit_until_actual_work_finishes() {
+    let (_dir, state) = fixture();
+    let rt = state.read().await.room_learning.clone().unwrap();
+    let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let blocked_state = state.clone();
+    let blocked_rt = rt.clone();
+    let blocked = tokio::spawn(async move {
+        temporal_status_with_reader(&blocked_state, &blocked_rt, move |reader, now| {
+            entered_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+            reader.temporal_status_snapshot_v2(now)
+        }).await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(2), entered_rx).await.unwrap().unwrap();
+    blocked.abort();
+    assert!(blocked.await.unwrap_err().is_cancelled());
+    // Poll a real waiter once: the aborted HTTP task must not have released
+    // the permit still owned by its actual blocking reader.
+    let mut direct_wait = Box::pin(rt.acquire_temporal_status_reader());
+    std::future::poll_fn(|cx| {
+        assert!(std::future::Future::poll(direct_wait.as_mut(), cx).is_pending());
+        std::task::Poll::Ready(())
+    }).await;
+    drop(direct_wait);
+    let invoked = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let mut waiters = Vec::new();
+    for _ in 0..3 {
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let waiter_state = state.clone();
+        let waiter_rt = rt.clone();
+        let calls = invoked.clone();
+        waiters.push(tokio::spawn(async move {
+            started_tx.send(()).unwrap();
+            temporal_status_with_reader(&waiter_state, &waiter_rt, move |reader, now| {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                reader.temporal_status_snapshot_v2(now)
+            }).await
+        }));
+        tokio::time::timeout(std::time::Duration::from_secs(2), started_rx).await.unwrap().unwrap();
+    }
+    assert_eq!(invoked.load(std::sync::atomic::Ordering::SeqCst), 0,
+        "concurrent async waiters must not spawn more blocking readers");
+    for waiter in waiters {
+        assert!(!waiter.is_finished());
+        waiter.abort();
+        assert!(waiter.await.unwrap_err().is_cancelled());
+    }
+    // Cancellation did not retain the RF ingress lock either.
+    drop(tokio::time::timeout(std::time::Duration::from_secs(2), state.write()).await.unwrap());
+    release_tx.send(()).unwrap();
+    let permit = tokio::time::timeout(std::time::Duration::from_secs(2), rt.acquire_temporal_status_reader()).await
+        .expect("permit must return only after real blocking work exits").unwrap();
+    drop(permit);
+    assert_eq!(invoked.load(std::sync::atomic::Ordering::SeqCst), 0,
+        "explicitly canceled async waiters must never run later");
+    let response = temporal_status_with_reader(&state, &rt, |reader, now| reader.temporal_status_snapshot_v2(now)).await.0;
+    assert_eq!(response["success"], true, "{response}");
 }

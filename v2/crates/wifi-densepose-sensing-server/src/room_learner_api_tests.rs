@@ -199,6 +199,7 @@ fn every_new_mutation_requires_admin_and_default_cli_does_not_enable_capture() {
         "train/cancel",
         "evaluate",
         "recovery/restore",
+        "recovery/retry",
         "recovery/discard",
         "recovery/enable-current",
     ] {

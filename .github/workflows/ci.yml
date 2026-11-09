@@ -420,6 +420,9 @@ jobs:
   # workflow, so it doesn't gate the rest of the pipeline.
   docker-build:
     name: Docker Build & Test
+    # Manual CI is verification only. Use the separate canonical publisher
+    # for an explicitly authorized image publication.
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     needs: [code-quality, test, rust-tests]
     continue-on-error: true
@@ -495,7 +498,7 @@ jobs:
     name: API Documentation
     runs-on: ubuntu-latest
     needs: [docker-build]
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && github.event_name != 'workflow_dispatch'
     permissions:
       contents: write   # gh-pages deploy needs write (GITHUB_TOKEN is read-only by default -> 403)
     steps:
@@ -540,7 +543,8 @@ jobs:
     name: Notify
     runs-on: ubuntu-latest
     needs: [code-quality, test, rust-tests, ui-tests, performance-test, docker-build, docs]
-    if: always()
+    # This job also creates releases and sends external notifications.
+    if: always() && github.event_name != 'workflow_dispatch'
     permissions:
       contents: write   # required by softprops/action-gh-release
     # GitHub Actions does not allow `secrets.X` directly in step-level `if:`

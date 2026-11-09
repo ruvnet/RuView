@@ -1376,3 +1376,10 @@ impl RecoveryStore {
         })
     }
 }
+
+#[cfg(test)]
+impl RecoveryStore {
+    pub(crate) fn synthetic_fail_before_head_publication(&self,intent:&TemporalIntent,prefix:&ValidatedTemporalPrefix,now:u64)->Result<TemporalToken,String>{
+        self.publish_temporal_with(intent,Some(prefix),now,false,&mut|point|{if point=="before:head.stage:rename"{Err("synthetic_failed_head_publication".into())}else{Ok(())}})
+    }
+}

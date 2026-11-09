@@ -298,9 +298,25 @@ fn export_canonical_structural_wire_examples_without_runtime_authority() {
         blocker: Some("context_mismatch".into()),
     };
     println!("C4C_CANONICAL_PROGRESS_EXAMPLES={}",serde_json::to_string(&serde_json::json!({"fixture_kind":"SYNTHETIC_STRUCTURAL_SERIALIZATION_ONLY_NOT_AUTHORITY","matching_complete":matching,"context_mismatch_redacted":mismatch,"selected_temporal_idle":{"schema":SELECTION_SCHEMA,"success":true,"progress_schema":PAIRED_PROGRESS_SCHEMA,"model_selection":selection}})).unwrap());
-    let examples = serde_json::json!({"fixture_kind":"SYNTHETIC_STRUCTURAL_SERIALIZATION_ONLY_NOT_AUTHORITY","idle_response":{"success":true,"status":idle},"candidate_identity":TemporalCandidateIdentityWire{model_kind:WholeTemporalKind::ManagedTemporalV3,model_sha256:h('a'),verified_fit_record_sha256:h('b'),context_digest:h('4'),room_digest:h('5'),persisted:false},"selected_identity":selected,"qualification_summary":qualification,"configure_request":TemporalConfigureRequestV2{schema:CONFIGURE_REQUEST_SCHEMA.into(),model_kind:WholeTemporalKind::ManagedTemporalV3,expected:guard(),binding_digest:h('4'),revision:1,source_node_ids:vec![15,16,17],new_training:true,recovery_consent:true},"evaluate_request":TemporalEvaluateRequestV2{schema:EVALUATE_REQUEST_SCHEMA.into(),expected:guard(),capture_generation_id:h('0'),refs:complete()},"qualify_request":TemporalQualifyRequestV2{schema:QUALIFY_REQUEST_SCHEMA.into(),expected:guard(),capture_generation_id:h('0'),refs:eval()}});
+    let examples = serde_json::json!({"fixture_kind":"SYNTHETIC_STRUCTURAL_SERIALIZATION_ONLY_NOT_AUTHORITY","idle_response":{"success":true,"status":idle},"candidate_identity":TemporalCandidateIdentityWire{model_kind:WholeTemporalKind::ManagedTemporalV3,model_sha256:h('a'),verified_fit_record_sha256:h('b'),context_digest:h('4'),room_digest:h('5'),persisted:false},"selected_identity":selected,"qualification_summary":qualification,"configure_request":TemporalConfigureRequestV2{schema:CONFIGURE_REQUEST_SCHEMA.into(),model_kind:WholeTemporalKind::ManagedTemporalV3,expected:guard(),binding_digest:h('4'),revision:1,source_node_ids:vec![15,16,17],new_training:true,recovery_consent:true,profile_id:None},"evaluate_request":TemporalEvaluateRequestV2{schema:EVALUATE_REQUEST_SCHEMA.into(),expected:guard(),capture_generation_id:h('0'),refs:complete()},"qualify_request":TemporalQualifyRequestV2{schema:QUALIFY_REQUEST_SCHEMA.into(),expected:guard(),capture_generation_id:h('0'),refs:eval()}});
     println!(
         "C4C_CANONICAL_PUBLIC_WIRE_EXAMPLES={}",
         serde_json::to_string(&examples).unwrap()
     );
+}
+
+
+#[test]
+fn operator_eight_step_policy_is_explicit_and_preserves_numeric_quality_thresholds() {
+    let old = TemporalQualificationPolicyWire::current();
+    assert_eq!(TemporalQualificationPolicyWire::for_operator_eight_step(false), old);
+    let new = TemporalQualificationPolicyWire::for_operator_eight_step(true);
+    assert_eq!(new.id, OPERATOR_EIGHT_STEP_TEMPORAL_POLICY_ID);
+    assert_eq!(new.minimum_windows_per_condition, 4);
+    assert_eq!(old.minimum_windows_per_condition, 16);
+    assert_eq!(new.window_unit, old.window_unit);
+    assert_eq!(new.minimum_unconditional_sensitivity, old.minimum_unconditional_sensitivity);
+    assert_eq!(new.maximum_false_positive_rate, old.maximum_false_positive_rate);
+    assert_eq!(new.minimum_evaluated_window_coverage, old.minimum_evaluated_window_coverage);
+    assert_ne!(super::super::qualification::hash(&new).unwrap(), super::super::qualification::hash(&old).unwrap());
 }

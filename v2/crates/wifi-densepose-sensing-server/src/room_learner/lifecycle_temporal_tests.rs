@@ -1412,3 +1412,117 @@ fn historical329_and_fresh343_priming_keep_the_original_cadence_band() {
         assert_eq!(snapshot(&rt,now)["failure"],"acquisition_cadence_changed");
     }
 }
+
+fn failed_full_capture_for_retry(root:&Path,lost_ack:bool)->(Arc<RoomLearningRuntime>,u64){
+    let rt=Arc::new(runtime(root,START));
+    rt.configure_temporal_full_run(&rt.mutation_guard().unwrap(),context(),"synthetic-stopped-retry".into(),START).unwrap();
+    let ready=settle_async_boundary(&rt,START);
+    let start=async_lead_end(&rt,ready);
+    let publication_gate=if lost_ack {
+        let state=rt.inner.lock().unwrap();let Some(CaptureWorkflow::Temporal(c))=&state.capture else{panic!()};
+        let writer=c.core.as_ref().unwrap().writer().unwrap();writer.lose_next_ack();
+        let(entered_tx,entered_rx)=std::sync::mpsc::sync_channel(1);let(release_tx,release_rx)=std::sync::mpsc::sync_channel(1);
+        writer.hold_next_after_publish(entered_tx,release_rx);Some((entered_rx,release_tx))
+    }else{None};
+    for source in 1..=3u8 {
+        let at=start+u64::from(source)*1000;
+        rt.ingest_native(&packet(source,1,at),at).unwrap();
+    }
+    if let Some((entered,_))=&publication_gate{entered.recv_timeout(std::time::Duration::from_secs(10)).unwrap();}
+    let at=start+1_001_000;
+    assert!(rt.ingest_native(&packet(1,2,at),at).unwrap_err().starts_with("temporal_observed_gap_or_rate:"));
+    if let Some((_,release))=publication_gate{release.send(()).unwrap();}
+    assert_eq!(snapshot(&rt,at)["stage"],"failed");
+    (rt,at+1_000_000)
+}
+
+#[test]
+fn explicit_failed_capture_retry_reconciles_actual_head_without_changing_identity_or_deadline(){
+    for lost_ack in [false,true] {
+        let directory=tempfile::tempdir().unwrap();let(rt,at)=failed_full_capture_for_retry(directory.path(),lost_ack);
+        let before=rt.temporal_status_v2(at).unwrap();
+        let guard=rt.mutation_guard().unwrap();
+        let id=before["capture"]["capture_generation_id"].as_str().unwrap().to_owned();
+        rt.retry_failed_temporal_capture(&guard,&id,at).unwrap();
+        let after=rt.temporal_status_v2(at+1).unwrap();
+        assert_eq!(after["capture"]["stage"],"paused");
+        assert_eq!(after["capture"]["failure"],Value::Null);
+        assert_eq!(after["capture"]["durability_pending"],false);
+        for field in ["capture_generation_id","schedule_sha256","continuation_policy_sha256","original_deadline","retained_windows","durable_windows","sealed_train_episodes","sealed_held_out_episodes"] {
+            assert_eq!(after["capture"][field],before["capture"][field],"{field}");
+        }
+        assert_eq!(after["mutation_guard"]["generation"],before["mutation_guard"]["generation"]);
+        assert_eq!(after["mutation_guard"]["runtime_epoch"],before["mutation_guard"]["runtime_epoch"]);
+        assert!(rt.retry_failed_temporal_capture(&guard,&id,at+2).is_err(),"old command is consumed");
+        assert_eq!(after["capture"]["observed_ms"],0);
+    }
+}
+
+#[test]
+fn retry_cannot_reconcile_a_writer_after_terminal_owner_drain(){
+    let directory=tempfile::tempdir().unwrap();let(rt,at)=failed_full_capture_for_retry(directory.path(),true);
+    let writer={let state=rt.inner.lock().unwrap();let Some(CaptureWorkflow::Temporal(c))=&state.capture else{panic!()};c.core.as_ref().unwrap().writer().unwrap()};
+    assert!(writer.has_failed_repair(),"actual publication happened and its ACK was withheld/lost");
+    writer.drain().unwrap();
+    assert!(!writer.has_failed_repair(),"terminal drain releases captured plaintext repair buffers");
+    fn files(root:&Path)->Vec<(std::path::PathBuf,Vec<u8>)>{let mut result=vec![];for e in std::fs::read_dir(root).unwrap(){let e=e.unwrap();if e.file_type().unwrap().is_dir(){result.extend(files(&e.path()));}else{result.push((e.path(),std::fs::read(e.path()).unwrap()));}}result.sort_by(|a,b|a.0.cmp(&b.0));result}
+    let before=files(directory.path());
+    assert_eq!(writer.reconcile_failed(at).unwrap_err(),"temporal_writer_terminally_drained");
+    assert_eq!(files(directory.path()),before);
+}
+
+#[test]
+fn profile_namespace_selection_is_guarded_and_default_reads_cannot_undo_explicit_choice(){
+    let directory=tempfile::tempdir().unwrap();let rt=runtime(directory.path(),START);
+    let old_guard=rt.mutation_guard().unwrap();
+    rt.temporal_default_operator_profile_v2().unwrap();
+    assert!(rt.operator_profile_selected.load(Ordering::Acquire));
+    assert!(rt.temporal_select_profile_guarded_v2(None,&old_guard).is_err());
+    assert!(rt.operator_profile_selected.load(Ordering::Acquire));
+    let guard=rt.mutation_guard().unwrap();
+    let after=rt.temporal_select_profile_guarded_v2(None,&guard).unwrap();
+    assert!(!rt.operator_profile_selected.load(Ordering::Acquire));
+    rt.temporal_default_operator_profile_v2().unwrap();
+    assert!(!rt.operator_profile_selected.load(Ordering::Acquire),"read must not race an explicit old-plan restore");
+    assert_eq!(rt.mutation_guard().unwrap(),after);
+}
+
+#[test]
+fn failed_capture_retry_rejects_wrong_identity_stale_owner_and_expiry_without_success(){
+    let directory=tempfile::tempdir().unwrap();let(rt,at)=failed_full_capture_for_retry(directory.path(),false);
+    let before=rt.temporal_status_v2(at).unwrap();
+    let id=before["capture"]["capture_generation_id"].as_str().unwrap();
+    let mut stale=rt.mutation_guard().unwrap();stale.runtime_epoch="another-runtime".into();
+    assert!(rt.retry_failed_temporal_capture(&stale,id,at).is_err());
+    assert!(rt.retry_failed_temporal_capture(&rt.mutation_guard().unwrap(),&"f".repeat(64),at).is_err());
+    let expiry=before["capture"]["original_deadline"]["expires_at_unix_ms"].as_u64().unwrap()*1_000_000;
+    assert!(rt.retry_failed_temporal_capture(&rt.mutation_guard().unwrap(),id,expiry).is_err());
+    let state=rt.inner.lock().unwrap();let Some(CaptureWorkflow::Temporal(c))=&state.capture else{panic!()};
+    let capture=c.core.as_ref().unwrap().public_capture(&rt.runtime_epoch,None,at);
+    assert_eq!(capture.stage,"failed");assert_eq!(capture.retained_windows,0);assert_eq!(capture.durable_windows,0);
+    assert_eq!(capture.original_deadline.expires_at_unix_ms,expiry/1_000_000);
+}
+
+#[test]
+fn retry_rejects_count_equal_but_wrong_known_accepted_prefix_digest(){
+    let directory=tempfile::tempdir().unwrap();let(rt,at)=failed_full_capture_for_retry(directory.path(),false);
+    let id={let mut state=rt.inner.lock().unwrap();let Some(CaptureWorkflow::Temporal(c))=state.capture.as_mut()else{panic!()};let core=c.core.as_mut().unwrap();let id=core.public_generation_id().to_owned();core.test_corrupt_retry_prefix();id};
+    assert_eq!(rt.retry_failed_temporal_capture(&rt.mutation_guard().unwrap(),&id,at).unwrap_err(),"temporal_retry_committed_prefix_changed");
+    let state=rt.inner.lock().unwrap();let Some(CaptureWorkflow::Temporal(c))=&state.capture else{panic!()};
+    assert_eq!(c.core.as_ref().unwrap().stage(),TemporalCaptureStage::Failed);
+}
+
+#[test]
+fn status_refuses_profile_and_recovery_snapshot_mixed_across_a_guarded_selection(){
+    let directory=tempfile::tempdir().unwrap();let old=runtime(directory.path(),START);
+    old.configure_temporal_full_run(&old.mutation_guard().unwrap(),context(),"retained-old-plan".into(),START).unwrap();
+    let settled=settle_async_boundary(&old,START);drop(old);
+    let rt=Arc::new(runtime(directory.path(),settled+1));
+    rt.temporal_select_profile_v2(None).unwrap();
+    let weak=Arc::downgrade(&rt);
+    *rt.temporal_status_profile_hook.lock().unwrap()=Some(Box::new(move||{let rt=weak.upgrade().unwrap();rt.temporal_select_profile_v2(Some(crate::room_learner::managed_schedule_contract::OPERATOR_EIGHT_PROFILE)).unwrap();}));
+    assert_eq!(rt.temporal_status_v2(settled+2).unwrap_err(),"learner_state_changed");
+    let coherent=rt.temporal_status_v2(settled+3).unwrap();
+    assert_eq!(coherent["temporal_profile"]["profile_id"],crate::room_learner::managed_schedule_contract::OPERATOR_EIGHT_PROFILE);
+    assert!(coherent["recovery"].is_null(),"new namespace cannot show the old plan recovery ID");
+}

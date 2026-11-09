@@ -8,6 +8,7 @@ pub(crate) fn owner_selection_routes(
 ) -> Router<SharedState> {
     Router::new()
         .route("/api/v1/room-learner/recovery/enable-current", post(enable_current_recovery))
+        .route("/api/v1/room-learner/recovery/retry", post(super::temporal_routes::retry_dispatch).layer(axum::middleware::from_fn(retry_requires_unpaired_owner)))
         .route("/api/v1/room-learner/qualify", post(super::temporal_routes::qualify_dispatch))
         .route("/api/v1/room-learner/select", post(super::temporal_routes::select_dispatch))
         .route("/api/v1/room-learner/deselect", post(super::temporal_routes::deselect_dispatch))
@@ -147,4 +148,9 @@ pub(crate) async fn selection(State(state): State<SharedState>) -> Json<serde_js
         "progress_schema":"ruview.room-learner.progress.v1",
         "model_selection":selection_snapshot(&state, &rt, now_ns(&rt))}),
     )
+}
+
+async fn retry_requires_unpaired_owner(request:axum::extract::Request,next:axum::middleware::Next)->axum::response::Response{
+    if request.extensions().get::<wifi_densepose_sensing_server::companion::Grant>().is_some(){return axum::response::IntoResponse::into_response(StatusCode::FORBIDDEN);}
+    next.run(request).await
 }

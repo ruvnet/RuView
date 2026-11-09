@@ -10,18 +10,19 @@ pub(super) const BRIDGE_POLICY: &str = "native-receiver-whole-train-period-v1;al
 // Explicit NEW Train genesis only. The generic constructor and old literal
 // remain historical329; restore never upgrades a stored generation.
 pub(super) const FRESH_TRAIN_343_POLICY:&str="native-receiver-whole-train-period-v2;all-selected-packets;existing-cadence-gap-arrival-skew;confirmed-durable-seals;train-budget343;no-fit-authority";
+pub(super) const OPERATOR_EIGHT_POLICY:&str="native-receiver-whole-operator-period-v1;reserved-validation-not-training;confirmed-durable-seals;no-fit-authority";
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
-pub(super) enum TrainBudgetProfile { Historical329, FreshTrain343 }
+pub(super) enum TrainBudgetProfile { Historical329, FreshTrain343, OperatorEightStep }
 impl TrainBudgetProfile {
     pub(super) fn from_stored(policy:&str)->Result<Self,String>{match policy{
-        BRIDGE_POLICY=>Ok(Self::Historical329),FRESH_TRAIN_343_POLICY=>Ok(Self::FreshTrain343),
+        BRIDGE_POLICY=>Ok(Self::Historical329),FRESH_TRAIN_343_POLICY=>Ok(Self::FreshTrain343),OPERATOR_EIGHT_POLICY=>Ok(Self::OperatorEightStep),
         _=>Err("temporal_train_profile_unknown".into()),
     }}
-    pub(super) fn policy(self)->&'static str{match self{Self::Historical329=>BRIDGE_POLICY,Self::FreshTrain343=>FRESH_TRAIN_343_POLICY}}
+    pub(super) fn policy(self)->&'static str{match self{Self::Historical329=>BRIDGE_POLICY,Self::FreshTrain343=>FRESH_TRAIN_343_POLICY,Self::OperatorEightStep=>OPERATOR_EIGHT_POLICY}}
     pub(super) fn transition_limit(self,schedule:&ManagedScheduleContract)->Result<usize,String>{
         let episodes=schedule.counts().train_episodes;
         let old=schedule.counts().train_windows.checked_add(2*128).and_then(|n|n.checked_add(episodes)).and_then(|n|n.checked_add(2)).ok_or("temporal_transition_capacity")?;
-        match self{Self::Historical329=>Ok(old),Self::FreshTrain343=>old.checked_add(2*episodes).ok_or("temporal_transition_capacity".into())}
+        match self{Self::Historical329=>Ok(old),Self::FreshTrain343=>old.checked_add(2*episodes).ok_or("temporal_transition_capacity".into()),Self::OperatorEightStep=>Ok(schedule.counts().total_windows+2*(128+schedule.episodes().len())+schedule.episodes().len()+4)}
     }
 }
 
@@ -212,6 +213,7 @@ impl BridgeState {
             parts: vec![],
         }
     }
+    pub(super) fn operator_eight_step()->Self{Self{policy:OPERATOR_EIGHT_POLICY.into(),..Self::new()}}
     pub(super) fn fresh_train_343()->Self{
         Self{policy:FRESH_TRAIN_343_POLICY.into(),..Self::new()}
     }
@@ -232,17 +234,15 @@ impl BridgeState {
     pub(super) fn validate_full_run_with_prefixes(
         &self,schedule:&ManagedScheduleContract,run:&str,rows:&[CaptureCohort],evidence:&[WindowEvidence],ledger:&Ledger,episode:usize,mapping:Option<&ObservedSegmentMap>,now:u64,digests:&prefix_digests::CanonicalPrefixDigests,
     )->Result<(),String>{
-        if self.policy!=BRIDGE_POLICY{return Err("temporal_full_run_train_profile_changed".into());}
+        if self.policy!=if schedule.is_operator_eight_step(){OPERATOR_EIGHT_POLICY}else{BRIDGE_POLICY}{return Err("temporal_full_run_train_profile_changed".into());}
         self.validate_with_prefixes(schedule,run,rows,evidence,ledger,episode,mapping,now,Some(digests))
     }
     fn validate_with_prefixes(
         &self,schedule:&ManagedScheduleContract,run:&str,rows:&[CaptureCohort],evidence:&[WindowEvidence],ledger:&Ledger,episode:usize,mapping:Option<&ObservedSegmentMap>,now:u64,digests:Option<&prefix_digests::CanonicalPrefixDigests>,
     )->Result<(),String>{
-        let train = schedule
-            .episodes()
-            .iter()
-            .take_while(|e| e.role == DataRole::Train)
-            .count();
+        let train = if schedule.is_operator_eight_step() { schedule.episodes().len() } else {
+            schedule.episodes().iter().take_while(|e| e.role == DataRole::Train).count()
+        };
         let profile=self.profile()?;
         if self.seals.len() > train
             || episode != self.seals.len()
@@ -292,7 +292,7 @@ impl BridgeState {
             if self.disposition != Disposition::Complete
                 || !self.parts.is_empty()
                 || mapping.is_some()
-                || rows.len() != schedule.counts().train_windows
+                || rows.len() != if schedule.is_operator_eight_step(){schedule.counts().total_windows}else{schedule.counts().train_windows}
             {
                 return Err("temporal_bridge_complete_state".into());
             }
@@ -632,7 +632,7 @@ impl TemporalTrainCapture {
     ) -> Result<(Self, Option<String>), String> {
         let mut workflow = TemporalWorkflow::prepare(schedule, run, config, now)?;
         let schedule = workflow.schedule()?;
-        workflow.bridge = Some(BridgeState::new());
+        workflow.bridge = Some(if schedule.is_operator_eight_step(){BridgeState::operator_eight_step()}else{BridgeState::new()});
         let error = initial(&mut workflow, store).err();
         if error.is_some() {
             workflow.stage = Stage::BlockedDurability;
@@ -765,7 +765,7 @@ impl TemporalTrainCapture {
         let w = &self.workflow;
         let schedule = &self.schedule;
         let e = schedule.episodes().get(w.episode)?;
-        if e.role != DataRole::Train && !w.full_run.as_ref().is_some_and(|m|m.is_frozen()) {return None;}
+        if e.role != DataRole::Train && !(schedule.is_operator_eight_step()&&e.role==DataRole::Validation) && !w.full_run.as_ref().is_some_and(|m|m.is_frozen()) {return None;}
         let frozen=w.frozen_identity().ok()?;
         let bound = schedule
             .bind_episode_start(
@@ -776,7 +776,7 @@ impl TemporalTrainCapture {
     }
     fn logical_phase_complete(&self)->bool {
         let w=&self.workflow;
-        self.schedule.episodes().get(w.episode).is_some_and(|e|(e.role==DataRole::Train || w.full_run.as_ref().is_some_and(|m|m.held_out.is_some()))
+        self.schedule.episodes().get(w.episode).is_some_and(|e|(e.role==DataRole::Train || self.schedule.is_operator_eight_step()&&e.role==DataRole::Validation || w.full_run.as_ref().is_some_and(|m|m.held_out.is_some()))
             && w.pending_window.is_none()
             && w.session.rows.len()==self.schedule.episodes().iter().take(w.episode+1).map(|e|e.slots.len()).sum::<usize>())
     }
@@ -786,7 +786,7 @@ impl TemporalTrainCapture {
         let Some(e) = s.episodes().get(w.episode) else {
             return false;
         };
-        (e.role == DataRole::Train || w.full_run.as_ref().is_some_and(|m|m.held_out.is_some()))
+        (e.role == DataRole::Train || s.is_operator_eight_step()&&e.role==DataRole::Validation || w.full_run.as_ref().is_some_and(|m|m.held_out.is_some()))
             && w.accepted() == e.target_active_recording_ms * 1_000_000
             && w.pending_window.is_none()
             && w.session.rows.len()
@@ -810,7 +810,7 @@ impl TemporalTrainCapture {
         let schedule = w.schedule()?;
         let role=schedule.episodes().get(w.episode).ok_or("temporal_capture_complete")?.role;
         if role==DataRole::HeldOut{w.begin_held_out_role(now)?;}
-        else if role!=DataRole::Train{return Err("temporal_train_complete".into());}
+        else if role!=DataRole::Train&&!(schedule.is_operator_eight_step()&&role==DataRole::Validation){return Err("temporal_train_complete".into());}
         else if w.full_run.is_some()&&w.mapping.is_none(){
             let b=w.bridge.as_ref().ok_or("temporal_bridge_required")?;
             let expected=schedule.episodes().iter().take(w.episode).map(|e|e.slots.len()).sum::<usize>();
@@ -999,7 +999,7 @@ impl TemporalTrainCapture {
         w.mapping = None;
         w.custody = SegmentCustody::default();
         w.live_observed_ns = 0;
-        b.disposition = if w.episode == schedule.counts().train_episodes {
+        b.disposition = if w.episode == if schedule.is_operator_eight_step(){schedule.episodes().len()}else{schedule.counts().train_episodes} {
             Disposition::Complete
         } else {
             Disposition::Ready
@@ -1082,6 +1082,13 @@ impl TemporalTrainCapture {
             .len();
         Ok(())
     }
+    /// Metadata-only update after the exact packet has already failed admission.
+    pub(crate) fn annotate_receiver_failure(&mut self, expected: &str, detail: String) -> bool {
+        if self.stage() != TemporalCaptureStage::Failed || self.failure.as_deref() != Some(expected)
+            || detail.len() > 256 || !detail.starts_with(expected) { return false; }
+        self.failure = Some(detail);
+        true
+    }
     pub(crate) fn invalidate(&mut self, reason: &str) {
         if let Some(state)=&self.workflow.async_state{state.writer.cancel();}
         self.failure = Some(
@@ -1105,8 +1112,8 @@ impl TemporalTrainCapture {
         let w = &self.workflow;
         let e = self.schedule.episodes().get(w.episode);
         let full=w.full_run.is_some();
-        let mut value=json!({"schema":"ruview.room-learner.private-temporal-capture.v1","stage":self.stage().as_str(),"episode_index":w.episode,"label":e.filter(|e|e.role==DataRole::Train||full).map(|e|e.condition),"role":if full&&e.is_some_and(|e|e.role==DataRole::HeldOut){"HeldOut"}else{"Train"},"sealed_train_episodes":self.durable_seals,"retained_rows":w.session.rows.len(),"durable_windows":w.durable_windows,"rows_sha256":w.async_state.as_ref().map(|a|if w.session.rows.len()==w.durable_windows{a.rows_sha256.clone()}else{None}).unwrap_or_else(||hash(&w.session.rows).ok()),"durability_pending":w.async_state.as_ref().is_some_and(|a|a.pending.is_some()),"durability_error":w.async_state.as_ref().and_then(|a|a.error.clone()),"observed_ns":w.live_observed_ns.to_string(),"durable_observed_ns":w.accepted().to_string(),"target_ms":e.filter(|e|e.role==DataRole::Train||full).map(|e|e.target_active_recording_ms),"descriptor":w.descriptor,"failure":self.failure,"fit_admission_available":false,"quality_is_engineering_only":true,"independence_verified":false,"source_clock_measured":false});
-        if full{value["sealed_held_out_episodes"]=json!(w.async_state.as_ref().map_or(0,|s|s.accepted_held_out_seals));}
+        let mut value=json!({"schema":"ruview.room-learner.private-temporal-capture.v1","stage":self.stage().as_str(),"episode_index":w.episode,"label":e.filter(|e|e.role==DataRole::Train||full).map(|e|e.condition),"role":if self.schedule.is_operator_eight_step(){e.map(|e|match e.role{DataRole::Train=>"Train",DataRole::Validation=>"Validation",DataRole::HeldOut=>"HeldOut",DataRole::Inference=>"Inference"}).unwrap_or("Train")}else if full&&e.is_some_and(|e|e.role==DataRole::HeldOut){"HeldOut"}else{"Train"},"sealed_train_episodes":if self.schedule.is_operator_eight_step(){self.schedule.episodes().iter().take(self.durable_seals).filter(|e|e.role==DataRole::Train).count()}else{self.durable_seals},"retained_rows":w.session.rows.len(),"durable_windows":w.durable_windows,"rows_sha256":w.async_state.as_ref().map(|a|if w.session.rows.len()==w.durable_windows{a.rows_sha256.clone()}else{None}).unwrap_or_else(||hash(&w.session.rows).ok()),"durability_pending":w.async_state.as_ref().is_some_and(|a|a.pending.is_some()),"durability_error":w.async_state.as_ref().and_then(|a|a.error.clone()),"observed_ns":w.live_observed_ns.to_string(),"durable_observed_ns":w.accepted().to_string(),"target_ms":e.filter(|e|e.role==DataRole::Train||full).map(|e|e.target_active_recording_ms),"descriptor":w.descriptor,"failure":self.failure,"fit_admission_available":false,"quality_is_engineering_only":true,"independence_verified":false,"source_clock_measured":false});
+        if full{value["sealed_held_out_episodes"]=json!(if self.schedule.is_operator_eight_step(){self.schedule.episodes().iter().take(self.durable_seals).filter(|e|e.role==DataRole::Validation).count()}else{w.async_state.as_ref().map_or(0,|s|s.accepted_held_out_seals)});}
         value
     }
 }
@@ -1141,13 +1148,13 @@ impl TemporalTrainCapture {
     pub(crate) fn public_phase_matches(&self,generation:&str,schedule:&str,episode:usize)->bool{self.public_generation_id==generation&&self.schedule.sha256()==schedule&&self.workflow.episode==episode}
     pub(crate) fn public_profile(&self)->crate::room_learner::temporal_wire::TemporalProfileWire{
         use crate::room_learner::temporal_wire::*;
-        TemporalProfileWire{profile_id:"native-2s-three-source-56bin-option-a-engineering-v1".into(),window_unit:"native_receiver_2s_window".into(),native_window_ms:2000,train_windows:64,held_out_windows:64,train_episodes:7,held_out_episodes:8,windows_per_condition:[16;4],train_episodes_per_condition:[1,2,2,2],held_out_episodes_per_condition:[2;4],episodes:self.schedule.episodes().iter().map(|e|TemporalEpisodeWire{index:e.index as u8,role:e.role,label:e.condition,target_ms:e.target_active_recording_ms,lead_in_ms:e.lead_in_ms,native_windows:e.slots.len()as u16}).collect()}
+        TemporalProfileWire{profile_id:self.schedule.profile_id().into(),window_unit:"native_receiver_2s_window".into(),native_window_ms:2000,train_windows:self.schedule.counts().train_windows as u16,held_out_windows:self.schedule.counts().held_out_windows as u16,train_episodes:self.schedule.counts().train_episodes as u8,held_out_episodes:self.schedule.counts().held_out_episodes as u8,windows_per_condition:[16;4],train_episodes_per_condition:if self.schedule.is_operator_eight_step(){[1;4]}else{[1,2,2,2]},held_out_episodes_per_condition:if self.schedule.is_operator_eight_step(){[1;4]}else{[2;4]},episodes:self.schedule.episodes().iter().map(|e|TemporalEpisodeWire{index:e.index as u8,role:e.role,label:e.condition,target_ms:e.target_active_recording_ms,lead_in_ms:e.lead_in_ms,native_windows:e.slots.len()as u16}).collect()}
     }
     pub(crate) fn public_capture(&self,epoch:&str,lead_until:Option<u64>,now:u64)->crate::room_learner::temporal_wire::TemporalCaptureWire{
         use crate::room_learner::temporal_wire::*;
         let w=&self.workflow;let episode=self.schedule.episodes().get(w.episode);let lead=lead_until.map_or(0,|end|end.saturating_sub(now)/1_000_000);
         let challenge=if matches!(self.stage(),TemporalCaptureStage::NeedsConfirmation|TemporalCaptureStage::Paused){self.confirmation_challenge().ok()}else{None};
-        TemporalCaptureWire{capture_generation_id:self.public_generation_id.clone(),schedule_sha256:self.schedule.sha256().into(),continuation_policy_sha256:w.full_run.as_ref().map(|m|m.policy.sha256().into()).unwrap_or_default(),durable_commitment_sha256:w.commit_token.as_ref().map(|t|t.data().commitment),original_deadline:TemporalOriginalDeadlineWire{created_at_unix_ms:w.descriptor.created_at_ms,expires_at_unix_ms:w.descriptor.expires_at_ms},receiver_epoch:epoch.into(),stage:if lead>0{"preparing".into()}else{self.stage().as_str().into()},current_episode:episode.map(|e|e.index as u8),role:episode.map(|e|e.role),label:episode.map(|e|e.condition),target_ms:episode.map(|e|e.target_active_recording_ms),lead_in_remaining_ms:lead,observed_ms:w.live_observed_ns/1_000_000,retained_windows:w.session.rows.len()as u16,durable_windows:w.durable_windows as u16,sealed_train_episodes:self.durable_seals as u8,sealed_held_out_episodes:w.async_state.as_ref().map_or(0,|a|a.accepted_held_out_seals as u8),durability_pending:w.async_state.as_ref().is_some_and(|a|a.pending.is_some()),awaiting_ground_truth:challenge.is_some(),confirmation_challenge:challenge,failure:self.failure.clone()}
+        TemporalCaptureWire{capture_generation_id:self.public_generation_id.clone(),schedule_sha256:self.schedule.sha256().into(),continuation_policy_sha256:w.full_run.as_ref().map(|m|m.policy.sha256().into()).unwrap_or_default(),durable_commitment_sha256:w.commit_token.as_ref().map(|t|t.data().commitment),original_deadline:TemporalOriginalDeadlineWire{created_at_unix_ms:w.descriptor.created_at_ms,expires_at_unix_ms:w.descriptor.expires_at_ms},receiver_epoch:epoch.into(),stage:if lead>0{"preparing".into()}else{self.stage().as_str().into()},current_episode:episode.map(|e|e.index as u8),role:episode.map(|e|e.role),label:episode.map(|e|e.condition),target_ms:episode.map(|e|e.target_active_recording_ms),lead_in_remaining_ms:lead,observed_ms:w.live_observed_ns/1_000_000,retained_windows:w.session.rows.len()as u16,durable_windows:w.durable_windows as u16,sealed_train_episodes:if self.schedule.is_operator_eight_step(){self.schedule.episodes().iter().take(self.durable_seals).filter(|e|e.role==DataRole::Train).count()as u8}else{self.durable_seals as u8},sealed_held_out_episodes:if self.schedule.is_operator_eight_step(){self.schedule.episodes().iter().take(self.durable_seals).filter(|e|e.role==DataRole::Validation).count()as u8}else{w.async_state.as_ref().map_or(0,|a|a.accepted_held_out_seals as u8)},durability_pending:w.async_state.as_ref().is_some_and(|a|a.pending.is_some()),awaiting_ground_truth:challenge.is_some(),confirmation_challenge:challenge,failure:self.failure.clone()}
     }
     pub(crate) fn public_candidate(&self)->Option<crate::room_learner::temporal_wire::TemporalCandidateIdentityWire>{
         use crate::room_learner::temporal_wire::*;
@@ -1192,3 +1199,74 @@ impl TemporalTrainCapture {
         result.unwrap_or_else(|_|Some(TemporalRecoveryStatusWire{schema:RECOVERY_STATUS_SCHEMA.into(),state:"unavailable".into(),capture_generation_id:None,context_digest:None,original_deadline:None}))
     }
 }
+
+/// Opaque same-process Retry fence snapshot. It cannot be deserialized and
+/// never grants recording or conditions authority.
+pub(crate) struct FailedRetryState {
+    generation: String,
+    schedule: String,
+    created_at_ms: u64,
+    expires_at_ms: u64,
+    durable_windows: usize,
+    seals: usize,
+    accepted_prefix_sha256: Option<String>,
+    accepted_seal_digests: Vec<String>,
+    fences: AssemblerCheckpoint,
+    source_high: Vec<(u8, u64, u64)>,
+}
+impl TemporalTrainCapture {
+    pub(crate) fn failed_retry_state(&mut self) -> Result<FailedRetryState, String> {
+        if !matches!(self.stage(), TemporalCaptureStage::Failed | TemporalCaptureStage::Blocked)
+            || !self.is_full_run()
+            || self.workflow.full_run.as_ref().is_some_and(|m| m.is_frozen() || m.is_complete())
+        { return Err("temporal_retry_requires_stopped_capture".into()); }
+        let state = FailedRetryState {
+            generation:self.public_generation_id.clone(), schedule:self.schedule.sha256().into(),
+            created_at_ms:self.workflow.descriptor.created_at_ms, expires_at_ms:self.workflow.descriptor.expires_at_ms,
+            durable_windows:self.workflow.durable_windows, seals:self.durable_seals,
+            accepted_prefix_sha256:self.workflow.async_state.as_ref().and_then(|state|state.row_prefix_sha256.clone()),
+            accepted_seal_digests:self.workflow.bridge.as_ref().map_or_else(Vec::new,|b|b.seals.iter().take(self.durable_seals).map(|seal|seal.sha256.clone()).collect()),
+            fences:self.workflow.session.assembler.fence_checkpoint()?, source_high:self.workflow.source_high.clone(),
+        };
+        if self.failure.is_none() { self.invalidate("temporal_retry_stopped_capture"); }
+        Ok(state)
+    }
+    pub(crate) fn apply_failed_retry_state(&mut self, old: FailedRetryState, now:u64) -> Result<(), String> {
+        if self.public_generation_id != old.generation || self.schedule.sha256()!=old.schedule
+            || self.workflow.descriptor.created_at_ms!=old.created_at_ms || self.workflow.descriptor.expires_at_ms!=old.expires_at_ms
+            || now/1_000_000>=old.expires_at_ms || self.workflow.durable_windows<old.durable_windows || self.durable_seals<old.seals
+        { return Err("temporal_retry_committed_identity_changed".into()); }
+        if let Some(expected)=old.accepted_prefix_sha256.as_ref(){
+            let n=old.durable_windows;
+            if hash(&(&self.workflow.session.rows[..n],&self.workflow.session.evidence[..n],&self.workflow.ledger.spans[..n]))?!=*expected {
+                return Err("temporal_retry_committed_prefix_changed".into());
+            }
+        }
+        if self.workflow.bridge.as_ref().is_none_or(|b|b.seals.iter().take(old.seals).map(|s|s.sha256.clone()).collect::<Vec<_>>()!=old.accepted_seal_digests){
+            return Err("temporal_retry_confirmed_seals_changed".into());
+        }
+        let n=self.workflow.session.rows.len();
+        let budget=self.workflow.full_run.as_ref().ok_or("temporal_full_run_required")?.policy.replay_fence_budget(&self.workflow.session.managed.as_ref().unwrap().binding)?;
+        self.workflow.session.assembler.restore_full_run_prefix_fences(old.fences.for_prefix(n)?,n,&budget)?;
+        for (id,seq,time) in old.source_high {
+            if time>now {return Err("temporal_retry_receiver_clock_changed".into());}
+            if let Some((_,old_seq,old_time))=self.workflow.source_high.iter_mut().find(|(source,_,_)|*source==id) {
+                *old_seq=(*old_seq).max(seq); *old_time=(*old_time).max(time);
+            } else {self.workflow.source_high.push((id,seq,time));}
+        }
+        self.workflow.source_high.sort();
+        self.workflow.stage=Stage::PausedNeedsReconfirmation;
+        self.workflow.last_now_ns=now;
+        self.failure=None;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+impl TemporalTrainCapture {
+    pub(crate) fn test_corrupt_retry_prefix(&mut self){self.workflow.async_state.as_mut().unwrap().row_prefix_sha256=Some("f".repeat(64));}
+}
+
+#[cfg(test)]
+#[path = "receiver_failure_annotation_tests.rs"]
+mod receiver_failure_annotation_tests;

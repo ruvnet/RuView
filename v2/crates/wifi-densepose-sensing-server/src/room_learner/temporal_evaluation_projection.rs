@@ -112,6 +112,7 @@ impl TemporalWorkflow {
         held_out: bool,
         schedule: &ManagedScheduleContract,
     ) -> Result<PendingTemporalEvidenceSource, String> {
+        let operator = schedule.is_operator_eight_step();
         let mode = self.full_run.as_ref().ok_or("temporal_full_run_required")?;
         let owner = mode
             .owner
@@ -173,14 +174,19 @@ impl TemporalWorkflow {
                 .ok_or("temporal_complete_record_required")?;
             if fact.token != *token
                 || fact.record_sha256 != record.sha256
-                || mode.held_out_seals() != 8
-                || self.session.rows.len() != 128
+                || (if operator {
+                    self.bridge.as_ref().map_or(0, |b| b.seals.iter().filter(|s|
+                        schedule.episodes().get(s.episode).is_some_and(|e| e.role == DataRole::Validation)
+                    ).count())
+                } else { mode.held_out_seals() }) != if operator { 4 } else { 8 }
+                || self.session.rows.len() != if operator { 80 } else { 128 }
             {
                 return Err("temporal_current_complete_changed".into());
             }
             Some(record.sha256.clone())
         } else {
-            if !(64..=128).contains(&self.session.rows.len()) {
+            if (operator && self.session.rows.len() != 80)
+                || (!operator && !(64..=128).contains(&self.session.rows.len())) {
                 return Err("temporal_stable_train_projection_required".into());
             }
             None
@@ -324,6 +330,16 @@ impl PendingTemporalEvidenceSource {
         verify_model_binding(record, &self.model)?;
         checkpoint::validate_temporal_evaluation_train_prefix(&w, record)?;
         self.check(now, cancel)?;
+        let schedule = w.schedule()?;
+        let operator = schedule.is_operator_eight_step();
+        if loaded.managed_is_operator_eight_step()? != operator
+            || self.model.managed_is_operator_eight_step()? != operator {
+            return Err("temporal_evaluation_profile_changed".into());
+        }
+        let check_role = if operator { DataRole::Validation } else { DataRole::HeldOut };
+        let check_rows: Vec<_> = w.session.rows.iter().filter(|r| r.role == check_role).cloned().collect();
+        let check_evidence: Vec<_> = w.session.evidence.iter().zip(&w.session.rows)
+            .filter(|(_, r)| r.role == check_role).map(|(e, _)| e.clone()).collect();
         let identity = data::TemporalEvaluationIdentityData {
             owner_scope: w.descriptor.owner_scope.clone(),
             installation_id: w.descriptor.installation_id.clone(),
@@ -367,14 +383,13 @@ impl PendingTemporalEvidenceSource {
                 training_identities_sha256: record.body.identity_evidence_sha256.clone(),
                 train_seal_sha256s: seals
                     .iter()
+                    .filter(|s| schedule.episodes().get(s.episode).is_some_and(|e| e.role == DataRole::Train))
                     .map(|s| s.sha256.clone())
-                    .collect::<Vec<_>>()
-                    .try_into()
-                    .map_err(|_| "temporal_train_seven_seals_required")?,
+                    .collect(),
                 train_seal_chain_sha256: record.body.train_seal_chain_sha256.clone(),
                 train_windows: 64,
                 windows_per_condition: [16; 4],
-                declared_episodes_per_condition: [1, 2, 2, 2],
+                declared_episodes_per_condition: if operator { [1; 4] } else { [1, 2, 2, 2] },
                 accepted_train_commitment: commitment(&record.body.accepted_train_commitment)?,
                 freeze_prepare_receiver_ns: record.body.freeze_prepare_receiver_ns.to_string(),
                 source_floors: record
@@ -397,7 +412,7 @@ impl PendingTemporalEvidenceSource {
                 .as_ref()
                 .ok_or("temporal_actual_complete_required")?;
             if Some(&complete.sha256) != self.binding.complete.as_ref()
-                || w.session.rows.len() != 128
+                || w.session.rows.len() != if operator { 80 } else { 128 }
                 || current.token != self.binding.token
             {
                 return Err("temporal_current_complete_changed".into());
@@ -407,28 +422,30 @@ impl PendingTemporalEvidenceSource {
                 .managed
                 .as_ref()
                 .ok_or("managed_session_required")?;
-            let hs = &mode
-                .held_out
-                .as_ref()
-                .ok_or("temporal_heldout_seals_required")?
-                .seals;
+            let check_windows: Vec<_> = managed.windows.iter().filter(|w| w.role == check_role).cloned().collect();
+            if check_rows.len() != if operator { 16 } else { 64 }
+                || check_evidence.len() != check_rows.len()
+                || check_windows.len() != check_rows.len() {
+                return Err("temporal_evaluation_reserved_check_shape".into());
+            }
+            let check_seals: Vec<String> = if operator {
+                seals.iter().filter(|s| schedule.episodes().get(s.episode).is_some_and(|e| e.role == DataRole::Validation))
+                    .map(|s| s.sha256.clone()).collect()
+            } else {
+                mode.held_out.as_ref().ok_or("temporal_heldout_seals_required")?.seals.iter().map(|s| s.sha256.clone()).collect()
+            };
             let evidence =
                 data::TemporalHeldOutEvidenceData::from_body_data(data::TemporalHeldOutBodyData {
                     identity,
                     training_proof_sha256: proof.sha256.clone(),
-                    held_out_data_sha256: hash(&(&w.session.rows[64..]))?,
-                    held_out_evidence_sha256: hash(&(&w.session.evidence[64..]))?,
-                    held_out_identities_sha256: hash(&(&managed.windows[64..]))?,
+                    held_out_data_sha256: hash(&check_rows)?,
+                    held_out_evidence_sha256: hash(&check_evidence)?,
+                    held_out_identities_sha256: hash(&check_windows)?,
                     complete_rows_sha256: complete.body.raw_sha256.clone(),
                     complete_evidence_sha256: complete.body.evidence_sha256.clone(),
                     complete_identities_sha256: complete.body.identity_sha256.clone(),
                     complete_ledger_sha256: complete.body.ledger_sha256.clone(),
-                    held_out_seal_sha256s: hs
-                        .iter()
-                        .map(|s| s.sha256.clone())
-                        .collect::<Vec<_>>()
-                        .try_into()
-                        .map_err(|_| "temporal_eight_heldout_seals_required")?,
+                    held_out_seal_sha256s: check_seals,
                     held_out_seal_chain_sha256: complete.body.held_out_chain_sha256.clone(),
                     complete_record_sha256: complete.sha256.clone(),
                     complete_commitment: commitment(&current.token.data())?,
@@ -452,9 +469,9 @@ impl PendingTemporalEvidenceSource {
                         .collect::<Vec<_>>()
                         .try_into()
                         .map_err(|_| "temporal_evaluation_three_sources_required")?,
-                    held_out_windows: 64,
-                    windows_per_condition: [16; 4],
-                    declared_episodes_per_condition: [2; 4],
+                    held_out_windows: if operator { 16 } else { 64 },
+                    windows_per_condition: if operator { [4; 4] } else { [16; 4] },
+                    declared_episodes_per_condition: if operator { [1; 4] } else { [2; 4] },
                     claims: data::DiagnosticClaimsData::diagnostic_only(),
                 })?;
             evidence.validate_data_links(&proof)?;
@@ -463,7 +480,7 @@ impl PendingTemporalEvidenceSource {
             None
         };
         let rows = if self.held_out {
-            w.session.rows[64..].to_vec()
+            check_rows
         } else {
             vec![]
         };
@@ -542,7 +559,7 @@ impl VerifiedTemporalEvaluationSnapshot {
                 complete_record_sha256: self.held_out().body.complete_record_sha256.clone(),
                 training_data_sha256: self.proof().body.training_data_sha256.clone(),
                 held_out_data_sha256: self.held_out().body.held_out_data_sha256.clone(),
-                role: DataRole::HeldOut,
+                role: if self.proof().is_operator_eight_step() { DataRole::Validation } else { DataRole::HeldOut },
                 window_unit: "native_receiver_2s_window".into(),
                 evaluated_at_receiver_ns: after.to_string(),
                 evaluated_at_unix_ms: after / 1_000_000,

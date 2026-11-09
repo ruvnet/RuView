@@ -358,3 +358,24 @@ fn wrong_key_or_tampered_inspection_fails_without_altering_retained_evidence() {
     assert!(s.inspect().is_err());
     assert_eq!(fs::read(&path).unwrap(), bad);
 }
+
+#[test]
+fn operator_profile_scope_preserves_old_bytes_and_uses_a_separate_key_without_recording_consent() {
+    let (_t,old)=fixture(Some(&[7;32]));
+    old.save(&descriptor(),b"synthetic previous-plan evidence",NOW).unwrap();
+    let bytes=fs::read(old.directory.join(FILE)).unwrap();
+    let new=old.operator_eight_scope().unwrap();
+    assert!(new.available());
+    assert!(fs::read_dir(&new.directory).unwrap().next().is_none());
+    assert!(new.inspect().unwrap().is_none());
+    new.save(&descriptor(),b"synthetic eight-step evidence",NOW).unwrap();
+    assert_eq!(new.load(NOW+1).unwrap().unwrap().plaintext,b"synthetic eight-step evidence");
+    assert_eq!(fs::read(old.directory.join(FILE)).unwrap(),bytes);
+    assert_eq!(old.load(NOW+1).unwrap().unwrap().plaintext,b"synthetic previous-plan evidence");
+    // The same owner's old ciphertext cannot authenticate in the new key domain.
+    let valid_new=fs::read(new.directory.join(FILE)).unwrap();
+    fs::write(new.directory.join(FILE),&bytes).unwrap();
+    assert!(new.load(NOW+1).is_err());
+    fs::write(new.directory.join(FILE),valid_new).unwrap();
+    assert!(new.operator_eight_scope().is_err());
+}

@@ -316,3 +316,18 @@ fn writer_readback_reuses_exact_authoritative_arc_records_and_rejects_changed_re
     assert_eq!(reuse_snapshot_records(&mut restored,&changed).unwrap_err(),"temporal_writer_shared_records_changed");
     assert!(restored.session.rows[0].same_record(&workflow.session.rows[0]));
 }
+
+#[test]
+fn old_train_snapshot_still_refuses_validation_heldout_and_inference_rows(){
+    let(_dir,store,mut workflow)=setup();workflow.persist_initial(&store).unwrap();
+    start(&mut workflow,&store,2_000_000_000,"synthetic-old-role-boundary");let mut sequence=0;
+    commit_next(&mut workflow,&store,2_000_000_000,&mut sequence);
+    let original=workflow.session.rows[0].clone();
+    let canonical=encode(&workflow).unwrap();
+    for role in [DataRole::Validation,DataRole::HeldOut,DataRole::Inference]{
+        let mut row=(*original).clone();row.role=role;workflow.session.rows[0]=SharedRecord::new(row);
+        assert!(matches!(snapshot_old(&workflow),Err(error)if error=="temporal_checkpoint_complete_train_prefix_only"));
+    }
+    workflow.session.rows[0]=original;
+    assert_eq!(encode(&workflow).unwrap(),canonical);
+}

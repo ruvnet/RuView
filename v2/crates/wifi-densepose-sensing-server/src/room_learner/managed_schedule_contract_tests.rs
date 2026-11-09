@@ -332,3 +332,60 @@ fn native_capacity_and_shape_reject_before_capture_without_fallback() {
     assert!(capacity(&many, &policies, 64, 128).is_err());
     assert_eq!(p.counts().total_windows, 128);
 }
+
+#[test]
+fn operator_eight_step_is_exact_interleaved_user_sequence_with_bounded_reserved_checks() {
+    let old = plan().export().unwrap();
+    let p=ManagedScheduleContract::build(context(3),LeadInPolicy::OperatorEightStepV1).unwrap();
+    assert_eq!(p.profile_id(),OPERATOR_EIGHT_PROFILE);
+    let expected=[
+        (DataRole::Train,RoomLabel::Empty,15_000,600_000,16),
+        (DataRole::Validation,RoomLabel::Empty,15_000,15_000,4),
+        (DataRole::Train,RoomLabel::OccupiedStatic,5_000,60_000,16),
+        (DataRole::Validation,RoomLabel::OccupiedStatic,5_000,15_000,4),
+        (DataRole::Train,RoomLabel::OccupiedMoving,5_000,60_000,16),
+        (DataRole::Validation,RoomLabel::OccupiedMoving,5_000,15_000,4),
+        (DataRole::Train,RoomLabel::AdjacentOnly,15_000,60_000,16),
+        (DataRole::Validation,RoomLabel::AdjacentOnly,15_000,15_000,4),
+    ];
+    assert_eq!(p.episodes().len(),8);
+    for (episode,(role,label,lead,duration,windows)) in p.episodes().iter().zip(expected) {
+        assert_eq!((episode.role,episode.condition,episode.lead_in_ms,episode.target_active_recording_ms,episode.slots.len()),(role,label,lead,duration,windows));
+        assert!(episode.requires_explicit_operator_start&&episode.requires_conditions_held_confirmation);
+        assert!(episode.slots.windows(2).all(|pair|pair[0].deadline_offset_ms<=pair[1].target_offset_ms));
+        assert!(episode.slots.last().unwrap().deadline_offset_ms<=duration);
+    }
+    let c=p.counts();
+    assert_eq!((c.train_episodes,c.held_out_episodes,c.train_windows,c.held_out_windows,c.total_windows),(4,4,64,16,80));
+    assert_eq!(c.nominal_recording_and_lead_in_ms,920_000);
+    assert_eq!(p.resources().max_numeric_values,1_034_880);
+    assert_eq!(p.resources().max_retained_rows,18_480);
+    assert_eq!(ManagedScheduleContract::import(&p.export().unwrap()).unwrap().export().unwrap(),p.export().unwrap());
+    assert_eq!(ManagedScheduleContract::import(&old).unwrap().export().unwrap(),old);
+    assert_ne!(p.sha256(),plan().sha256());
+}
+
+#[test]
+fn operator_reserved_checks_bind_without_a_model_but_cannot_be_relabelled_as_training() {
+    let p=ManagedScheduleContract::build(context(3),LeadInPolicy::OperatorEightStepV1).unwrap();
+    let check=p.bind_episode_start("operator-run",1,0,0,None).unwrap();
+    assert_eq!(check.episode().role,DataRole::Validation);
+    let frozen=FrozenModelIdentity::from_runtime_verified_artifact(&p,"f".repeat(64)).unwrap();
+    assert!(p.bind_episode_start("operator-run",1,0,0,Some(&frozen)).is_err());
+    assert!(plan().bind_episode_start("old-run",7,0,0,None).is_err());
+    let mut value:serde_json::Value=serde_json::from_slice(&p.export().unwrap()).unwrap();
+    value["body"]["episodes"][1]["role"]=serde_json::json!("Train");
+    assert!(ManagedScheduleContract::import(&serde_json::to_vec(&value).unwrap()).is_err());
+}
+
+#[test]
+fn operator_default_is_explicit_and_rehashed_authority_claims_stay_rejected(){
+    let p=ManagedScheduleContract::build(context(3),LeadInPolicy::OperatorEightStepV1).unwrap();
+    assert!(p.body.claims.user_facing_default);
+    assert!(!p.body.claims.capture_ready&&!p.body.claims.scientific_adequacy_claimed&&!p.body.claims.independence_verified);
+    assert!(!plan().body.claims.user_facing_default);
+    let mut forged=p.clone();forged.body.claims.capture_ready=true;forged.sha256=hash(&forged.body).unwrap();
+    assert!(ManagedScheduleContract::import(&forged.export().unwrap()).is_err());
+    let mut forged=plan();forged.body.claims.user_facing_default=true;forged.sha256=hash(&forged.body).unwrap();
+    assert!(ManagedScheduleContract::import(&forged.export().unwrap()).is_err());
+}

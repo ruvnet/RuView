@@ -91,10 +91,13 @@ pub(super) fn snapshot(v: &TemporalWorkflow) -> Result<Snapshot, String> {
     Ok(Snapshot::Old(snapshot_old(v)?))
 }
 fn snapshot_old(v: &TemporalWorkflow) -> Result<OldSnapshot, String> {
+    // The Full operator codec reuses this structural carrier, with explicit
+    // reserved Validation rows. Old Train-only and old15 roles stay unchanged.
+    let operator_checks=v.full_run.is_some()&&v.schedule()?.is_operator_eight_step();
     if v.session.fitted
         || v.session.failed
         || v.session.active
-        || v.session.rows.iter().any(|r| r.role != DataRole::Train)
+        || v.session.rows.iter().any(|r| r.role != DataRole::Train && !(operator_checks&&r.role==DataRole::Validation))
         || v.session.rows.len() != v.ledger.spans.len()
     {
         return Err("temporal_checkpoint_complete_train_prefix_only".into());
@@ -194,7 +197,7 @@ pub(super) fn decode_full_post_frozen(
 }
 fn decode_prefix(p:Prefix,descriptor:&RecoveryDescriptor,now:u64,contract:StructuralDecode<'_>)->Result<TemporalWorkflow,String>{
     let schedule = p.binding.contract()?;
-    let full=matches!(&contract,StructuralDecode::FullPostFrozen{..});
+    let full=matches!(&contract,StructuralDecode::FullPostFrozen{..})||schedule.is_operator_eight_step();
     let frozen=match &contract{
         StructuralDecode::OldTrain|StructuralDecode::FullTrain{..}=>None,
         StructuralDecode::FullPostFrozen{fit,..}=>Some(crate::room_learner::managed_schedule_contract::FrozenModelIdentity::from_runtime_verified_artifact(&schedule,fit.body.artifact_sha256.clone())?),
@@ -457,9 +460,10 @@ fn decode_prefix(p:Prefix,descriptor:&RecoveryDescriptor,now:u64,contract:Struct
         }
     }
     if let Some(bridge) = &p.bridge {
-        if !full {
+        if !full || schedule.is_operator_eight_step() {
             if matches!(contract,StructuralDecode::FullTrain{..}){
-                if bridge.seals.len()>schedule.counts().train_episodes{return Err("temporal_bridge_phase_order".into());}
+                let max_seals=if schedule.is_operator_eight_step(){schedule.episodes().len()}else{schedule.counts().train_episodes};
+                if bridge.seals.len()>max_seals{return Err("temporal_bridge_phase_order".into());}
                 let mut count=0;let cuts=bridge.seals.iter().enumerate().map(|(i,_)|{count+=schedule.episodes()[i].slots.len();count}).collect::<Vec<_>>();
                 let digests=prefix_digests::canonical_tuple_prefixes(&p.rows,&p.evidence,&p.ledger.spans,&cuts)?;
                 bridge.validate_full_run_with_prefixes(&schedule,&p.run,&p.rows,&p.evidence,&p.ledger,p.episode,p.mapping.as_ref(),p.last_now_ns,&digests)?;

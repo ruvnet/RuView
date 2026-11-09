@@ -438,6 +438,75 @@ fn receiver_tick_withdraws_stale_segment_without_advancing_observed_time() {
 }
 
 #[test]
+fn receiver_interval_diagnostics_preserve_exact_frozen_admission_boundaries() {
+    for boundary in ["below", "minimum", "maximum", "above"] {
+        let (_dir, store, mut w) = setup();
+        w.persist_initial(&store).unwrap();
+        let base = 2_000_000_000;
+        start(&mut w, &store, base, "interval-boundaries");
+        for source in 1..=3u8 {
+            let at = base + u64::from(source) * 1000;
+            w.observe(&packet(source, 1, at, RoomLabel::Empty, 0), at)
+                .unwrap();
+        }
+        let policy = &w.session.managed.as_ref().unwrap().binding.native.source_policies()[0];
+        let (minimum, maximum) = (policy.min_packet_interval_ns, policy.max_gap_ns);
+        assert_eq!((minimum, maximum), (27_777_777, 50_000_000));
+        let interval = match boundary {
+            "below" => minimum - 1,
+            "minimum" => minimum,
+            "maximum" => maximum,
+            _ => maximum + 1,
+        };
+        let before = (w.live_observed_ns, w.source_high.clone(), w.accepted());
+        let at = base + 1000 + interval;
+        let result = w.observe(&packet(1, 2, at, RoomLabel::Empty, 0), at);
+        match boundary {
+            "minimum" | "maximum" => result.unwrap(),
+            "below" => {
+                let error = result.unwrap_err();
+                assert_eq!(error, format!(
+                    "temporal_observed_gap_or_rate: source=1 direction=below_min receiver_interval_ns={} min_ns={} max_ns={}",
+                    interval, minimum, maximum
+                ));
+                assert!(error.len() <= 256);
+                assert_eq!((w.live_observed_ns, w.source_high.clone(), w.accepted()), before);
+            }
+            _ => {
+                // Custody still withdraws a too-late source before the interval
+                // diagnostic. Do not replace the earlier failure or admit it.
+                assert_eq!(result.unwrap_err(), "temporal_missing_segment_source");
+                assert!(w.custody.failed);
+                assert_eq!((w.live_observed_ns, w.source_high.clone(), w.accepted()), before);
+            }
+        }
+        assert!(w.session.rows.is_empty());
+        assert_eq!(w.durable_windows, 0);
+    }
+}
+
+#[test]
+fn synthetic_receiver_burst_reports_interval_without_advancing_observation() {
+    let (_dir, store, mut w) = setup();
+    w.persist_initial(&store).unwrap();
+    // A synthetic delay before the actual receiver start earns no observation.
+    let base = 12_000_000_000;
+    start(&mut w, &store, base, "synthetic-queued-drain");
+    for source in 1..=3u8 {
+        let at = base + u64::from(source) * 1000;
+        w.observe(&packet(source, 1, at, RoomLabel::Empty, 0), at)
+            .unwrap();
+    }
+    let before = (w.live_observed_ns, w.source_high.clone());
+    let at = base + 1_001_000;
+    let error = w.observe(&packet(1, 2, at, RoomLabel::Empty, 0), at).unwrap_err();
+    assert_eq!(error, "temporal_observed_gap_or_rate: source=1 direction=below_min receiver_interval_ns=1000000 min_ns=27777777 max_ns=50000000");
+    assert_eq!((w.live_observed_ns, w.source_high.clone()), before);
+    assert_eq!(w.accepted(), 0);
+    assert!(w.session.rows.is_empty());
+}
+
+#[test]
 fn initial_source_skew_uses_native_limit_even_within_first_arrival_deadline() {
     let (_dir, store, mut w) = setup();
     w.persist_initial(&store).unwrap();

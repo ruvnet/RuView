@@ -20,6 +20,7 @@ pub(crate) struct TemporalFitCaptureIdentity {
     prefix_schema: &'static str,
     metadata_kind: &'static str,
     continuation_policy: Option<String>,
+    operator_profile: Option<String>,
 }
 impl TemporalFitCaptureIdentity {
     pub(crate) fn owner(&self) -> &str {
@@ -114,7 +115,7 @@ impl VerifiedTemporalFitSource {
             configured_fit_sha256:self.identity.configuration,training_data_sha256:self.train_data,input_evidence_sha256:self.evidence,
             identity_evidence_sha256:self.identities,train_seal_chain_sha256:self.seals,accepted_train_prefix_sha256:self.identity.prefix,
             accepted_train_commitment:self.identity.token.data(),saved_candidate:candidate,actual_summary:self.actual_summary,
-            freeze_prepare_receiver_ns:now,source_floors:floors,
+            freeze_prepare_receiver_ns:now,source_floors:floors,operator_profile:self.identity.operator_profile,
         };
         let sha256=hash(&(full_run::FIT_RECORD_DOMAIN,&body))?;
         Ok(full_run::VerifiedFitRecordData{schema:full_run::FIT_RECORD_DOMAIN.into(),body,sha256})
@@ -136,24 +137,26 @@ fn complete_train(
         .as_ref()
         .ok_or("managed_session_required")?;
     let counts = schedule.counts();
+    let prefit_episodes=if schedule.is_operator_eight_step(){schedule.episodes().len()}else{counts.train_episodes};
+    let prefit_windows=if schedule.is_operator_eight_step(){counts.total_windows}else{counts.train_windows};
     if now < w.last_now_ns || now / 1_000_000 >= w.descriptor.expires_at_ms {
         return Err("temporal_fit_original_deadline_or_clock".into());
     }
     if bridge.disposition != bridge::Disposition::Complete
-        || bridge.seals.len() != counts.train_episodes
+        || bridge.seals.len() != prefit_episodes
         || !bridge.parts.is_empty()
-        || w.episode != counts.train_episodes
+        || w.episode != prefit_episodes
         || w.mapping.is_some()
         || w.pending_window.is_some()
         || w.session.active
         || w.session.failed
         || w.session.fitted
-        || w.session.rows.len() != counts.train_windows
-        || w.session.evidence.len() != counts.train_windows
-        || managed.windows.len() != counts.train_windows
-        || w.ledger.spans.len() != counts.train_windows
-        || w.durable_windows != counts.train_windows
-        || w.session.rows.iter().any(|row| row.role != DataRole::Train)
+        || w.session.rows.len() != prefit_windows
+        || w.session.evidence.len() != prefit_windows
+        || managed.windows.len() != prefit_windows
+        || w.ledger.spans.len() != prefit_windows
+        || w.durable_windows != prefit_windows
+        || w.session.rows.iter().any(|row| row.role != DataRole::Train && !(schedule.is_operator_eight_step() && row.role == DataRole::Validation))
         || w.pending_intent.is_some()
         || w.pending_prefix.is_some()
         || w.stage == Stage::BlockedDurability
@@ -182,6 +185,7 @@ fn identity(
         prefix_schema:if w.full_run.is_some(){full_run::PREFIX_SCHEMA}else{"ruview.room-learner.temporal-runtime-prefix.v2"},
         metadata_kind:if w.full_run.is_some(){full_run::META_KIND}else{"temporal-prefix-commitment-v1"},
         continuation_policy:w.full_run.as_ref().map(|m|m.policy.sha256().into()),
+        operator_profile:schedule.is_operator_eight_step().then(||"native-2s-three-source-56bin-operator-eight-step-v1".into()),
     })
 }
 pub(super) fn current_identity(
@@ -200,7 +204,7 @@ pub(super) fn current_identity(
     if state.pending.is_some()
         || state.busy_pause
         || state.error.is_some()
-        || state.accepted_seals != schedule.counts().train_episodes
+        || state.accepted_seals != if schedule.is_operator_eight_step(){schedule.episodes().len()}else{schedule.counts().train_episodes}
         || w.durable.is_none()
     {
         return Err("temporal_fit_durability_unconfirmed".into());
@@ -273,7 +277,7 @@ impl PendingTemporalFitInput {
         }
         Ok(ValidatedTemporalFitInput {
             identity: self.identity,
-            train_seals_sha256:hash(&restored.bridge.as_ref().ok_or("temporal_fit_actual_bridge_required")?.seals)?,
+            train_seals_sha256:hash(&restored.bridge.as_ref().ok_or("temporal_fit_actual_bridge_required")?.seals.iter().filter(|seal|schedule.episodes().get(seal.episode).is_some_and(|e|e.role==DataRole::Train)).collect::<Vec<_>>())?,
             session: restored.session,
         })
     }
@@ -287,7 +291,8 @@ impl ValidatedTemporalFitInput {
     ) -> Result<(TemporalTrainingSession, ManagedFitAdmission), String> {
         let(session,permit,_)=self.into_session_admission_and_source()?;Ok((session,permit))
     }
-    pub(crate) fn into_session_admission_and_source(self)->Result<(TemporalTrainingSession,ManagedFitAdmission,VerifiedTemporalFitSource),String>{
+    pub(crate) fn into_session_admission_and_source(mut self)->Result<(TemporalTrainingSession,ManagedFitAdmission,VerifiedTemporalFitSource),String>{
+        self.session.retain_managed_train_only()?;
         let managed = self
             .session
             .managed

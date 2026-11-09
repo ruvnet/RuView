@@ -297,7 +297,8 @@ impl ArtifactStore {
         }
 
         let id = &proof.body.identity;
-        if proof.sha256 != t.training_proof_sha256
+        if model.managed_is_operator_eight_step()? != proof.is_operator_eight_step()
+            || proof.sha256 != t.training_proof_sha256
             || held.sha256 != t.held_out_evidence_sha256
             || evaluation.sha256 != t.evaluation_receipt_sha256
             || qualification.receipt_sha256 != t.qualification_sha256
@@ -377,7 +378,7 @@ impl ArtifactStore {
             assessment_lookup_sha256: crate::room_learner::qualification::hash(&(
                 crate::room_learner::temporal_wire::ASSESSMENT_SCHEMA,
                 &assessment.evaluation.receipt().sha256,
-                TemporalQualificationPolicyWire::current(),
+                TemporalQualificationPolicyWire::for_operator_eight_step(source.proof().is_operator_eight_step()),
             ))?,
             assessment_sha256: assessment.assessment.receipt_sha256.clone(),
             qualification_sha256: q.receipt_sha256.clone(),

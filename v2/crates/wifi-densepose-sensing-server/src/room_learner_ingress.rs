@@ -1,6 +1,23 @@
 //! Header-only readiness is keyed to the exact PHY class admitted by the learner.
 use super::*;
 use std::collections::VecDeque;
+
+/// Receiver-only pipeline coordinates. Deliberately not Serialize and never an admission clock.
+#[derive(Clone, Copy)]
+pub(crate) struct ReceiverIngressTiming {
+    dequeued_at: std::time::Instant,
+    parse_us: Option<u32>,
+    lock_us: Option<u32>,
+}
+fn diagnostic_micros(duration: Option<std::time::Duration>) -> Option<u32> {
+    duration.and_then(|d| d.as_micros().try_into().ok())
+}
+impl ReceiverIngressTiming {
+    pub(crate) fn new(dequeued_at: std::time::Instant, parse: Option<std::time::Duration>, lock_wait: Option<std::time::Duration>) -> Self {
+        Self { dequeued_at, parse_us: diagnostic_micros(parse), lock_us: diagnostic_micros(lock_wait) }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub(crate) struct NativeSourceKey {
     pub(super) node_id: u8,
@@ -28,8 +45,14 @@ pub(crate) struct LiveSource {
     pub(super) bandwidth_hz: Option<u64>,
     pub(super) receiver_rate_hz: f64,
     arrivals: VecDeque<std::time::Instant>,
+    // Separate from arrivals/readiness/model input; one relative diagnostic predecessor.
+    last_dequeued: Option<std::time::Instant>,
 }
 impl LiveSource {
+    fn diagnostic_dequeue_interval(&mut self, at: std::time::Instant) -> Option<u32> {
+        let previous = self.last_dequeued.replace(at);
+        diagnostic_micros(previous.and_then(|before| at.checked_duration_since(before)))
+    }
     fn record(&mut self, now: std::time::Instant) {
         while self
             .arrivals
@@ -103,6 +126,15 @@ pub(crate) fn observe(
     packet: &[u8],
     now: std::time::Instant,
 ) {
+    observe_with_receiver_timing(state, frame, packet, now, None);
+}
+pub(crate) fn observe_with_receiver_timing(
+    state: &mut AppStateInner,
+    frame: &Esp32Frame,
+    packet: &[u8],
+    now: std::time::Instant,
+    receiver_timing: Option<ReceiverIngressTiming>,
+) {
     let Some(runtime) = state.room_learning.clone() else {
         return;
     };
@@ -171,12 +203,15 @@ pub(crate) fn observe(
             bandwidth_hz: Some(20_000_000),
             receiver_rate_hz: 0.0,
             arrivals: VecDeque::new(),
+            last_dequeued: None,
         });
     meta.record(now);
     let rate = meta.receiver_rate_hz;
     if !runtime.selects_grid(frame.node_id, &id) {
         return;
     }
+    let dequeue_interval_us = receiver_timing.and_then(|t| meta.diagnostic_dequeue_interval(t.dequeued_at));
+    let native_stamp_at = receiver_timing.map(|_| std::time::Instant::now());
     let ns = runtime.receiver_now_ns();
     let projected = match native::canonicalize_esp32(NativePacketInput {
         node_id: frame.node_id,
@@ -197,5 +232,49 @@ pub(crate) fn observe(
             return;
         }
     };
-    let _ = runtime.ingest_native(&projected, ns);
+    let timing = receiver_timing.map(|t| {
+        wifi_densepose_sensing_server::room_learner::lifecycle::ReceiverPipelineTiming::for_packet(
+            &projected, dequeue_interval_us, t.parse_us, t.lock_us,
+            diagnostic_micros(native_stamp_at.and_then(|at| at.checked_duration_since(t.dequeued_at))))
+    });
+    let _ = runtime.ingest_native_with_receiver_timing(&projected, ns, timing);
+}
+
+
+#[cfg(test)]
+mod receiver_timing_tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+    fn source() -> LiveSource { LiveSource { frequency_hz:2_437_000_000, bandwidth_hz:Some(20_000_000), receiver_rate_hz:33.0, arrivals:VecDeque::new(), last_dequeued:None } }
+    #[test]
+    fn diagnostic_cache_is_separate_from_readiness_and_exact_phy_keys_do_not_mix() {
+        let t = Instant::now();
+        let ht_key = NativeSourceKey { node_id:15, n_antennas:1, raw_bins:64, ppdu_type:0, frequency_mhz:2437, bw40:false };
+        let he_key = NativeSourceKey { raw_bins:256, ppdu_type:1, ..ht_key };
+        let mut cache = std::collections::HashMap::from([(ht_key, source()), (he_key, source())]);
+        let ht = cache.get_mut(&ht_key).unwrap(); ht.record(t);
+        let prior = (ht.arrivals.len(), ht.receiver_rate_hz, ht.eligible(t));
+        assert_eq!(ht.diagnostic_dequeue_interval(t), None);
+        assert_eq!(ht.diagnostic_dequeue_interval(t + Duration::from_micros(30_303)), Some(30_303));
+        assert_eq!((ht.arrivals.len(), ht.receiver_rate_hz, ht.eligible(t)), prior);
+        let he = cache.get_mut(&he_key).unwrap();
+        assert_eq!(he.diagnostic_dequeue_interval(t + Duration::from_micros(30_304)), None);
+    }
+    #[test]
+    fn invalid_or_oversized_durations_stay_unknown_instead_of_clipping() {
+        assert_eq!(diagnostic_micros(None), None);
+        assert_eq!(diagnostic_micros(Some(Duration::from_micros(u64::from(u32::MAX) + 1))), None);
+        assert_eq!(diagnostic_micros(Some(Duration::from_micros(12))), Some(12));
+        let t = Instant::now(); let mut s = source();
+        s.diagnostic_dequeue_interval(t + Duration::from_millis(1));
+        assert_eq!(s.diagnostic_dequeue_interval(t), None);
+    }
+    #[test]
+    fn synthetic_post_dequeue_delay_does_not_become_a_radio_timestamp() {
+        let t = Instant::now();
+        let timing = ReceiverIngressTiming::new(t, Some(Duration::from_micros(20)), Some(Duration::from_millis(60)));
+        assert_eq!(timing.parse_us, Some(20)); assert_eq!(timing.lock_us, Some(60_000));
+        let before_native_stamp = t + Duration::from_micros(60_025);
+        assert_eq!(diagnostic_micros(before_native_stamp.checked_duration_since(timing.dequeued_at)), Some(60_025));
+    }
 }

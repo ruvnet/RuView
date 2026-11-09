@@ -483,3 +483,59 @@ fn mode_correct_policy_identity_tracks_managed_targets_and_preserves_seed_v2_ide
     assert_eq!(seed.plan_sha256(), old.sha256());
     assert_eq!(seed.plan_sha256(), seed.binding.plan_sha256);
 }
+
+
+fn collect_operator(validation_changed:bool)->TemporalTrainingSession {
+    let plan=ManagedScheduleContract::build(context(),LeadInPolicy::OperatorEightStepV1).unwrap();
+    let mut session=TemporalTrainingSession::managed(plan.clone(),"synthetic-eight-run".into(),FitConfig{epochs:2,..Default::default()}).unwrap();
+    let mut start=10_000_000_000u64;let mut index=0;
+    for episode in plan.episodes(){
+        let bound=plan.bind_episode_start("synthetic-eight-run",episode.index,0,0,None).unwrap();
+        for slot in 0..episode.slots.len(){
+            let target=ManagedWindowTarget::from_runtime_episode(&plan,&bound,"synthetic-eight-run",slot,start).unwrap();
+            if validation_changed&&episode.role==DataRole::Validation {
+                session.begin_managed_window(&target).unwrap();
+                'window: for row in 0..100usize {for source in 1..=3u8 {
+                    let at=target.target_ns()+row as u64*1_000_000_000u64.div_ceil(33)+u64::from(source)*1000;
+                    let iq=vec![120u8;128];
+                    let p=canonicalize_esp32(NativePacketInput{node_id:source,n_antennas:1,raw_bins:64,frequency_hz:2_437_000_000,
+                        ppdu_type:PpduType::HtLegacy,sequence:index*1000+row as u32+1,received_at_ns:at,receiver_sample_rate_hz:33.,
+                        iq_bytes:&iq,flags:Adr018Flags::default(),provenance:CaptureProvenance::Synthetic}).unwrap();
+                    if session.ingest(&p).unwrap()==WindowAdmission::Ready{session.finish_window(at).unwrap();break 'window;}
+                }}
+            } else {collect(&mut session,&target,index,episode.condition);}
+            index+=1;
+        }
+        start+=episode.target_active_recording_ms*1_000_000+10_000_000_000;
+    }
+    assert_eq!(session.rows.len(),80);
+    assert_eq!(session.rows.iter().filter(|r|r.role==DataRole::Validation).count(),16);
+    session
+}
+#[test]
+fn operator_reserved_checks_never_change_actual_fitter_normalization_or_model_bytes(){
+    let mut first=collect_operator(false);let mut changed=collect_operator(true);
+    assert_ne!(hash(&first.rows).unwrap(),hash(&changed.rows).unwrap());
+    first.retain_managed_train_only().unwrap();changed.retain_managed_train_only().unwrap();
+    assert_eq!(first.rows.len(),64);assert_eq!(hash(&first.rows).unwrap(),hash(&changed.rows).unwrap());
+    assert_eq!(first.rows.iter().map(|r|&r.trial_id).collect::<HashSet<_>>().len(),4);
+    let a=first.synthetic_test_fit_admission().unwrap();let b=changed.synthetic_test_fit_admission().unwrap();
+    let(ma,ra)=first.fit_managed_with_cancel(a,&AtomicBool::new(false)).unwrap();
+    let(mb,rb)=changed.fit_managed_with_cancel(b,&AtomicBool::new(false)).unwrap();
+    assert_eq!(ma.export().unwrap(),mb.export().unwrap());
+    assert_eq!(serde_json::to_value(ra).unwrap(),serde_json::to_value(rb).unwrap());
+    assert!(ma.managed_is_operator_eight_step().unwrap());
+    assert_eq!(TemporalModel::import(&ma.export().unwrap()).unwrap().export().unwrap(),ma.export().unwrap());
+}
+#[test]
+fn operator_training_partition_rejects_relabelled_validation_before_fitting(){
+    let mut session=collect_operator(false);
+    let index=session.rows.iter().position(|r|r.role==DataRole::Validation).unwrap();
+    let original=(*session.rows[index]).clone();
+    for label_or_role in [false,true] {
+        let mut forged=original.clone();if label_or_role{forged.role=DataRole::Train}else{forged.label=RoomLabel::OccupiedMoving}
+        session.rows[index]=SharedRecord::new(forged);
+        assert!(session.retain_managed_train_only().is_err());
+        assert!(!session.fitted);
+    }
+}

@@ -108,10 +108,7 @@ impl RoomLearningRuntime {
     ) -> Result<u64, String> {
         let executor = tokio::runtime::Handle::try_current()
             .map_err(|_| "temporal_evaluation_executor_unavailable")?;
-        let recovery = self
-            .recovery_store
-            .clone()
-            .ok_or("temporal_recovery_unavailable")?;
+        let recovery = self.temporal_store_arc()?;
         let store = self.store.clone();
         let (input, identity, lifetime) = self.reserve_temporal_evidence(expected, now, purpose)?;
         let attempt = identity.attempt;
@@ -237,10 +234,7 @@ impl RoomLearningRuntime {
         expected: &MutationGuard,
         now: u64,
     ) -> Result<(), String> {
-        let recovery = self
-            .recovery_store
-            .clone()
-            .ok_or("temporal_recovery_unavailable")?;
+        let recovery = self.temporal_store_arc()?;
         let store = self.store.clone();
         let (input, identity, lifetime) =
             self.reserve_temporal_evidence(expected, now, EvidencePurpose::Selection)?;

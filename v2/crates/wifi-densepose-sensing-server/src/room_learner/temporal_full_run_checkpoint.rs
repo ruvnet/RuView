@@ -27,6 +27,8 @@ enum FullStage {
     Train {
         bridge: BridgeState,
     },
+    OperatorFrozen { fit: VerifiedFitRecordData, seals: Vec<bridge::TrainSeal> },
+    OperatorComplete { fit: VerifiedFitRecordData, seals: Vec<bridge::TrainSeal>, complete: held_out::FullCompleteRecordData },
     Frozen {
         fit: VerifiedFitRecordData,
         train_seals: Vec<bridge::TrainSeal>,
@@ -74,7 +76,8 @@ impl FullSnapshot {
                 .binding,
         )?;
         let permit = mode.snapshot_permit(w.commit_token.clone())?;
-        let old = if mode.held_out.is_some() {
+        let operator=w.schedule()?.is_operator_eight_step();
+        let old = if mode.held_out.is_some() || operator && mode.frozen.is_some() && mode.pending_record().is_none() {
             mode.check_current_train_prefix(&w.session)?;
             if w.session.failed || w.session.active || w.session.rows.len() != w.ledger.spans.len()
             {
@@ -107,7 +110,12 @@ impl FullSnapshot {
         } else {
             super::snapshot_old(w)?
         };
-        let stage = if let Some(held) = &mode.held_out {
+        let stage = if operator && mode.frozen.is_some() {
+            let fit=mode.frozen.as_ref().unwrap().clone();
+            let seals=old.bridge.as_ref().ok_or("operator_bridge_required")?.seals.clone();
+            if let Some(complete)=&mode.complete {FullStage::OperatorComplete{fit,seals,complete:complete.clone()}}
+            else {FullStage::OperatorFrozen{fit,seals}}
+        } else if let Some(held) = &mode.held_out {
             let fit = mode
                 .frozen
                 .as_ref()
@@ -239,7 +247,8 @@ fn old_projection(
             // Full-v3 genesis and model identity retain their ORIGINAL Train
             // seal profile. Recognizing fresh343 for Kind1 must not widen this
             // separately versioned Kind2 continuation contract.
-            if bridge.policy != bridge::BRIDGE_POLICY {
+            let operator=common.binding.contract()?.is_operator_eight_step();
+            if bridge.policy != if operator{bridge::OPERATOR_EIGHT_POLICY}else{bridge::BRIDGE_POLICY} {
                 return Err("temporal_full_run_train_profile_changed".into());
             }
             (bridge, None)
@@ -301,6 +310,9 @@ pub(super) fn decode_structural(
     now: u64,
 ) -> Result<TemporalWorkflow, String> {
     let e = parse(bytes)?;
+    if matches!(e.payload.stage,FullStage::OperatorFrozen{..}|FullStage::OperatorComplete{..}) {
+        return decode_operator(e.payload,descriptor,now);
+    }
     if matches!(
         e.payload.stage,
         FullStage::HeldOut { .. } | FullStage::Complete { .. }
@@ -441,7 +453,8 @@ pub(super) fn validate_full_extension(
             )?;
             super::validate_extension(&av, &bv)
         }
-        (FullStage::Train { bridge }, FullStage::Frozen { fit, train_seals }) => {
+        (FullStage::Train { bridge }, FullStage::Frozen { fit, train_seals })
+        | (FullStage::Train { bridge }, FullStage::OperatorFrozen { fit, seals:train_seals }) => {
             if bridge.disposition != bridge::Disposition::Complete
                 || bridge.seals != *train_seals
                 || fit.body.accepted_train_prefix_sha256 != bytes_hash(old.bytes())
@@ -473,8 +486,58 @@ pub(super) fn validate_full_extension(
             // commitment preparation; the raw structure grants no write.
             Ok(())
         }
+        (FullStage::OperatorFrozen{fit:a_fit,seals:a_seals},FullStage::OperatorComplete{fit:b_fit,seals:b_seals,complete}) => {
+            if a_fit != b_fit || a_seals != b_seals
+                || serde_json::to_vec(&a.payload.accepted).map_err(|_|"temporal_encoding")? != serde_json::to_vec(&b.payload.accepted).map_err(|_|"temporal_encoding")?
+                || a.payload.common.binding.schedule_sha256 != b.payload.common.binding.schedule_sha256
+                || a.payload.common.run != b.payload.common.run || a.payload.common.ledger != b.payload.common.ledger
+                || a.payload.common.mapping.is_some() || b.payload.common.mapping.is_some()
+                || a.payload.common.episode!=8 || b.payload.common.episode!=8
+                || complete.body.accepted_held_out_commitment.run!=a.payload.common.run
+                || complete.body.complete_prepare_receiver_ns!=b.payload.common.last_now_ns {
+                return Err("operator_complete_transition_changed".into());
+            }
+            for(id,seq,time)in &a.payload.common.source_high{if !b.payload.common.source_high.iter().any(|(s,q,t)|s==id&&q>=seq&&t>=time){return Err("temporal_commit_floor_regressed".into());}}
+            Ok(())
+        }
         _ => Err("temporal_full_run_transition_unsupported".into()),
     }
+}
+
+fn decode_operator(data:FullData,descriptor:&RecoveryDescriptor,now:u64)->Result<TemporalWorkflow,String>{
+    let (fit,seals,complete)=match data.stage{
+        FullStage::OperatorFrozen{fit,seals}=>(fit,seals,None),
+        FullStage::OperatorComplete{fit,seals,complete}=>(fit,seals,Some(complete)),
+        _=>return Err("operator_frozen_stage_required".into()),
+    };
+    let c=data.common;let a=data.accepted;
+    let schedule=c.binding.contract()?;
+    if !schedule.is_operator_eight_step() || c.episode!=8 || c.mapping.is_some() || a.rows.len()!=80
+        || a.evidence.len()!=80 || a.identities.len()!=80 || seals.len()!=8 || c.run!=fit.body.run
+        || c.last_now_ns<fit.body.freeze_prepare_receiver_ns
+        || fit.body.source_floors.iter().any(|(id,seq,time)|!c.source_high.iter().any(|(s,q,t)|s==id&&q>=seq&&t>=time)) {
+        return Err("operator_frozen_prefix_changed".into());
+    }
+    fit.validate_data(&c.binding,&data.policy)?;
+    let prefix=Prefix{schema:BRIDGE_SCHEMA.into(),binding:c.binding,run:c.run,descriptor:c.descriptor,last_now_ns:c.last_now_ns,
+        rows:a.rows,evidence:a.evidence,identities:a.identities,fences:a.fences,source_high:c.source_high,ledger:c.ledger,
+        mapping:c.mapping,episode:c.episode,frozen_model:None,quality_issued:false,confirmation_issued:false,
+        bridge:Some(BridgeState{policy:bridge::OPERATOR_EIGHT_POLICY.into(),disposition:bridge::Disposition::Complete,seals,parts:vec![]})};
+    let budget=data.policy.replay_fence_budget(&prefix.binding)?;
+    let mut w=super::decode_full_train_projection(&old_bytes(prefix)?,descriptor,now,&budget)?;
+    validate_immutable_train(&w,&fit)?;
+    if let Some(record)=&complete{
+        record.validate_binding_data(&fit,descriptor,now)?;
+        let hashes=full_run::FullPrefixHashes::from_workflow(&w)?;
+        let checkseals=w.bridge.as_ref().unwrap().seals.iter().filter(|seal|schedule.episodes()[seal.episode].role==DataRole::Validation).collect::<Vec<_>>();
+        if record.body.raw_sha256!=hashes.raw || record.body.evidence_sha256!=hashes.evidence
+            || record.body.identity_sha256!=hashes.identities || record.body.ledger_sha256!=hashes.ledger
+            || record.body.held_out_chain_sha256!=hash(&checkseals)? {
+            return Err("operator_complete_actual_prefix_changed".into());
+        }
+    }
+    let mut mode=FullRunState::structural(data.policy,Some(fit));mode.complete=complete;w.full_run=Some(mode);
+    Ok(w)
 }
 
 fn decode_continued(
@@ -730,21 +793,21 @@ pub(super) fn validate_immutable_train(
         .as_ref()
         .ok_or("temporal_full_run_bridge_required")?;
     let body = &record.body;
-    if w.session.rows.len() < 64
-        || w.session.evidence.len() < 64
-        || managed.windows.len() < 64
-        || w.session.rows[..64]
-            .iter()
-            .any(|r| r.role != DataRole::Train)
+    let schedule=w.schedule()?;
+    let operator=schedule.is_operator_eight_step();
+    let rows=w.session.rows.iter().filter(|r|r.role==DataRole::Train).collect::<Vec<_>>();
+    let evidence=w.session.evidence.iter().filter(|r|r.role==DataRole::Train).collect::<Vec<_>>();
+    let identities=managed.windows.iter().filter(|r|r.role==DataRole::Train).collect::<Vec<_>>();
+    let seals=bridge.seals.iter().filter(|seal|schedule.episodes()[seal.episode].role==DataRole::Train).collect::<Vec<_>>();
+    if rows.len()!=64 || evidence.len()!=64 || identities.len()!=64
         || bridge.disposition != bridge::Disposition::Complete
-        || bridge.seals.len() != 7
-        || body.training_data_sha256 != hash(&(&w.session.rows[..64]))?
-        || body.input_evidence_sha256 != hash(&(&w.session.evidence[..64]))?
-        || body.identity_evidence_sha256 != hash(&(&managed.windows[..64]))?
-        || body.train_seal_chain_sha256 != hash(&bridge.seals)?
+        || bridge.seals.len()!=if operator{8}else{7}
+        || body.training_data_sha256 != hash(&rows)?
+        || body.input_evidence_sha256 != hash(&evidence)?
+        || body.identity_evidence_sha256 != hash(&identities)?
+        || body.train_seal_chain_sha256 != hash(&seals)?
         || body.accepted_train_commitment.run != w.session.run_id
-        || body.accepted_train_commitment.id != w.descriptor.id
-    {
+        || body.accepted_train_commitment.id != w.descriptor.id {
         return Err("temporal_frozen_train_binding".into());
     }
     Ok(())

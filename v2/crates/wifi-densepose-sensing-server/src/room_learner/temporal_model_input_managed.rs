@@ -190,9 +190,11 @@ fn identity(
 fn expected_position(
     schedule: &ManagedScheduleContract,
     index: usize,
+    train_only: bool,
 ) -> Result<(usize, usize), String> {
     let mut cursor = 0;
     for episode in schedule.episodes() {
+        if train_only && episode.role != DataRole::Train { continue; }
         if index < cursor + episode.slots.len() {
             return Ok((episode.index, index - cursor));
         }
@@ -215,7 +217,7 @@ fn validate_records(
     let mut previous: Option<&ManagedWindowIdentity> = None;
     for (index, (e, r)) in evidence.iter().zip(records).enumerate() {
         let e = e.borrow();
-        let position = expected_position(schedule, index)?;
+        let position = expected_position(schedule, index, train_only)?;
         if (r.episode_index, r.slot_index) != position
             || (train_only && (r.role != DataRole::Train || r.frozen_artifact_sha256.is_some()))
         {
@@ -335,6 +337,32 @@ impl TemporalTrainingSession {
         self.target_ns = Some(target.target_ns());
         Ok(())
     }
+    /// Called only on the recertified fitting copy. Validation rows remain in
+    /// the durable capture and never enter training, normalization or its codec.
+    pub(crate) fn retain_managed_train_only(&mut self) -> Result<(), String> {
+        let managed = self.managed.as_mut().ok_or("managed_session_required")?;
+        let schedule = managed.binding.contract()?;
+        if !schedule.is_operator_eight_step() { return Ok(()); }
+        if self.active || self.fitted || self.failed || self.rows.len() != schedule.counts().total_windows
+            || self.rows.len() != self.evidence.len() || self.rows.len() != managed.windows.len() {
+            return Err("operator_check_train_filter_requires_complete_capture".into());
+        }
+        validate_records(&schedule, &self.run_id, &self.evidence, &managed.windows, &self.binding, false)?;
+        for ((row,evidence),identity) in self.rows.iter().zip(&self.evidence).zip(&managed.windows) {
+            if row.role!=identity.role || row.label!=identity.label || row.id!=evidence.cohort_id
+                || row.canonical_sha256()?!=&evidence.cohort_sha256 {
+                return Err("operator_check_training_partition_changed".into());
+            }
+        }
+        let keep = managed.windows.iter().map(|w| w.role == DataRole::Train).collect::<Vec<_>>();
+        let mut index=0;self.rows.retain(|_|{let k=keep[index];index+=1;k});
+        let mut index=0;self.evidence.retain(|_|{let k=keep[index];index+=1;k});
+        managed.windows.retain(|w|w.role==DataRole::Train);
+        if self.rows.len()!=schedule.counts().train_windows || self.rows.iter().any(|r|r.role!=DataRole::Train) {
+            return Err("operator_check_training_partition_changed".into());
+        }
+        Ok(())
+    }
     pub(crate) fn fit_managed_with_cancel(
         &mut self,
         permit: ManagedFitAdmission,
@@ -399,6 +427,9 @@ impl TemporalTrainingSession {
     }
 }
 impl TemporalModel {
+    pub(crate) fn managed_is_operator_eight_step(&self) -> Result<bool, String> {
+        Ok(self.validate_managed()?.is_operator_eight_step())
+    }
     pub(super) fn validate_managed(&self) -> Result<ManagedScheduleContract, String> {
         let m = self.managed.as_ref().ok_or("managed_model_required")?;
         let schedule = m.binding.contract()?;

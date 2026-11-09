@@ -453,7 +453,7 @@ jobs:
     # job-level env block (added below).
     - name: Notify security team on critical findings
       continue-on-error: true
-      if: ${{ env.SECURITY_SLACK_WEBHOOK_URL != '' && (needs.sast.result == 'failure' || needs.dependency-scan.result == 'failure' || needs.container-scan.result == 'failure') }}
+      if: ${{ github.event_name != 'workflow_dispatch' && env.SECURITY_SLACK_WEBHOOK_URL != '' && (needs.sast.result == 'failure' || needs.dependency-scan.result == 'failure' || needs.container-scan.result == 'failure') }}
       uses: 8398a7/action-slack@77eaa4f1c608a7d68b38af4e3f739dcd8cba273e # v3
       with:
         status: failure
@@ -469,7 +469,7 @@ jobs:
 
     - name: Create security issue on critical findings
       continue-on-error: true
-      if: needs.sast.result == 'failure' || needs.dependency-scan.result == 'failure'
+      if: github.event_name != 'workflow_dispatch' && (needs.sast.result == 'failure' || needs.dependency-scan.result == 'failure')
       uses: actions/github-script@00f12e3e20659f42342b1c0226afda7f7c042325 # v6
       with:
         script: |

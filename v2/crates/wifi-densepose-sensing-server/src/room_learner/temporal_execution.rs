@@ -489,12 +489,23 @@ impl TemporalWorkflow {
             .iter()
             .find(|s| s.source_id == p.source_id)
             .ok_or("temporal_unbound_source")?;
-        if self.source_high.iter().any(|(id, _, last)| {
+        if let Some((_, _, last)) = self.source_high.iter().find(|(id, _, last)| {
             *id == p.source_id
                 && *last >= mapping.receiver_start_ns
                 && (t - *last > policy.max_gap_ns || t - *last < policy.min_packet_interval_ns)
         }) {
-            return Err("temporal_observed_gap_or_rate".into());
+            let interval_ns = t - *last;
+            let direction = if interval_ns < policy.min_packet_interval_ns {
+                "below_min"
+            } else {
+                "above_max"
+            };
+            // Receiver-processing interval only: no RF values, absolute time or
+            // source-clock claim. Keep the existing failure prefix and guards.
+            return Err(format!(
+                "temporal_observed_gap_or_rate: source={} direction={} receiver_interval_ns={} min_ns={} max_ns={}",
+                p.source_id, direction, interval_ns, policy.min_packet_interval_ns, policy.max_gap_ns
+            ));
         }
         let first_limit = native.max_first_packet_delay_ms() * 1_000_000;
         if let Some((_, _, last)) = self
@@ -825,4 +836,26 @@ impl TemporalWorkflow {
         else{self.bridge.as_mut().ok_or("temporal_bridge_required")?.disposition=disposition;}
         Ok(())
     }
+}
+
+
+/// Failure-only receiver pipeline metadata. No clock value or RF row is exported.
+/// Unknown/oversized durations stay unknown; the original failure is never cut.
+pub(crate) fn receiver_pipeline_failure_detail(
+    primary: &str,
+    durations: [Option<u32>; 4],
+) -> Option<String> {
+    if primary.len() > 256 || !primary.starts_with("temporal_observed_gap_or_rate:") { return None; }
+    const KEYS: [&str; 4] = ["deq_us", "parse_us", "lock_us", "stamp_age_us"];
+    let digits = |value: Option<u32>| -> usize { value.map_or(2, |n| if n == 0 { 1 } else { n.ilog10() as usize + 1 }) };
+    let length = primary.len() + KEYS.iter().zip(durations).map(|(key, value)| key.len() + 2 + digits(value)).sum::<usize>();
+    if length > 256 { return None; }
+    let mut detail = String::with_capacity(length);
+    detail.push_str(primary);
+    for (key, value) in KEYS.iter().zip(durations) {
+        detail.push(' '); detail.push_str(key); detail.push('=');
+        if let Some(value) = value { use std::fmt::Write; write!(&mut detail, "{value}").ok()?; }
+        else { detail.push_str("na"); }
+    }
+    Some(detail)
 }

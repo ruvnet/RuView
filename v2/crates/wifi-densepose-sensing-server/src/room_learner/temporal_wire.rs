@@ -155,6 +155,19 @@ pub struct TemporalConfigureRequestV2 {
     pub source_node_ids: Vec<u8>,
     pub new_training: bool,
     pub recovery_consent: bool,
+    #[serde(default)]
+    pub profile_id: Option<String>,
+}
+
+pub const RECOVERY_RETRY_REQUEST_SCHEMA: &str = "ruview.room-learner.recovery-retry.v2";
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TemporalRetryRequestV2 {
+    pub schema: String,
+    pub model_kind: WholeTemporalKind,
+    pub expected: MutationGuard,
+    pub capture_generation_id: String,
+    pub retry_confirmed: bool,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -316,10 +329,21 @@ pub struct TemporalRecoveryRequestV2 {
     pub revision: u64,
     pub source_node_ids: Vec<u8>,
     pub capture_generation_id: String,
+    #[serde(default)]
+    pub profile_id: Option<String>,
 }
 
 pub const TEMPORAL_POLICY_ID: &str = "ruview.local-operational-temporal-policy.v1";
+pub const OPERATOR_EIGHT_STEP_TEMPORAL_POLICY_ID: &str = "ruview.local-operational-temporal-policy.operator-eight-step.v1";
 impl TemporalQualificationPolicyWire {
+    pub(crate) fn for_operator_eight_step(operator: bool) -> Self {
+        let mut policy = Self::current();
+        if operator {
+            policy.id = OPERATOR_EIGHT_STEP_TEMPORAL_POLICY_ID.into();
+            policy.minimum_windows_per_condition = 4;
+        }
+        policy
+    }
     pub(crate) fn current() -> Self {
         let numeric = super::qualification::QualificationPolicy::default();
         Self {
@@ -358,6 +382,14 @@ pub struct TemporalDiscardRequestV2 {
 }
 
 impl TemporalProfileWire {
+    pub(crate) fn operator_eight_step() -> Self {
+        let labels=[RoomLabel::Empty,RoomLabel::OccupiedStatic,RoomLabel::OccupiedMoving,RoomLabel::AdjacentOnly];
+        Self {profile_id:super::managed_schedule_contract::OPERATOR_EIGHT_PROFILE.into(),window_unit:"native_receiver_2s_window".into(),native_window_ms:2000,
+            train_windows:64,held_out_windows:16,train_episodes:4,held_out_episodes:4,windows_per_condition:[16;4],train_episodes_per_condition:[1;4],held_out_episodes_per_condition:[1;4],
+            episodes:labels.into_iter().flat_map(|label| [DataRole::Train,DataRole::Validation].into_iter().map(move |role|(label,role))).enumerate().map(|(index,(label,role))|TemporalEpisodeWire{
+                index:index as u8,role,label,target_ms:if role==DataRole::Validation{15_000}else if label==RoomLabel::Empty{600_000}else{60_000},lead_in_ms:if matches!(label,RoomLabel::Empty|RoomLabel::AdjacentOnly){15_000}else{5_000},native_windows:if role==DataRole::Train{16}else{4}
+            }).collect()}
+    }
     pub(crate) fn engineering() -> Self {
         let labels = [
             RoomLabel::Empty,

@@ -29,11 +29,8 @@ impl RoomLearningRuntime {
         if context.sources.len() != 3 {
             return Err("learner_temporal_three_sources_required".into());
         }
-        let store = self
-            .recovery_store
-            .clone()
-            .filter(|s| s.available())
-            .ok_or("recovery_unavailable")?;
+        let store = self.temporal_store_arc()?.clone();
+        if !store.available(){return Err("recovery_unavailable".into());}
         if store.inspect()?.is_some() {
             return Err("learner_recovery_pending".into());
         }
@@ -47,6 +44,39 @@ impl RoomLearningRuntime {
                 TemporalTrainCapture::prepare_full_run_async(s, r, f, n, store, w)
             },
         )
+    }
+    fn validate_profile_selection(&self,state:&Inner,profile:Option<&str>)->Result<bool,String>{
+        let operator=match profile {Some(crate::room_learner::managed_schedule_contract::OPERATOR_EIGHT_PROFILE)=>true,Some("native-2s-three-source-56bin-option-a-engineering-v1")|None=>false,_=>return Err("learner_unsupported_profile".into())};
+        if let Some(CaptureWorkflow::Temporal(c))=state.capture.as_ref(){
+            if c.core.as_ref().is_none_or(|core|core.public_profile().profile_id.eq(crate::room_learner::managed_schedule_contract::OPERATOR_EIGHT_PROFILE)!=operator){return Err("temporal_previous_plan_loaded".into());}
+        }
+        Ok(operator)
+    }
+    pub fn temporal_select_profile_guarded_v2(&self,profile:Option<&str>,expected:&MutationGuard)->Result<MutationGuard,String>{
+        let mut state=self.command_state(expected)?;
+        let operator=self.validate_profile_selection(&state,profile)?;
+        self.operator_profile_selected.store(operator,Ordering::Release);
+        self.operator_profile_initialized.store(true,Ordering::Release);
+        Ok(self.guard_for(&state))
+    }
+    #[cfg(test)]
+    pub(super) fn temporal_select_profile_v2(&self,profile:Option<&str>)->Result<(),String>{
+        let guard=self.mutation_guard()?;self.temporal_select_profile_guarded_v2(profile,&guard).map(|_|())
+    }
+    pub fn temporal_default_operator_profile_v2(&self)->Result<(),String>{
+        let mut state=self.inner.lock().map_err(|_|"learner state unavailable")?;
+        if state.capture.is_none()&&!self.operator_profile_initialized.load(Ordering::Acquire){
+            state.workflow_revision=state.workflow_revision.checked_add(1).ok_or("learner command revision exhausted")?;
+            self.operator_profile_selected.store(true,Ordering::Release);
+            self.operator_profile_initialized.store(true,Ordering::Release);
+        }
+        Ok(())
+    }
+    pub fn temporal_retry_v2(&self,request:TemporalRetryRequestV2,now:u64)->Result<(),String>{
+        schema(&request.schema,RECOVERY_RETRY_REQUEST_SCHEMA)?;
+        if !request.retry_confirmed{return Err("temporal_retry_confirmation_required".into());}
+        if !sha(&request.capture_generation_id){return Err("learner_capture_identity_invalid".into());}
+        self.retry_failed_temporal_capture(&request.expected,&request.capture_generation_id,now)
     }
     pub fn temporal_begin_phase_v2(
         &self,
@@ -395,7 +425,18 @@ impl RoomLearningRuntime {
         self.start_temporal_evidence(&request.expected, now, EvidencePurpose::HeldOutEvaluation)
             .map(|attempt| attempt.to_string())
     }
+    /// The permit must live inside the blocking read, not its cancellable HTTP
+    /// future: one stuck filesystem read cannot accumulate retry workers.
+    pub async fn acquire_temporal_status_reader(&self) -> Result<tokio::sync::OwnedSemaphorePermit, String> {
+        self.status_reader.clone().acquire_owned().await.map_err(|_| "learner_status_reader_unavailable".into())
+    }
     pub fn temporal_status_v2(self: &Arc<Self>, now: u64) -> Result<Value, String> {
+        self.temporal_poll_status_v2(now)?;
+        self.temporal_status_snapshot_v2(now)
+    }
+    /// Caller serializes this clock-advancing poll with live ingress. No disk
+    /// discovery runs here; it belongs in the separately fenced snapshot.
+    pub fn temporal_poll_status_v2(self: &Arc<Self>, now: u64) -> Result<(), String> {
         // ACKs may already be ready. This tick does not issue new consent,
         // source samples, fit/proof/evaluation jobs or immutable metadata writes.
         let temporal = {
@@ -405,19 +446,22 @@ impl RoomLearningRuntime {
         if temporal {
             let _ = self.tick_temporal_capture(&self.mutation_guard()?, now);
         }
-        let generation = {
-            self.inner
-                .lock()
-                .map_err(|_| "learner state unavailable")?
-                .generation
+        Ok(())
+    }
+    /// Read-only recovery discovery may wait for a durable writer. Callers
+    /// must not hold the shared RF ingress lock across this operation.
+    pub fn temporal_status_snapshot_v2(self: &Arc<Self>, now: u64) -> Result<Value, String> {
+        let (generation,workflow_revision,operator_profile) = {
+            let state=self.inner.lock().map_err(|_| "learner state unavailable")?;
+            (state.generation,state.workflow_revision,self.operator_profile_selected.load(Ordering::Acquire))
         };
-        let recovery = self
-            .recovery_store
-            .as_ref()
-            .and_then(|store| TemporalTrainCapture::recovery_discovery(store, now));
+        let recovery_store=if operator_profile{self.operator_recovery_store.as_ref()}else{self.recovery_store.as_ref()};
+        let recovery=recovery_store.and_then(|store|TemporalTrainCapture::recovery_discovery(store,now));
+        #[cfg(test)]
+        if let Some(hook)=self.temporal_status_profile_hook.lock().unwrap().take(){hook();}
         let mut response = {
             let state = self.inner.lock().map_err(|_| "learner state unavailable")?;
-            if state.generation != generation {
+            if state.generation != generation || state.workflow_revision!=workflow_revision || self.operator_profile_selected.load(Ordering::Acquire)!=operator_profile {
                 return Err("learner_state_changed".into());
             }
             let capture = match state.capture.as_ref() {
@@ -425,7 +469,7 @@ impl RoomLearningRuntime {
                 _ => None,
             };
             let context = state.capture_context().cloned();
-            let mut profile = TemporalProfileWire::engineering();
+            let mut profile = if operator_profile{TemporalProfileWire::operator_eight_step()}else{TemporalProfileWire::engineering()};
             let mut wire_capture = None;
             let mut candidate = None;
             let mut train_proof = None;

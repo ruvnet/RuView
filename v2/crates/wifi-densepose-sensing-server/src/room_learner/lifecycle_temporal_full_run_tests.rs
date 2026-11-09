@@ -280,6 +280,8 @@ fn record_train_uncached(root: &Path) -> (Arc<RoomLearningRuntime>, u64) {
     .unwrap();
     let mut sequence = 0;
     let mut starts = 0;
+    let mut forced_pause = false;
+    let mut forced_resume = false;
     for episode in schedule
         .episodes()
         .iter()
@@ -289,17 +291,69 @@ fn record_train_uncached(root: &Path) -> (Arc<RoomLearningRuntime>, u64) {
             let progress = fixture::snapshot(&runtime, now);
             match progress["stage"].as_str().unwrap() {
                 "ready" | "paused" => {
+                    let resume_revision = if progress["stage"] == "paused"
+                        && forced_pause && !forced_resume
+                    {
+                        Some((runtime.temporal_store().unwrap().load_temporal(now)
+                            .unwrap().unwrap().token.data().revision,
+                            progress["durable_windows"].as_u64().unwrap()))
+                    } else { None };
                     now = fixture::async_lead_end(&runtime, now);
                     starts += 1;
                     runtime
                         .tick_temporal_capture(&runtime.mutation_guard().unwrap(), now)
                         .unwrap();
+                    if let Some((before, durable_rows)) = resume_revision {
+                        // Lead readiness is only recertification. Admit the
+                        // actual SEGMENT ACK while every source remains live.
+                        let wait = Instant::now();
+                        loop {
+                            sequence += 1;
+                            for source in 1..=3 {
+                                runtime.ingest_native(
+                                    &packet(source, sequence, now, episode.condition), now,
+                                ).unwrap();
+                            }
+                            let pending = fixture::snapshot(&runtime, now)["durability_pending"] == true;
+                            now += fixture::PERIOD;
+                            if !pending { break; }
+                            assert!(wait.elapsed() < Duration::from_secs(30));
+                            std::thread::sleep(Duration::from_nanos(fixture::PERIOD));
+                        }
+                        let after = runtime.temporal_store().unwrap().load_temporal(now)
+                            .unwrap().unwrap().token.data().revision;
+                        assert_eq!(after, before.checked_add(1).unwrap(),
+                            "the explicit resumed segment is exactly one durable transition");
+                        let resumed = fixture::snapshot(&runtime, now);
+                        assert_eq!(resumed["stage"], "observing");
+                        assert_eq!(resumed["durable_windows"], durable_rows);
+                        assert_eq!(resumed["retained_rows"], durable_rows,
+                            "the SEGMENT ACK must not be confused with a new WINDOW ACK");
+                        forced_resume = true;
+                    }
                 }
                 "needs_confirmation" => break,
                 "failed" => panic!("synthetic C4A phase{} failed: {progress}", episode.index),
                 _ => {}
             }
             let pending = fixture::snapshot(&runtime, now)["durability_pending"] == true;
+            if !forced_pause && episode.index == 0 && !pending
+                && progress["stage"] == "observing"
+                && progress["durable_windows"].as_u64().is_some_and(|n| n >= 1)
+                && progress["retained_rows"] == progress["durable_windows"]
+            {
+                let before = runtime.temporal_store().unwrap().load_temporal(now)
+                    .unwrap().unwrap().token.data().revision;
+                runtime.pause_temporal_capture(&runtime.mutation_guard().unwrap(), now).unwrap();
+                now = fixture::settle_async_boundary(&runtime, now);
+                assert_eq!(fixture::snapshot(&runtime, now)["stage"], "paused");
+                let after = runtime.temporal_store().unwrap().load_temporal(now)
+                    .unwrap().unwrap().token.data().revision;
+                assert_eq!(after, before.checked_add(1).unwrap(),
+                    "the explicit legal pause is exactly one durable transition");
+                forced_pause = true;
+                continue;
+            }
             sequence += 1;
             for source in 1..=3 {
                 match runtime.ingest_native(&packet(source, sequence, now, episode.condition), now)
@@ -324,6 +378,8 @@ fn record_train_uncached(root: &Path) -> (Arc<RoomLearningRuntime>, u64) {
         now = fixture::settle_async_boundary(&runtime, now);
     }
     let complete = fixture::snapshot(&runtime, now);
+    assert!(forced_pause && forced_resume,
+        "the native producer must exercise an actual durable pause and resume");
     assert_eq!(complete["stage"], "complete");
     assert_eq!(
         complete["sealed_train_episodes"],
@@ -420,11 +476,9 @@ async fn c4a_actual_seven_train_fit_frozen_ack_and_exact_cold_model() {
         .load_temporal(now)
         .unwrap()
         .unwrap();
-    assert_eq!(
-        loaded.token.data().revision,
-        78,
-        "actual genesis +7 segments +64 windows +7 seals"
-    );
+    let train_revision = loaded.token.data().revision;
+    assert!(train_revision >= 80,
+        "all initial segments, 64 windows and 7 seals plus the forced pause/resume must be durable; extra legal pauses add transitions");
     let (compute_tx, compute_rx) = std::sync::mpsc::sync_channel(1);
     let (compute_release_tx, compute_release_rx) = std::sync::mpsc::sync_channel(1);
     let mut compute_gate = ReleaseGate(Some(compute_release_tx));
@@ -599,7 +653,7 @@ async fn c4a_actual_seven_train_fit_frozen_ack_and_exact_cold_model() {
         .unwrap();
     assert_eq!(
         loaded.token.data().revision,
-        79,
+        train_revision.checked_add(1).unwrap(),
         "one actual durable Frozen transition"
     );
     let data: serde_json::Value = serde_json::from_slice(loaded.prefix.unwrap().bytes()).unwrap();
@@ -687,7 +741,7 @@ async fn c4a_actual_seven_train_fit_frozen_ack_and_exact_cold_model() {
             .token
             .data()
             .revision,
-        79
+        train_revision.checked_add(1).unwrap()
     );
     drop(runtime);
     let cold_now = post_ack + 1_000_000_000;
@@ -923,6 +977,8 @@ async fn c4a_owner_cancel_drains_actual_prepared_frozen_writer_before_synthetic_
 async fn c4a_actual_frozen_lost_ack_same_intent_repair_installs_only_after_exact_ack() {
     let directory = tempfile::tempdir().unwrap();
     let (rt, now) = record_train(directory.path());
+    let train_revision = rt.temporal_store().unwrap().load_temporal(now)
+        .unwrap().unwrap().token.data().revision;
     let at = fit_ready(&rt, now).await;
     let writer = {
         let s = rt.inner.lock().unwrap();
@@ -952,7 +1008,8 @@ async fn c4a_actual_frozen_lost_ack_same_intent_repair_installs_only_after_exact
         .unwrap()
         .unwrap()
         .token;
-    assert_eq!(token.data().revision, 79);
+    assert_eq!(token.data().revision, train_revision.checked_add(1).unwrap(),
+        "Frozen adds exactly one transition to the actual completed Train prefix");
     rt.repair_temporal_capture(&rt.mutation_guard().unwrap(), now)
         .unwrap();
     now = fixture::settle_async_boundary(&rt, now);
@@ -1017,4 +1074,192 @@ async fn c4a_running_compute_cancel_cannot_produce_accepted_fit_or_frozen() {
     assert!(rt.current_verified_frozen_model().unwrap().is_none());
     rt.cancel_temporal_durability(&rt.mutation_guard().unwrap())
         .unwrap();
+}
+
+#[tokio::test(flavor="multi_thread",worker_threads=2)]
+#[cfg_attr(debug_assertions,ignore="native-persistence operator journey requires Release; CI must explicitly execute this case")]
+async fn operator_eight_actual_reserved_checks_fit_complete_cold_and_evaluate(){
+    assert!(!cfg!(debug_assertions));
+    let directory=tempfile::tempdir().unwrap();
+    let mut runtime=Arc::new(fixture::runtime(directory.path(),fixture::START));
+    runtime.temporal_select_profile_v2(Some("native-2s-three-source-56bin-operator-eight-step-v1")).unwrap();
+    let store=runtime.temporal_store_arc().unwrap();
+    runtime.configure_temporal_capture_with_custody(&runtime.mutation_guard().unwrap(),fixture::context(),"synthetic-eight-actual".into(),fixture::START,
+        move|schedule,run,mut config,now,_,witness|{config.epochs=2;TemporalTrainCapture::prepare_full_run_async(schedule,run,config,now,store,witness)}).unwrap();
+    let mut now=fixture::settle_async_boundary(&runtime,fixture::START);
+    let original=fixture::snapshot(&runtime,now)["descriptor"].clone();
+    let schedule=ManagedScheduleContract::build(fixture::context(),LeadInPolicy::OperatorEightStepV1).unwrap();
+    let mut sequence=0u32;
+    // The same stopped-first-capture seam: segment write actually commits but
+    // its ACK is lost; a too-fast packet fails before any retained window.
+    now=fixture::async_lead_end(&runtime,now);
+    let (initial_enter_tx,initial_enter_rx)=std::sync::mpsc::sync_channel(1);
+    let (initial_release_tx,initial_release_rx)=std::sync::mpsc::sync_channel(1);
+    {let state=runtime.inner.lock().unwrap();let Some(CaptureWorkflow::Temporal(c))=&state.capture else{panic!()};let writer=c.core.as_ref().unwrap().writer().unwrap();writer.lose_next_ack();writer.hold_next_after_publish(initial_enter_tx,initial_release_rx);}
+    let mut initial_gate=ReleaseGate(Some(initial_release_tx));
+    for source in 1..=3u8{let at=now+u64::from(source)*1000;runtime.ingest_native(&packet(source,1,at,RoomLabel::Empty),at).unwrap();}
+    initial_enter_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    assert_eq!(fixture::snapshot(&runtime,now+3000)["durability_pending"],true);
+    let failed_at=now+1_001_000;
+    assert!(runtime.ingest_native(&packet(1,2,failed_at,RoomLabel::Empty),failed_at).unwrap_err().starts_with("temporal_observed_gap_or_rate:"));
+    initial_gate.release();
+    let failed=runtime.temporal_status_v2(failed_at).unwrap();
+    assert_eq!(failed["capture"]["stage"],"failed");
+    let id=failed["capture"]["capture_generation_id"].as_str().unwrap().to_owned();
+    let before=runtime.mutation_guard().unwrap();now=failed_at+1_000_000_000;
+    runtime.retry_failed_temporal_capture(&before,&id,now).unwrap();
+    let retried=runtime.temporal_status_v2(now).unwrap();
+    assert_eq!(retried["capture"]["capture_generation_id"],id);
+    assert_eq!(retried["capture"]["stage"],"paused");
+    assert_eq!(retried["capture"]["durability_pending"],false);
+    assert_eq!(retried["capture"]["retained_windows"],0);
+    assert_eq!(retried["capture"]["durable_windows"],0);
+    assert!(retried["capture"]["failure"].is_null());
+    assert_original_lifetime(&fixture::snapshot(&runtime,now)["descriptor"],&original);
+    assert_eq!(runtime.mutation_guard().unwrap().generation,before.generation);
+    assert!(runtime.mutation_guard().unwrap().workflow_revision>before.workflow_revision);
+    sequence=2;
+    for episode in schedule.episodes(){
+        let supervised=Instant::now();
+        loop{
+            let progress=fixture::snapshot(&runtime,now);
+            match progress["stage"].as_str().unwrap(){
+                "ready"|"paused"=>{now=fixture::async_lead_end(&runtime,now);runtime.tick_temporal_capture(&runtime.mutation_guard().unwrap(),now).unwrap();}
+                "needs_confirmation"=>break,
+                "failed"=>panic!("operator episode{} failed: {progress}",episode.index),
+                _=>{}
+            }
+            sequence+=1;
+            for source in 1..=3{match runtime.ingest_native(&packet(source,sequence,now,episode.condition),now){Ok(())=>{},Err(e)if e=="temporal_storage_busy_pause"=>break,Err(e)=>panic!("operator ingest: {e}")}}
+            now+=fixture::PERIOD;
+            if fixture::snapshot(&runtime,now)["durability_pending"]==true{std::thread::sleep(Duration::from_nanos(fixture::PERIOD));}
+            assert!(supervised.elapsed()<Duration::from_secs(240));
+        }
+        let guard=runtime.mutation_guard().unwrap();let challenge=runtime.temporal_confirmation_challenge(&guard).unwrap();
+        runtime.confirm_temporal_phase(&guard,&challenge,now).unwrap();now=fixture::settle_async_boundary(&runtime,now);
+        if episode.index==1{
+            assert_eq!(fixture::snapshot(&runtime,now)["durable_windows"],20);
+            drop(runtime);now+=1_000_000_000;runtime=Arc::new(fixture::runtime(directory.path(),now));
+            runtime.temporal_select_profile_v2(Some("native-2s-three-source-56bin-operator-eight-step-v1")).unwrap();
+            runtime.restore_temporal_full_run(&runtime.mutation_guard().unwrap(),&fixture::context(),now).unwrap();
+            assert_original_lifetime(&fixture::snapshot(&runtime,now)["descriptor"],&original);
+            // Reuse the actual sealed Empty+Empty-check prefix. Neither retry
+            // is allowed to replace those native rows, evidence, spans or seals.
+            fn prefix20(rt:&RoomLearningRuntime,at:u64)->serde_json::Value{
+                use sha2::{Digest,Sha256};
+                let loaded=rt.temporal_store().unwrap().load_temporal(at).unwrap().unwrap();
+                let data:serde_json::Value=serde_json::from_slice(loaded.prefix.unwrap().bytes()).unwrap();
+                let payload=&data["payload"];
+                for key in ["rows","evidence","identities"]{assert_eq!(payload["accepted"][key].as_array().unwrap().len(),20);}
+                assert_eq!(payload["common"]["ledger"]["spans"].as_array().unwrap().len(),20);
+                assert_eq!(payload["stage"]["bridge"]["seals"].as_array().unwrap().len(),2);
+                let digest=|v:&serde_json::Value|format!("{:x}",Sha256::digest(serde_json::to_vec(v).unwrap()));
+                serde_json::json!({"rows":digest(&payload["accepted"]["rows"]),"evidence":digest(&payload["accepted"]["evidence"]),
+                    "identities":digest(&payload["accepted"]["identities"]),"spans":digest(&payload["common"]["ledger"]["spans"]),
+                    "seals":digest(&payload["stage"]["bridge"]["seals"])})
+            }
+            let known_prefix=prefix20(&runtime,now);
+            let known_rows=fixture::snapshot(&runtime,now)["rows_sha256"].clone();assert!(known_rows.is_string());
+            for committed_lost_ack in [true,false]{
+                let lead=fixture::async_lead_end(&runtime,now);
+                let writer={let state=runtime.inner.lock().unwrap();let Some(CaptureWorkflow::Temporal(c))=&state.capture else{panic!()};c.core.as_ref().unwrap().writer().unwrap()};
+                let gate=if committed_lost_ack{
+                    let(entered_tx,entered_rx)=std::sync::mpsc::sync_channel(1);let(release_tx,release_rx)=std::sync::mpsc::sync_channel(1);
+                    writer.lose_next_ack();writer.hold_next_after_publish(entered_tx,release_rx);Some((entered_rx,ReleaseGate(Some(release_tx))))
+                }else{writer.fail_next_publication();None};
+                sequence+=1;
+                // One packet arms the pending segment in both variants.
+                runtime.ingest_native(&packet(1,sequence,lead+1000,RoomLabel::OccupiedStatic),lead+1000).unwrap();
+                let stop=lead+1_001_000;
+                if let Some((entered,mut release))=gate{
+                    for source in 2..=3u8{let at=lead+u64::from(source)*1000;runtime.ingest_native(&packet(source,sequence,at,RoomLabel::OccupiedStatic),at).unwrap();}
+                    entered.recv_timeout(Duration::from_secs(10)).unwrap();
+                    assert!(writer.has_failed_repair(),"the HEAD/WITNESS publication is real before the ACK is lost");
+                    sequence+=1;
+                    assert!(runtime.ingest_native(&packet(1,sequence,stop,RoomLabel::OccupiedStatic),stop).unwrap_err().starts_with("temporal_observed_gap_or_rate:"));
+                    release.release();
+                }else{
+                    let wait=Instant::now();while !writer.ack_is_queued(){assert!(wait.elapsed()<Duration::from_secs(10));std::thread::sleep(Duration::from_millis(1));}
+                    assert!(runtime.tick_temporal_capture(&runtime.mutation_guard().unwrap(),stop).is_err(),"the actual before-head-rename publication failure must be observed");
+                    assert_eq!(fixture::snapshot(&runtime,stop)["stage"],"blocked");
+                }
+                let live_floors=floors(&runtime).0;
+                let failed=runtime.temporal_status_v2(stop).unwrap();
+                let capture_id=failed["capture"]["capture_generation_id"].as_str().unwrap().to_owned();
+                let guard=runtime.mutation_guard().unwrap();now=stop+1_000_000_000;
+                runtime.retry_failed_temporal_capture(&guard,&capture_id,now).unwrap();
+                let after=runtime.temporal_status_v2(now).unwrap();
+                assert_eq!(after["capture"]["stage"],"paused");assert_eq!(after["capture"]["current_episode"],2);
+                assert_eq!(after["capture"]["capture_generation_id"],capture_id);
+                assert_eq!(after["capture"]["retained_windows"],20);assert_eq!(after["capture"]["durable_windows"],20);
+                assert_eq!(after["capture"]["sealed_train_episodes"],1);assert_eq!(after["capture"]["sealed_held_out_episodes"],1);
+                assert_eq!(after["capture"]["observed_ms"],0);assert_eq!(after["capture"]["durability_pending"],false);
+                assert!(after["capture"]["failure"].is_null());
+                assert_original_lifetime(&fixture::snapshot(&runtime,now)["descriptor"],&original);
+                assert_eq!(fixture::snapshot(&runtime,now)["rows_sha256"],known_rows);
+                assert_eq!(prefix20(&runtime,now),known_prefix);
+                let after_floors=floors(&runtime).0;
+                for(id,seq,time)in live_floors{assert!(after_floors.iter().any(|(s,q,t)|*s==id&&*q>=seq&&*t>=time),"Retry must retain live replay fences");}
+                assert!(runtime.retry_failed_temporal_capture(&guard,&capture_id,now).is_err(),"consumed command cannot retry again");
+                sequence+=1;
+                println!("SYNTHETIC_OPERATOR20_RETRY committed_lost_ack={committed_lost_ack} rows=20 seals=2 prefix_preserved=true");
+            }
+            // Probe a real previously admitted CanonicalPacket while paused.
+            // A fail-closed replay may stop the run; explicitly Retry once more
+            // before continuing, never count that packet as new progress.
+            let replay_floors=floors(&runtime).0;
+            let(source,seq,time)=replay_floors[0];let replay_now=now+1_000_000;
+            assert!(runtime.ingest_native(&packet(source,seq as u32,time,RoomLabel::OccupiedStatic),replay_now).is_err());
+            assert_eq!(fixture::snapshot(&runtime,replay_now)["retained_rows"],20);
+            assert_eq!(fixture::snapshot(&runtime,replay_now)["durable_windows"],20);
+            assert_eq!(floors(&runtime).0,replay_floors,"rejected replay adds no source credit");
+            if matches!(fixture::snapshot(&runtime,replay_now)["stage"].as_str(),Some("failed"|"blocked")){
+                let status=runtime.temporal_status_v2(replay_now).unwrap();let id=status["capture"]["capture_generation_id"].as_str().unwrap();
+                now=replay_now+1_000_000_000;runtime.retry_failed_temporal_capture(&runtime.mutation_guard().unwrap(),id,now).unwrap();
+            }else{now=replay_now;}
+            assert_eq!(prefix20(&runtime,now),known_prefix);
+        }
+    }
+    assert_eq!(fixture::snapshot(&runtime,now)["durable_windows"],80);
+    assert!(runtime.current_verified_frozen_model().unwrap().is_none());
+    runtime.start_temporal_fit(&runtime.mutation_guard().unwrap(),now).unwrap();
+    let fit_clock=Instant::now();
+    loop{
+        let phase=runtime.inner.lock().unwrap().job.phase;
+        if phase==JobPhase::Ready{break;}
+        assert_eq!(phase,JobPhase::Running,"{:?}",runtime.inner.lock().unwrap().job.error);
+        assert!(fit_clock.elapsed()<Duration::from_secs(120));tokio::time::sleep(Duration::from_millis(2)).await;
+    }
+    loop{
+        let done={let state=runtime.inner.lock().unwrap();let Some(CaptureWorkflow::Temporal(c))=&state.capture else{panic!()};c.fit_job.as_ref().unwrap().done()};
+        if done{break;}tokio::time::sleep(Duration::from_millis(2)).await;
+    }
+    now+=fit_clock.elapsed().as_nanos() as u64+1;
+    runtime.prepare_frozen_transition(&runtime.mutation_guard().unwrap(),now).unwrap();
+    now=fixture::settle_async_boundary(&runtime,now);
+    assert_eq!(fixture::snapshot(&runtime,now)["stage"],"full_complete");
+    let model=runtime.current_verified_frozen_model().unwrap().unwrap();let bytes=model.export().unwrap();
+    assert!(model.managed_is_operator_eight_step().unwrap());
+    assert_eq!(model.context(),&fixture::context());
+    drop(runtime);now+=1_000_000_000;runtime=Arc::new(fixture::runtime(directory.path(),now));
+    runtime.temporal_select_profile_v2(Some("native-2s-three-source-56bin-operator-eight-step-v1")).unwrap();
+    runtime.restore_temporal_full_run(&runtime.mutation_guard().unwrap(),&fixture::context(),now).unwrap();
+    assert_eq!(fixture::snapshot(&runtime,now)["stage"],"full_complete");
+    assert_original_lifetime(&fixture::snapshot(&runtime,now)["descriptor"],&original);
+    assert_eq!(runtime.current_verified_frozen_model().unwrap().unwrap().export().unwrap(),bytes);
+    for purpose in [evidence_control::EvidencePurpose::TrainProof,evidence_control::EvidencePurpose::HeldOutEvaluation,evidence_control::EvidencePurpose::Qualification]{
+        runtime.start_temporal_evidence(&runtime.mutation_guard().unwrap(),now,purpose).unwrap();
+        let job_clock=Instant::now();
+        loop{let phase=runtime.inner.lock().unwrap().job.phase;if phase==JobPhase::Ready{break;}assert_eq!(phase,JobPhase::Running,"{:?}",runtime.inner.lock().unwrap().job.error);assert!(job_clock.elapsed()<Duration::from_secs(120));tokio::time::sleep(Duration::from_millis(2)).await;}
+        now+=job_clock.elapsed().as_nanos() as u64+1;
+    }
+    let state=runtime.inner.lock().unwrap();let Some(CaptureWorkflow::Temporal(c))=&state.capture else{panic!()};
+    let evaluation=c.evaluation.as_ref().unwrap();assert_eq!(evaluation.held_out().body.held_out_windows,16);assert_eq!(evaluation.receipt().body.role,DataRole::Validation);
+    assert!(c.assessment.is_some());drop(state);
+    if let Some(destination)=std::env::var_os("RUVIEW_OPERATOR8_FIXTURE_OUT") {
+        let destination=std::path::PathBuf::from(destination);
+        assert!(destination.starts_with("/tmp/ruview-release-session-20261109"));
+        let value=serde_json::json!({"schema":"ruview.test-only.operator-eight-producer.v1","evidence":"SYNTHETIC","real_user_data":false,"status":runtime.temporal_status_v2(now).unwrap()});
+        std::fs::write(destination,serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+    }
 }
