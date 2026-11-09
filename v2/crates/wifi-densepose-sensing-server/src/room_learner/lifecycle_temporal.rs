@@ -8,8 +8,42 @@ use crate::room_learner::{
 
 const TRAIN_LEAD_IN_NS: u64 = 5_000_000_000;
 const PRIVATE_KIND: &str = "learner_temporal_capture_private_unsupported_command";
+/// Only the actual protected Runtime constructor can mint fresh full-run
+/// custody. No serde/Clone or caller-supplied authority flag.
+pub(crate) struct FullRunGenesisWitness {
+    runtime_epoch:String,generation:u64,context:CaptureContext,run:String,
+}
+impl FullRunGenesisWitness {
+    pub(crate) fn consume(self,context:&CaptureContext,run:&str)->Result<(String,u64),String>{
+        if self.context!=*context||self.run!=run||self.runtime_epoch.is_empty()||self.generation==0{
+            return Err("temporal_full_run_genesis_owner_changed".into());
+        }
+        Ok((self.runtime_epoch,self.generation))
+    }
+}
+pub(crate) struct FrozenOwnerWitness {
+    runtime_epoch:String,generation:u64,revision:u64,context:CaptureContext,run:String,
+}
+pub(crate) struct FullRunRecoveryWitness{runtime_epoch:String,generation:u64,context:CaptureContext}
+impl FullRunRecoveryWitness{
+    pub(crate) fn consume(self,context:&CaptureContext)->Result<(String,u64),String>{
+        if self.context!=*context||self.runtime_epoch.is_empty()||self.generation==0{return Err("temporal_full_run_recovery_owner_changed".into());}
+        Ok((self.runtime_epoch,self.generation))
+    }
+}
+impl FrozenOwnerWitness {
+    pub(crate) fn consume(self,context:&CaptureContext,run:&str)->Result<(String,u64,u64),String>{
+        if self.context!=*context||self.run!=run||self.runtime_epoch.is_empty()||self.generation==0||self.revision==0{
+            return Err("temporal_frozen_owner_operation_changed".into());
+        }
+        Ok((self.runtime_epoch,self.generation,self.revision))
+    }
+}
+#[path="lifecycle_temporal_frozen.rs"]
+mod frozen_control;
 #[path = "lifecycle_temporal_fit.rs"]
 mod fit_control;
+pub(crate) use fit_control::AcceptedTemporalFit;
 
 pub(super) struct RuntimeTemporalCapture {
     context: CaptureContext,
@@ -134,6 +168,7 @@ impl RuntimeTemporalCapture {
             TemporalCaptureStage::Ready
             | TemporalCaptureStage::Paused
             | TemporalCaptureStage::Preparing => core.prime_fence(packet, now),
+            TemporalCaptureStage::Complete|TemporalCaptureStage::Frozen if core.is_full_run()=>core.prime_fence(packet,now),
             _ => Ok(()), // No automatic start, confirmation or new phase from packet arrival.
         }
     }
@@ -194,13 +229,18 @@ impl RoomLearningRuntime {
             run,
             now,
             |schedule, run, fit, now, _| {
-                // The existing-work guard runs before this off-lock producer.
-                // Unavailable recovery must never mask refusal to replace a
-                // selected Legacy capture/model/history.
+                // Existing-work guard precedes this off-lock producer.
                 let store=self.recovery_store.clone().ok_or("temporal_recovery_unavailable")?;
                 TemporalTrainCapture::prepare_async(schedule, run, fit, now, store)
             },
         )
+    }
+    /// Fresh genesis only; never upgrades a running old private capture.
+    fn configure_temporal_full_run(&self,expected:&MutationGuard,context:CaptureContext,run:String,now:u64)->Result<(),String>{
+        self.configure_temporal_capture_with_custody(expected,context,run,now,|s,r,f,n,_,w|{
+            let store=self.recovery_store.clone().ok_or("temporal_recovery_unavailable")?;
+            TemporalTrainCapture::prepare_full_run_async(s,r,f,n,store,w)
+        })
     }
     fn configure_temporal_capture_with(
         &self,
@@ -216,6 +256,12 @@ impl RoomLearningRuntime {
             &super::super::recovery_store::RecoveryStore,
         ) -> Result<(TemporalTrainCapture, Option<String>), String>,
     ) -> Result<(), String> {
+        self.configure_temporal_capture_with_custody(expected,context,run,now,move|s,r,f,n,store,_|prepare(s,r,f,n,store))
+    }
+    fn configure_temporal_capture_with_custody(
+        &self,expected:&MutationGuard,context:CaptureContext,run:String,now:u64,
+        prepare:impl FnOnce(ManagedScheduleContract,String,FitConfig,u64,&super::super::recovery_store::RecoveryStore,FullRunGenesisWitness)->Result<(TemporalTrainCapture,Option<String>),String>,
+    )->Result<(),String>{
         context.validate()?;
         if context.owner_scope != self.owner
             || context.installation_id != self.installation
@@ -243,6 +289,7 @@ impl RoomLearningRuntime {
             .generation
             .checked_add(1)
             .ok_or("learner generation exhausted")?;
+        let witness=FullRunGenesisWitness{runtime_epoch:self.runtime_epoch.clone(),generation:next_generation,context:context.clone(),run:run.clone()};
         state.capture = Some(CaptureWorkflow::Temporal(Box::new(
             RuntimeTemporalCapture {
                 context: context.clone(),
@@ -258,7 +305,7 @@ impl RoomLearningRuntime {
         state.generation = next_generation;
         drop(state);
         // Initial crypto/filesystem execution never holds the receiver lock.
-        let result = prepare(schedule, run, fit, now, store);
+        let result = prepare(schedule, run, fit, now, store,witness);
         let (core, failure) = match result {
             Ok((core, error)) => (Some(core), error),
             Err(error) => (None, Some(error)),
@@ -450,6 +497,12 @@ impl RoomLearningRuntime {
         context: &CaptureContext,
         now: u64,
     ) -> Result<(), String> {
+        self.restore_temporal_capture_kind(expected,context,now,false)
+    }
+    fn restore_temporal_full_run(&self,expected:&MutationGuard,context:&CaptureContext,now:u64)->Result<(),String>{
+        self.restore_temporal_capture_kind(expected,context,now,true)
+    }
+    fn restore_temporal_capture_kind(&self,expected:&MutationGuard,context:&CaptureContext,now:u64,full_run:bool)->Result<(),String>{
         context.validate()?;
         if context.owner_scope != self.owner || context.installation_id != self.installation {
             return Err("temporal_context_owner_or_clock".into());
@@ -473,6 +526,7 @@ impl RoomLearningRuntime {
             .generation
             .checked_add(1)
             .ok_or("learner generation exhausted")?;
+        let full_witness=FullRunRecoveryWitness{runtime_epoch:self.runtime_epoch.clone(),generation:next_generation,context:context.clone()};
         state.capture = Some(CaptureWorkflow::Temporal(Box::new(
             RuntimeTemporalCapture {
                 context: context.clone(),
@@ -487,8 +541,18 @@ impl RoomLearningRuntime {
         )));
         state.generation = next_generation;
         drop(state);
-        let mut core =
-            TemporalTrainCapture::cold_restore(store, context, now, &self.runtime_epoch, now)?;
+        let recovered=if full_run{
+            TemporalTrainCapture::cold_restore_full_run(store,self.store.clone(),context,now,&self.runtime_epoch,now,full_witness)
+        }else{
+            TemporalTrainCapture::cold_restore(store, context, now, &self.runtime_epoch, now)
+        };
+        let mut core=match recovered{
+            Ok(core)=>core,
+            Err(error)=>{
+                if full_run{let mut state=self.inner.lock().map_err(|_|"learner state unavailable")?;if state.generation==next_generation{if let Some(CaptureWorkflow::Temporal(c))=state.capture.as_mut(){c.failure=Some(bounded(error.clone()));}}}
+                return Err(error);
+            }
+        };
         core.enable_async_restore(
             self.recovery_store
                 .clone()
@@ -583,6 +647,9 @@ impl RoomLearningRuntime {
 #[cfg(test)]
 #[path = "lifecycle_temporal_tests.rs"]
 mod tests;
+#[cfg(all(test,unix))]
+#[path="lifecycle_temporal_full_run_tests.rs"]
+mod full_run_tests;
 
 impl Drop for RoomLearningRuntime {
     fn drop(&mut self) {

@@ -32,14 +32,26 @@ struct Envelope<P = Prefix> {
 }
 const SCHEMA: &str = "ruview.room-learner.temporal-runtime-prefix.v1";
 const BRIDGE_SCHEMA: &str = "ruview.room-learner.temporal-runtime-prefix.v2";
-pub(super) type Snapshot = Prefix<SharedRecord<CaptureCohort>, SharedRecord<WindowEvidence>>;
+pub(super) type OldSnapshot = Prefix<SharedRecord<CaptureCohort>, SharedRecord<WindowEvidence>>;
+#[path="temporal_full_run_checkpoint.rs"]
+mod full_checkpoint;
+pub(super) enum Snapshot {
+    Old(OldSnapshot),
+    Full(full_checkpoint::FullSnapshot),
+}
 #[derive(Clone)]
 pub(super) struct SharedRecords {
     rows: Vec<SharedRecord<CaptureCohort>>,
     evidence: Vec<SharedRecord<WindowEvidence>>,
 }
 pub(super) fn snapshot_records(snapshot:&Snapshot)->SharedRecords {
-    SharedRecords{rows:snapshot.rows.clone(),evidence:snapshot.evidence.clone()}
+    match snapshot {
+        Snapshot::Old(snapshot)=>SharedRecords{rows:snapshot.rows.clone(),evidence:snapshot.evidence.clone()},
+        Snapshot::Full(snapshot)=>snapshot.records(),
+    }
+}
+pub(super) fn snapshot_full_permit(snapshot:&mut Snapshot)->Option<full_run::FullRunSnapshotPermit>{
+    match snapshot{Snapshot::Old(_)=>None,Snapshot::Full(snapshot)=>snapshot.permit.take()}
 }
 pub(super) fn workflow_records(w:&TemporalWorkflow)->SharedRecords {
     SharedRecords{rows:w.session.rows.clone(),evidence:w.session.evidence.clone()}
@@ -75,6 +87,10 @@ pub(super) fn decode_shared(
     Ok(validated)
 }
 pub(super) fn snapshot(v: &TemporalWorkflow) -> Result<Snapshot, String> {
+    if v.full_run.is_some(){return Ok(Snapshot::Full(full_checkpoint::FullSnapshot::from_workflow(v)?));}
+    Ok(Snapshot::Old(snapshot_old(v)?))
+}
+fn snapshot_old(v: &TemporalWorkflow) -> Result<OldSnapshot, String> {
     if v.session.fitted
         || v.session.failed
         || v.session.active
@@ -115,6 +131,12 @@ pub(super) fn snapshot(v: &TemporalWorkflow) -> Result<Snapshot, String> {
     Ok(payload)
 }
 pub(super) fn encode_snapshot(payload: Snapshot) -> Result<Vec<u8>, String> {
+    match payload {
+        Snapshot::Old(payload)=>encode_old_snapshot(payload),
+        Snapshot::Full(payload)=>payload.encode(),
+    }
+}
+fn encode_old_snapshot(payload: OldSnapshot) -> Result<Vec<u8>, String> {
     let envelope = Envelope {
         schema: payload.schema.clone(),
         payload_sha256: hash(&payload)?,
@@ -134,6 +156,10 @@ pub(super) fn decode(
     descriptor: &RecoveryDescriptor,
     now: u64,
 ) -> Result<TemporalWorkflow, String> {
+    if full_checkpoint::is_full(bytes)? {return full_checkpoint::decode_structural(bytes,descriptor,now);}
+    decode_old(bytes,descriptor,now)
+}
+fn decode_old(bytes:&[u8],descriptor:&RecoveryDescriptor,now:u64)->Result<TemporalWorkflow,String>{
     if bytes.len() > crate::room_learner::recovery_store::MAX_RECOVERY_BYTES {
         return Err("temporal_checkpoint_budget".into());
     }
@@ -458,6 +484,7 @@ pub(super) fn decode(
         .map_or(0, |s| s.observed_end_ns);
     let durable_windows = session.rows.len();
     Ok(TemporalWorkflow {
+        full_run: None,
         session,
         descriptor: p.descriptor,
         ledger: p.ledger,
@@ -492,12 +519,16 @@ pub(crate) struct ValidatedTemporalPrefix {
     window_count: usize,
     transition_limit: usize,
     saved_receiver_ns: u64,
+    metadata_kind: &'static str,
+    full_write_grant: Option<full_run::FullRunWriteGrant>,
+    full_frozen_predecessor: Option<crate::room_learner::recovery_store::temporal_commitment::TemporalCommitmentData>,
 }
 pub(crate) fn validated_prefix(
     bytes: &[u8],
     descriptor: &RecoveryDescriptor,
     now_ns: u64,
 ) -> Result<ValidatedTemporalPrefix, String> {
+    if full_checkpoint::is_full(bytes)?{return full_checkpoint::validated_structural(bytes,descriptor,now_ns);}
     let v = decode(bytes, descriptor, now_ns)?;
     let schedule = v.schedule()?;
     let train_episodes = schedule
@@ -529,12 +560,17 @@ pub(crate) fn validated_prefix(
         window_count: v.session.rows.len(),
         transition_limit,
         saved_receiver_ns: v.last_now_ns,
+        metadata_kind:"temporal-prefix-commitment-v1",
+        full_write_grant:None,
+        full_frozen_predecessor:None,
     })
 }
 pub(crate) fn validate_extension(
     old: &ValidatedTemporalPrefix,
     new: &ValidatedTemporalPrefix,
 ) -> Result<(), String> {
+    if old.metadata_kind!=new.metadata_kind{return Err("temporal_prefix_generation_kind_changed".into());}
+    if old.metadata_kind==full_run::META_KIND{return full_checkpoint::validate_full_extension(old,new);}
     let a: Envelope =
         serde_json::from_slice(&old.bytes).map_err(|_| "temporal_checkpoint_schema")?;
     let b: Envelope =
@@ -665,6 +701,21 @@ pub(crate) fn validate_extension(
 }
 
 impl ValidatedTemporalPrefix {
+    pub(crate) fn metadata_kind(&self)->&str{self.metadata_kind}
+    pub(crate) fn authorizes_write(&self,expected:Option<&TemporalToken>)->bool{
+        self.metadata_kind!=full_run::META_KIND||(self.full_write_grant.as_ref().is_some_and(|g|g.permits(&self.bytes,expected))
+            &&self.full_frozen_predecessor.as_ref().is_none_or(|p|expected.is_some_and(|e|e.data()==*p)))
+    }
+    pub(super) fn verify_full_artifact(&self)->Result<(),String>{
+        if self.metadata_kind==full_run::META_KIND&&self.full_frozen_predecessor.is_some(){
+            return self.full_write_grant.as_ref().ok_or("temporal_frozen_producer_model_required")?.verify_frozen_model();
+        }
+        Ok(())
+    }
+    pub(super) fn attach_full_grant(&mut self,grant:full_run::FullRunWriteGrant)->Result<(),String>{
+        if self.metadata_kind!=full_run::META_KIND{return Err("temporal_full_run_grant_kind".into());}
+        self.full_write_grant=Some(grant);Ok(())
+    }
     pub(crate) fn saved_receiver_ns(&self) -> u64 {
         self.saved_receiver_ns
     }
@@ -689,6 +740,7 @@ impl ValidatedTemporalPrefix {
 }
 
 pub(crate) fn is_new_empty_run(p: &ValidatedTemporalPrefix) -> Result<bool, String> {
+    if p.metadata_kind==full_run::META_KIND{return full_checkpoint::is_new_full_run(p);}
     let e: Envelope =
         serde_json::from_slice(p.bytes()).map_err(|_| "temporal_checkpoint_schema")?;
     let q = e.payload;

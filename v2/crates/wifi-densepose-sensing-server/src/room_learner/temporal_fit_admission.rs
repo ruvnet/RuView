@@ -17,6 +17,9 @@ pub(crate) struct TemporalFitCaptureIdentity {
     descriptor: RecoveryDescriptor,
     token: TemporalToken,
     prefix: String,
+    prefix_schema: &'static str,
+    metadata_kind: &'static str,
+    continuation_policy: Option<String>,
 }
 impl TemporalFitCaptureIdentity {
     pub(crate) fn owner(&self) -> &str {
@@ -28,6 +31,7 @@ impl TemporalFitCaptureIdentity {
     pub(crate) fn context(&self) -> &str {
         &self.context
     }
+    pub(crate) fn run_id(&self)->&str{&self.run}
     pub(crate) fn expires_at_ms(&self) -> u64 {
         self.descriptor.expires_at_ms
     }
@@ -65,6 +69,56 @@ pub(crate) struct PendingTemporalFitInput {
 pub(crate) struct ValidatedTemporalFitInput {
     identity: TemporalFitCaptureIdentity,
     session: TemporalTrainingSession,
+    train_seals_sha256:String,
+}
+/// Off-lock strict producer validation, later bound to an ACTUAL saved fit.
+/// This is not serializable/importable, and has no public constructor.
+pub(crate) struct VerifiedTemporalFitSource {
+    identity:TemporalFitCaptureIdentity,
+    train_data:String,evidence:String,identities:String,seals:String,
+    actual_candidate:Option<crate::room_learner::artifact::TemporalCandidateReceipt>,
+    actual_summary:full_run::FitSummaryReference,
+}
+impl VerifiedTemporalFitSource {
+    pub(crate) fn is_full_run(&self)->bool{self.identity.continuation_policy.is_some()}
+    pub(crate) fn binding(&self)->&TemporalFitCaptureIdentity{&self.identity}
+    pub(crate) fn bind_saved_fit(&mut self,model:&TemporalModel,saved:&crate::room_learner::artifact::TemporalFitSaveResult)->Result<(),String>{
+        let b=model.fit_diagnostic_binding()?;
+        if b.artifact_kind!=full_run::MODEL_KIND||b.context_digest!=self.identity.context
+            ||b.training_data_sha256!=self.train_data||b.input_evidence_sha256!=self.evidence
+            ||b.identity_evidence_sha256.as_ref()!=Some(&self.identities)||b.schedule_sha256.as_ref()!=Some(&self.identity.schedule)
+            ||b.input_policy_sha256!=self.identity.policy
+            ||b.bound_fit_config.as_ref().map(hash).transpose()?.as_ref()!=Some(&self.identity.configuration)
+            ||saved.candidate.artifact_sha256!=b.artifact_sha256||saved.candidate.artifact_kind!=b.artifact_kind{
+            return Err("temporal_actual_fit_source_binding_changed".into());
+        }
+        self.actual_candidate=Some(saved.candidate.clone());
+        self.actual_summary=match &saved.fit_diagnostics.summary{
+            Some(summary)=>full_run::FitSummaryReference::Recorded{sha256:hash(summary)?},
+            None=>match saved.fit_diagnostics.state{
+                crate::room_learner::artifact::FitDiagnosticState::NotRecorded=>full_run::FitSummaryReference::NotRecorded,
+                _=>full_run::FitSummaryReference::Unavailable,
+            }
+        };
+        Ok(())
+    }
+    pub(super) fn record_data(self,now:u64,floors:Vec<(u8,u64,u64)>)->Result<full_run::VerifiedFitRecordData,String>{
+        self.identity.check_deadline(now)?;
+        let candidate=self.actual_candidate.ok_or("temporal_actual_saved_fit_required")?;
+        let continuation=self.identity.continuation_policy.ok_or("temporal_full_run_no_upconversion")?;
+        let body=full_run::VerifiedFitRecordBody{
+            owner_scope:self.identity.owner,installation_id:self.identity.installation,context_digest:self.identity.context,run:self.identity.run,
+            prefix_schema:self.identity.prefix_schema.into(),metadata_kind:self.identity.metadata_kind.into(),continuation_policy_sha256:continuation,
+            artifact_kind:candidate.artifact_kind.clone(),artifact_sha256:candidate.artifact_sha256.clone(),
+            input_policy_sha256:self.identity.policy,execution_policy_sha256:hash(&EXECUTION_POLICY)?,schedule_sha256:self.identity.schedule,
+            configured_fit_sha256:self.identity.configuration,training_data_sha256:self.train_data,input_evidence_sha256:self.evidence,
+            identity_evidence_sha256:self.identities,train_seal_chain_sha256:self.seals,accepted_train_prefix_sha256:self.identity.prefix,
+            accepted_train_commitment:self.identity.token.data(),saved_candidate:candidate,actual_summary:self.actual_summary,
+            freeze_prepare_receiver_ns:now,source_floors:floors,
+        };
+        let sha256=hash(&(full_run::FIT_RECORD_DOMAIN,&body))?;
+        Ok(full_run::VerifiedFitRecordData{schema:full_run::FIT_RECORD_DOMAIN.into(),body,sha256})
+    }
 }
 
 fn complete_train(
@@ -125,6 +179,9 @@ fn identity(
         descriptor: w.descriptor.clone(),
         token,
         prefix,
+        prefix_schema:if w.full_run.is_some(){full_run::PREFIX_SCHEMA}else{"ruview.room-learner.temporal-runtime-prefix.v2"},
+        metadata_kind:if w.full_run.is_some(){full_run::META_KIND}else{"temporal-prefix-commitment-v1"},
+        continuation_policy:w.full_run.as_ref().map(|m|m.policy.sha256().into()),
     })
 }
 pub(super) fn current_identity(
@@ -133,6 +190,7 @@ pub(super) fn current_identity(
     now: u64,
 ) -> Result<TemporalFitCaptureIdentity, String> {
     complete_train(w, schedule, now)?;
+    if w.full_run.as_ref().is_some_and(|m|m.owner.is_none()){return Err("temporal_full_run_owner_custody_required".into());}
     // The async writer supplies a cached verified digest. Never hash a growing
     // raw prefix under the receiver lock or silently fall back to a sync path.
     let state = w
@@ -215,6 +273,7 @@ impl PendingTemporalFitInput {
         }
         Ok(ValidatedTemporalFitInput {
             identity: self.identity,
+            train_seals_sha256:hash(&restored.bridge.as_ref().ok_or("temporal_fit_actual_bridge_required")?.seals)?,
             session: restored.session,
         })
     }
@@ -226,6 +285,9 @@ impl ValidatedTemporalFitInput {
     pub(crate) fn into_session_and_admission(
         self,
     ) -> Result<(TemporalTrainingSession, ManagedFitAdmission), String> {
+        let(session,permit,_)=self.into_session_admission_and_source()?;Ok((session,permit))
+    }
+    pub(crate) fn into_session_admission_and_source(self)->Result<(TemporalTrainingSession,ManagedFitAdmission,VerifiedTemporalFitSource),String>{
         let managed = self
             .session
             .managed
@@ -238,9 +300,13 @@ impl ValidatedTemporalFitInput {
             evidence: hash(&self.session.evidence)?,
             identities: hash(&managed.windows)?,
         };
+        // Strict seal validation happened in the recertified producer decoder;
+        // recover its exact immutable chain from the accepted prefix again on
+        // the worker, never hash growing source data under Runtime.inner.
+        let source=VerifiedTemporalFitSource{identity:self.identity,train_data:permit.data.clone(),evidence:permit.evidence.clone(),
+            identities:permit.identities.clone(),seals:self.train_seals_sha256,actual_candidate:None,actual_summary:full_run::FitSummaryReference::Unavailable};
         // Full validated data is intentionally dropped here, on the worker.
         drop(dataset);
-        let _ = self.identity;
-        Ok((self.session, permit))
+        Ok((self.session, permit,source))
     }
 }

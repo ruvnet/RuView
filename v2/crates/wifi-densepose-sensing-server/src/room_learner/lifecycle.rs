@@ -558,6 +558,10 @@ mod recovery_enable;
 
 #[path = "lifecycle_temporal.rs"]
 mod temporal_control;
+pub(crate) use temporal_control::FullRunGenesisWitness;
+pub(crate) use temporal_control::AcceptedTemporalFit;
+pub(crate) use temporal_control::FrozenOwnerWitness;
+pub(crate) use temporal_control::FullRunRecoveryWitness;
 
 #[cfg(test)]
 #[path="lifecycle_legacy_byte_probe.rs"]
