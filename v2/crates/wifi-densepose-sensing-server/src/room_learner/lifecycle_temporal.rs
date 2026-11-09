@@ -88,6 +88,9 @@ impl RuntimeTemporalCapture {
             })
     }
     fn check_time(&mut self, now: u64) -> Result<(), String> {
+        if self.core.as_ref().is_some_and(|c|c.is_full_run()&&!c.current_context_matches(&self.context)){
+            self.invalidate_owner();return Err("temporal_full_owner_context_changed".into());
+        }
         if now < self.last_now_ns {
             self.cancel_fit();
             self.lead_in_until = None;
@@ -118,10 +121,11 @@ impl RuntimeTemporalCapture {
         if let Some(at) = self.lead_in_until {
             if now >= at {
                 self.lead_in_until = None;
-                self.core
-                    .as_mut()
-                    .ok_or("temporal_initial_barrier_unconfirmed")?
-                    .start_segment(epoch, at, store)?;
+                let core=self.core.as_mut().ok_or("temporal_initial_barrier_unconfirmed")?;
+                // Full-run preparation/lateness is never credited as observation.
+                // Start at this actual trusted receiver coordinate, not the old deadline.
+                let start=if core.is_full_run(){now}else{at};
+                core.start_segment(epoch,start,store)?;
             }
         }
         Ok(())
@@ -144,7 +148,7 @@ impl RuntimeTemporalCapture {
         self.last_now_ns = now;
         if admission.is_some_and(|(start, _)| start) {
             self.lead_in_until = Some(
-                now.checked_add(TRAIN_LEAD_IN_NS)
+                now.checked_add(self.core.as_ref().filter(|c|c.is_full_run()).map(|c|c.current_lead_in_ns()).transpose()?.unwrap_or(TRAIN_LEAD_IN_NS))
                     .ok_or("temporal_time_overflow")?,
             );
             return self.core.as_mut().unwrap().prime_fence(packet, now);
@@ -168,7 +172,7 @@ impl RuntimeTemporalCapture {
             TemporalCaptureStage::Ready
             | TemporalCaptureStage::Paused
             | TemporalCaptureStage::Preparing => core.prime_fence(packet, now),
-            TemporalCaptureStage::Complete|TemporalCaptureStage::Frozen if core.is_full_run()=>core.prime_fence(packet,now),
+            TemporalCaptureStage::Complete|TemporalCaptureStage::Frozen|TemporalCaptureStage::FullComplete if core.is_full_run()=>core.prime_fence(packet,now),
             _ => Ok(()), // No automatic start, confirmation or new phase from packet arrival.
         }
     }
@@ -240,6 +244,15 @@ impl RoomLearningRuntime {
         self.configure_temporal_capture_with_custody(expected,context,run,now,|s,r,f,n,_,w|{
             let store=self.recovery_store.clone().ok_or("temporal_recovery_unavailable")?;
             TemporalTrainCapture::prepare_full_run_async(s,r,f,n,store,w)
+        })
+    }
+    /// Explicit trusted new-Train entry point. No public route or profile flag.
+    /// Active old generations must retire first; only authenticated retired
+    /// metadata can chain a new343 generation in the SAME store.
+    fn configure_fresh_train_343_capture(&self,expected:&MutationGuard,context:CaptureContext,run:String,now:u64)->Result<(),String>{
+        self.configure_temporal_capture_with(expected,context,run,now,|schedule,run,fit,now,_|{
+            let store=self.recovery_store.clone().ok_or("temporal_recovery_unavailable")?;
+            TemporalTrainCapture::prepare_async_fresh_train_343(schedule,run,fit,now,store)
         })
     }
     fn configure_temporal_capture_with(
@@ -349,10 +362,8 @@ impl RoomLearningRuntime {
             .as_mut()
             .ok_or("temporal_initial_barrier_unconfirmed")?;
         if capture.lead_in_until.is_some()
-            || !matches!(
-                core.stage(),
-                TemporalCaptureStage::Ready | TemporalCaptureStage::Paused
-            )
+            || !(matches!(core.stage(),TemporalCaptureStage::Ready|TemporalCaptureStage::Paused)
+                ||core.is_full_run()&&core.stage()==TemporalCaptureStage::Frozen)
         {
             return Err("temporal_phase_not_startable".into());
         }
@@ -361,7 +372,7 @@ impl RoomLearningRuntime {
         }
         // Synchronous reference path retains its original behavior.
         capture.lead_in_until = Some(
-            now.checked_add(TRAIN_LEAD_IN_NS)
+            now.checked_add(if core.is_full_run(){core.current_lead_in_ns()?}else{TRAIN_LEAD_IN_NS})
                 .ok_or("temporal_time_overflow")?,
         );
         Ok(())
@@ -403,7 +414,7 @@ impl RoomLearningRuntime {
         capture.last_now_ns = now;
         if admission.is_some_and(|(start, _)| start) {
             capture.lead_in_until = Some(
-                now.checked_add(TRAIN_LEAD_IN_NS)
+                now.checked_add(capture.core.as_ref().filter(|c|c.is_full_run()).map(|c|c.current_lead_in_ns()).transpose()?.unwrap_or(TRAIN_LEAD_IN_NS))
                     .ok_or("temporal_time_overflow")?,
             );
             return Ok(());
@@ -679,3 +690,7 @@ impl Drop for RoomLearningRuntime {
         if let Some(fit) = fit { fit.drain(); }
     }
 }
+
+#[cfg(test)]
+#[path="lifecycle_temporal_held_out_tests.rs"]
+mod held_out_tests;

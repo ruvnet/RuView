@@ -745,7 +745,7 @@ async fn c4a_actual_seven_train_fit_frozen_ack_and_exact_cold_model() {
     );
     drop(runtime);
     let cold_now = post_ack + 1_000_000_000;
-    let cold = fixture::runtime(directory.path(), cold_now);
+    let cold = Arc::new(fixture::runtime(directory.path(), cold_now));
     cold.restore_temporal_full_run(
         &cold.mutation_guard().unwrap(),
         &fixture::context(),
@@ -767,10 +767,38 @@ async fn c4a_actual_seven_train_fit_frozen_ack_and_exact_cold_model() {
         model.export().unwrap()
     );
     assert_original_lifetime(&fixture::snapshot(&cold, cold_now)["descriptor"], &original);
-    assert!(
-        cold.start_temporal_phase(&cold.mutation_guard().unwrap(), cold_now)
-            .is_err(),
-        "private Frozen must not activate HeldOut"
+    // C4B deliberately adds only the protected PRIVATE next-role producer.
+    // Public Legacy training stays unsupported, and no sample/observed time is
+    // credited by a request, recertification or preparation countdown.
+    assert!(cold
+        .start_training(&cold.mutation_guard().unwrap(), FitConfig::default())
+        .unwrap_err()
+        .contains("unsupported_command"));
+    let before_start = fixture::snapshot(&cold, cold_now);
+    cold.start_temporal_phase(&cold.mutation_guard().unwrap(), cold_now)
+        .unwrap();
+    let requested = fixture::snapshot(&cold, cold_now);
+    assert_eq!(requested["durability_pending"], true);
+    assert_eq!(
+        requested["durable_windows"],
+        before_start["durable_windows"]
+    );
+    assert_eq!(requested["observed_ns"], "0");
+    let acknowledged = fixture::settle_async_boundary(&cold, cold_now);
+    let prepared = fixture::snapshot(&cold, acknowledged);
+    assert_eq!(prepared["lead_in_remaining_ms"], 15_000);
+    assert_eq!(prepared["durable_windows"], 64);
+    assert_eq!(prepared["observed_ns"], "0");
+    let before_lead_end = acknowledged + 14_999_999_999;
+    cold.tick_temporal_capture(&cold.mutation_guard().unwrap(), before_lead_end)
+        .unwrap();
+    assert_eq!(
+        fixture::snapshot(&cold, before_lead_end)["durable_windows"],
+        64
+    );
+    assert_eq!(
+        fixture::snapshot(&cold, before_lead_end)["observed_ns"],
+        "0"
     );
     cold.cancel_temporal_durability(&cold.mutation_guard().unwrap())
         .unwrap();

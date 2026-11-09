@@ -985,3 +985,171 @@ fn metadata_only_cold_retirement_rejects_copied_foreign_owner_records() {
         .inspect_temporal_retirement(p[0].descriptor().expires_at_ms * 1_000_000)
         .is_err());
 }
+
+#[test]
+fn legacy_terminal_shape_is_known329_negative_only_and_not_a_loader_grant(){
+    let descriptor=RecoveryDescriptor{schema:RECOVERY_SCHEMA.into(),id:"synthetic-terminal".into(),owner_scope:"a".repeat(64),installation_id:"synthetic-install".into(),context_digest:"b".repeat(64),created_at_ms:1,saved_at_ms:2,expires_at_ms:1+RECOVERY_TTL_MS};
+    let terminal=Meta{schema:KIND.into(),generation:0,revision:329,descriptor,run:"synthetic-run".into(),policy_sha256:"c".repeat(64),transition_limit:329,window_count:59,receiver_ns:10_000_000,slot:None,payload_sha256:None,previous_sha256:Some("d".repeat(64)),retired_at_ms:Some(10)};
+    assert!(legacy_saturated_terminal_shape(&terminal));
+    for mode in 0..12{
+        let mut bad=terminal.clone();match mode{
+            0=>bad.schema="unknown-kind".into(),1=>bad.transition_limit=343,2=>bad.transition_limit=512,
+            3=>bad.revision=328,4=>bad.revision=330,5=>bad.slot=Some(0),6=>bad.payload_sha256=Some("e".repeat(64)),
+            7=>bad.previous_sha256=None,8=>bad.previous_sha256=Some("invalid".into()),9=>bad.window_count=65,
+            10=>bad.retired_at_ms=None,_=>bad.receiver_ns=11_000_000,
+        }
+        assert!(!legacy_saturated_terminal_shape(&bad),"shape mode{mode}");
+    }
+    // Shape alone grants nothing. The wired loader/producer also enforce
+    // canonical AEAD metadata, owner, clock, exact head/token and witness chain.
+}
+// SYNTHETIC authenticated chain fixture for storage failpoints ONLY. Its
+// counters do not establish positive sample admission; the independent actual
+// Runtime128-gap companion suite is the positive reachability oracle.
+fn synthetic_saturated_metadata_chain() -> (tempfile::TempDir,RecoveryStore,TemporalToken,u64){
+    let(t,store,p)=setup();commit(&store,None,&p[0]);
+    let mut m=store.temporal_components(&store.temporal_dir()).unwrap().head.unwrap();
+    assert_eq!(m.transition_limit,329);
+    for rev in 1..=328{
+        m.previous_sha256=Some(m.sha().unwrap());m.revision=rev;
+        let plain=serde_json::to_vec(&m).unwrap();
+        let path=store.temporal_dir().join(m.witness());
+        let mut file=OpenOptions::new().write(true).create_new(true).open(&path).unwrap();
+        #[cfg(unix)]{use std::os::unix::fs::PermissionsExt;file.set_permissions(fs::Permissions::from_mode(0o600)).unwrap();}
+        file.write_all(&store.temporal_seal("witness",&plain).unwrap()).unwrap();file.sync_all().unwrap();
+    }
+    fs::write(store.temporal_dir().join(format!("slot-{}.bin",m.slot.unwrap())),store.temporal_payload_seal(&m,&p[0]).unwrap()).unwrap();
+    fs::write(store.temporal_dir().join(HEAD),store.temporal_seal("head",&serde_json::to_vec(&m).unwrap()).unwrap()).unwrap();
+    assert_eq!(store.temporal_components(&store.temporal_dir()).unwrap().head.as_ref(),Some(&m));
+    let at=m.receiver_ns;(t,store,m.token().unwrap(),at)
+}
+#[test]
+fn saturated_terminal_authenticated_writer_faults_require_exact_same_intent(){
+    for point in ["before:head.stage:write","after:head.stage:write","after:head.stage:directory_fsync","after:witness:install","before:cleanup"]{
+        let(_t,store,token,at)=synthetic_saturated_metadata_chain();
+        let old=store.temporal_read(&store.temporal_dir().join(format!("witness-{:016x}-{:04x}.bin",token.generation,token.revision)),SMALL+36).unwrap().unwrap();
+        let intent=store.prepare_retire_temporal(&token,at,false).unwrap();assert_eq!(intent.meta.revision,329);assert!(intent.meta.slot.is_none());
+        let mut hook=|seen:&str|if seen==point{Err("synthetic-terminal-interrupted".into())}else{Ok(())};
+        assert!(store.publish_temporal_with(&intent,None,at,false,&mut hook).is_err(),"{point}");
+        let repaired=store.repair_same_temporal(&intent,None,at).unwrap();assert_eq!(repaired.revision,329);
+        assert!(store.load_temporal(at).unwrap().unwrap().prefix.is_none());
+        assert_eq!(store.repair_same_temporal(&intent,None,at).unwrap(),repaired);
+        let same=store.prepare_retire_temporal(&repaired,at,false).unwrap();assert_eq!(same.meta.revision,329);
+        assert_eq!(store.temporal_read(&store.temporal_dir().join(format!("witness-{:016x}-{:04x}.bin",token.generation,token.revision)),SMALL+36).unwrap().unwrap(),old);
+        let mut forbidden=intent.clone();forbidden.meta.revision=330;
+        assert!(store.publish_temporal(&forbidden,None,at).is_err());
+    }
+}
+#[test]
+fn saturated_terminal_prehead_abort_and_corrupt_stage_never_become_acknowledgment(){
+    let(_t,store,token,at)=synthetic_saturated_metadata_chain();let intent=store.prepare_retire_temporal(&token,at,false).unwrap();
+    let mut hook=|point:&str|if point=="before:head.stage:rename"{Err("synthetic-pre-head-stop".into())}else{Ok(())};
+    assert!(store.publish_temporal_with(&intent,None,at,false,&mut hook).is_err());
+    let tickets=store.inspect_abortable_temporal(&token,at).unwrap();assert_eq!(tickets.len(),1);
+    assert_eq!(store.abort_temporal_pending(&tickets[0],at).unwrap().token,token);
+    // The abort only removes the uncommitted stage; authenticated tip is328.
+    assert_eq!(store.temporal_components(&store.temporal_dir()).unwrap().head.unwrap().revision,328);
+    assert!(store.publish_temporal_with(&intent,None,at,false,&mut hook).is_err());
+    fs::write(store.temporal_dir().join("head.stage"),b"synthetic-corruption").unwrap();
+    assert!(store.repair_same_temporal(&intent,None,at).is_err());
+    assert!(store.fresh_train_genesis_predecessor(at).is_err());
+    // Existing explicit negative abort may discard a corrupt UNCOMMITTED
+    // named stage. It is not a successful retirement/recovery ACK. The old
+    // stage ticket cannot erase changed bytes; a new hash-bound ticket is needed.
+    assert!(store.abort_temporal_pending(&tickets[0],at).is_err());
+    let corrupt=store.inspect_abortable_temporal(&token,at).unwrap();assert_eq!(corrupt.len(),1);
+    let preserved=store.abort_temporal_pending(&corrupt[0],at).unwrap();assert_eq!(preserved.token,token);
+    assert!(preserved.prefix.is_some());
+    assert_eq!(store.temporal_components(&store.temporal_dir()).unwrap().head.unwrap().revision,328);
+}
+
+// Optional export is an independent OLD-binary compatibility test fixture,
+// generated solely from this synthetic temp owner/key. No live profile reads.
+#[test]
+fn saturated_terminal_fixture_for_frozen_old_runtime_consumer(){
+    let(t,store,token,at)=synthetic_saturated_metadata_chain();
+    let intent=store.prepare_retire_temporal(&token,at,false).unwrap();
+    let terminal=store.publish_temporal(&intent,None,at).unwrap();assert_eq!(terminal.revision,329);
+    assert!(store.load_temporal(at).unwrap().unwrap().prefix.is_none());
+    if let Some(output)=std::env::var_os("RUVIEW_2473_SYNTHETIC_FIXTURE_OUTPUT"){
+        fn copy_private(from:&Path,to:&Path){
+            fs::create_dir(to).unwrap();
+            #[cfg(unix)]{use std::os::unix::fs::PermissionsExt;fs::set_permissions(to,fs::Permissions::from_mode(0o700)).unwrap();}
+            for e in fs::read_dir(from).unwrap(){let e=e.unwrap();let m=fs::symlink_metadata(e.path()).unwrap();assert!(!m.file_type().is_symlink());
+                if m.is_dir(){copy_private(&e.path(),&to.join(e.file_name()));}else{assert!(m.is_file());fs::copy(e.path(),to.join(e.file_name())).unwrap();
+                    #[cfg(unix)]{use std::os::unix::fs::PermissionsExt;fs::set_permissions(to.join(e.file_name()),fs::Permissions::from_mode(0o600)).unwrap();}
+                }
+            }
+        }
+        let output=PathBuf::from(output);fs::create_dir_all(&output).unwrap();let dest=output.join("terminal329");copy_private(t.path(),&dest);
+        fs::write(output.join("terminal329.json"),serde_json::to_vec(&serde_json::json!({"now_ns":at,"owner_scope":intent.meta.descriptor.owner_scope,"installation_id":intent.meta.descriptor.installation_id})).unwrap()).unwrap();
+    }
+}
+
+#[test]
+fn authenticated_boundary_metadata_rejects_positive329_and_negative330(){
+    for positive in [true,false]{
+        let(_t,store,token,at)=synthetic_saturated_metadata_chain();
+        let intent=store.prepare_retire_temporal(&token,at,false).unwrap();
+        let terminal=store.publish_temporal(&intent,None,at).unwrap();assert_eq!(terminal.revision,329);
+        let mut inadmissible=intent.meta.clone();
+        if positive{inadmissible.slot=Some(0);inadmissible.payload_sha256=Some("a".repeat(64));inadmissible.retired_at_ms=None;}
+        else{inadmissible.revision=330;inadmissible.previous_sha256=Some(intent.meta.sha().unwrap());}
+        // Actual canonical encryption under the synthetic owner key. This is
+        // not an outer-hash-only/corrupted-cipher rejection control.
+        let bytes=store.temporal_seal("head",&serde_json::to_vec(&inadmissible).unwrap()).unwrap();
+        fs::write(store.temporal_dir().join(HEAD),bytes).unwrap();
+        assert!(store.load_temporal(at).is_err());assert!(store.inspect_temporal_retirement(at).is_err());
+        assert!(store.fresh_train_genesis_predecessor(at).is_err());
+    }
+}
+
+#[test]
+fn boundary329_to_fresh343_interrupted_obsolete_gc_keeps_exact_new_chain(){
+    use crate::room_learner::temporal_model_input::managed::execution::checkpoint::synthetic_fresh_train343_empty_run;
+    for cut in [1usize,329]{
+        let(_t,store,token,at)=synthetic_saturated_metadata_chain();
+        let initial=store.load_temporal(at).unwrap().unwrap().prefix.unwrap();
+        let retirement=store.prepare_retire_temporal(&token,at,false).unwrap();
+        let retired=store.publish_temporal(&retirement,None,at).unwrap();assert_eq!(retired.revision,329);
+        let old_head=fs::read(store.temporal_dir().join(HEAD)).unwrap();
+        let fresh=synthetic_fresh_train343_empty_run(&initial,at/1_000_000+1);assert_eq!(fresh.transition_limit(),343);
+        let intent=store.prepare_temporal(Some(&retired),&fresh,now(&fresh)).unwrap();
+        let mut hook=|point:&str|if point=="before:cleanup"{Err("synthetic-boundary-GC-interruption".into())}else{Ok(())};
+        assert!(store.publish_temporal_with(&intent,Some(&fresh),now(&fresh),false,&mut hook).is_err());
+        let components=store.temporal_components(&store.temporal_dir()).unwrap();
+        let obsolete=components.witnesses.iter().filter(|(_,m)|m.generation==retired.generation).map(|(name,_)|name.clone()).collect::<Vec<_>>();
+        assert_eq!(obsolete.len(),330);
+        for name in obsolete.iter().take(cut){fs::remove_file(store.temporal_dir().join(name)).unwrap();}
+        // With cut329 the ONLY remaining obsolete record is negative329.
+        // It is authenticated and parsed but cannot outrank the complete new chain.
+        let loaded=store.load_temporal(now(&fresh)).unwrap().unwrap();assert_eq!(loaded.token.generation,1);assert_eq!(loaded.token.revision,0);
+        assert_eq!(loaded.prefix.as_ref().unwrap().bytes(),fresh.bytes());
+        let repaired=store.repair_same_temporal(&intent,Some(&fresh),now(&fresh)).unwrap();assert_eq!(repaired,loaded.token);
+        assert_eq!(store.temporal_components(&store.temporal_dir()).unwrap().witnesses.len(),1);
+        // Selective replay of the old authentic terminal still fails closed.
+        fs::write(store.temporal_dir().join(HEAD),old_head).unwrap();assert!(store.load_temporal(now(&fresh)).is_err());
+        assert_eq!(store.repair_same_temporal(&intent,Some(&fresh),now(&fresh)).unwrap(),repaired);
+        assert_eq!(store.load_temporal(now(&fresh)).unwrap().unwrap().prefix.unwrap().bytes(),fresh.bytes());
+    }
+}
+#[test]
+fn boundary329_to_fresh343_never_acknowledges_or_drops_malformed_or_old_stage(){
+    use crate::room_learner::temporal_model_input::managed::execution::checkpoint::synthetic_fresh_train343_empty_run;
+    for corrupt in [false,true]{
+        let(_t,store,token,at)=synthetic_saturated_metadata_chain();let initial=store.load_temporal(at).unwrap().unwrap().prefix.unwrap();
+        let retirement=store.prepare_retire_temporal(&token,at,false).unwrap();let retired=store.publish_temporal(&retirement,None,at).unwrap();
+        let old_head=fs::read(store.temporal_dir().join(HEAD)).unwrap();let fresh=synthetic_fresh_train343_empty_run(&initial,at/1_000_000+1);
+        let intent=store.prepare_temporal(Some(&retired),&fresh,now(&fresh)).unwrap();
+        assert!(store.publish_temporal_with(&intent,Some(&fresh),now(&fresh),false,&mut |point|if point=="before:cleanup"{Err("synthetic-before-GC".into())}else{Ok(())}).is_err());
+        let bytes=if corrupt{b"synthetic-corrupt-stage".to_vec()}else{old_head};
+        let path=store.temporal_dir().join("head.stage");
+        let mut file=OpenOptions::new().write(true).create_new(true).open(&path).unwrap();
+        #[cfg(unix)]{use std::os::unix::fs::PermissionsExt;file.set_permissions(fs::Permissions::from_mode(0o600)).unwrap();}
+        file.write_all(&bytes).unwrap();file.sync_all().unwrap();drop(file);
+        assert!(store.repair_same_temporal(&intent,Some(&fresh),now(&fresh)).is_err());
+        assert_eq!(fs::read(path).unwrap(),bytes,"failed repair removed untrusted pending bytes");
+        let loaded=store.load_temporal(now(&fresh)).unwrap().unwrap();assert_eq!(loaded.token.generation,1);assert_eq!(loaded.token.revision,0);
+        assert_eq!(loaded.prefix.unwrap().bytes(),fresh.bytes());
+    }
+}
