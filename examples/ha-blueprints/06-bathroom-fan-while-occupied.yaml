@@ -5,6 +5,9 @@ blueprint:
     configurable run-on delay after the zone clears (humidity recovery).
     Privacy-mode-safe: bathroom_occupied is derived from zone presence,
     not biometrics, so this works under --privacy-mode too.
+    Not yet published by the RuView server: bathroom_occupied has no server
+    source yet (its entity stays unavailable). Works today if you pick the
+    RuView presence binary_sensor of the node mounted in the bathroom.
     Part of the ADR-115 §3.12 starter blueprint set.
   domain: automation
   source_url: https://github.com/ruvnet/RuView/blob/main/examples/ha-blueprints/06-bathroom-fan-while-occupied.yaml
