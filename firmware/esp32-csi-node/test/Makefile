@@ -232,7 +232,7 @@ run_c5_lltf8_contract: test_c5_lltf8_contract
 
 .PHONY: run_c5_wifi_band run_c5_lltf8_contract
 
-host_tests: run_c5_lltf8_contract run_c5_wifi_band run_mmwave_pins run_self_ping run_edge_stbc run_edge_current_grid run_csi_he_gate run_node_mdns run_adr110 run_vitals run_mmwave_detect run_thermal run_csi_sanitize \
+host_tests: run_c5_phy_receipt run_c5_lltf8_contract run_c5_wifi_band run_mmwave_pins run_self_ping run_edge_stbc run_edge_current_grid run_csi_he_gate run_node_mdns run_adr110 run_vitals run_mmwave_detect run_thermal run_csi_sanitize \
             run_c6_antenna run_serial_onboarding run_onboarding_identity run_onboarding_console run_delivery_contract run_ota_health \
             run_config_rules run_config_recovery
 	@echo "Host tests passed (firmware contracts, DSP, configuration recovery, onboarding and OTA health)"
@@ -275,3 +275,9 @@ clean:
 		test_thermal test_csi_sanitize test_c6_antenna test_serial_onboarding \
 		test_ota_health test_onboarding_identity test_config_rules test_edge_stbc test_edge_current_grid test_csi_he_gate test_node_mdns test_self_ping test_config_recovery
 	rm -rf corpus_serialize/ corpus_edge/ corpus_nvs/
+
+.PHONY: run_c5_phy_receipt
+run_c5_phy_receipt:
+	$(CC) -std=c11 -Wall -Wextra -Werror -pedantic -I$(MAIN_DIR) test_c5_phy_receipt.c -o /tmp/ruview-c5-phy-receipt-test
+	/tmp/ruview-c5-phy-receipt-test
+	python3 test_c5_diagnostic.py

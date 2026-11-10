@@ -11,7 +11,7 @@ Primary references: [ESP-IDF v6.0.2 CSI configuration](https://github.com/espres
 and [Espressif's packing clarification](https://github.com/espressif/esp-idf/issues/18982#issuecomment-5420118269).
 
 The new opt-in profile requests only legacy/forced L-LTF with
-`lltf_bit_mode=1`, reads the actual configuration back through the SDK, and
+`lltf_bit_mode=1`, reads the actual configuration through the pinned SDK MAC+PHY adapter described below, and
 withholds CSI if that readback differs. A callback can carry this claim only
 when its original metadata reports non-HT OFDM (`cur_bb_format=1`, 11g/11a),
 no secondary channel, valid channel estimate and exactly 106
@@ -20,7 +20,7 @@ The profile sets STA bandwidth to `WIFI_BW20` before association and verifies
 it through `esp_wifi_get_bandwidth` before CSI acquisition. C5 has no per-frame
 `cwb` field; the suffix explicitly reports that interface readback, combined
 with the original non-HT OFDM/secondary-none callback metadata, not an invented
-per-frame bandwidth value. CSI-format fields and zero scaling are read back;
+per-frame bandwidth value. CSI format and the opaque SDK `val_scale_cfg=0` write footprint are checked;
 HE-STBC selection is irrelevant to this non-HT profile.
 Physical readback/callback validation is required before managed capture;
 unknown shape, estimator-validity starvation or another PHY remains blocked.
@@ -37,7 +37,7 @@ can still read the declared IQ payload; the suffix must never enter edge DSP.
 | 5 | Component width 8 bits |
 | 6 | SDK-documented signed int8 imaginary/real order, ID 1 |
 | 7 | SDK L-LTF53 order `[0..26, -26..-1]`, ID 1 |
-| 8 | SDK configuration readback matched, 1 |
+| 8 | SDK configuration state matched through the pinned MAC+PHY adapter, 1 |
 | 9 | Original `cur_bb_format`, required 1 |
 | 10 | Original secondary-channel field, required 0 |
 | 11 | STA bandwidth API readback in MHz, required 20 |
@@ -54,3 +54,48 @@ must have its own versioned identity and must not claim that 53 slots form a
 uniform/padded 64-point FFT or that interpolation adds measured tones. The
 documented component convention does not qualify phase; no learner may
 consume phase on the strength of this format claim alone.
+
+## Pinned C5 readback adapter (local experimental implementation)
+
+Physical Node23 diagnostics showed that ESP-IDF v6.0.2's successful public
+`esp_wifi_get_csi_config` call populated only structure bits0–11. The caller's
+zero-filled bits12–31 were not measurements: the getter does not return
+`val_scale_cfg`, `dump_ack_en` or `lltf_bit_mode`. The adapter never seeds those
+fields from the request and never treats their zeroes as readback.
+
+The exact linked setter still consumes the full four-byte configuration:
+`ic_csi_set_config` calls the **normal** `phy_chan_dump_cfg` directly, then
+`phy_lltf_mask_en`. The `_752` alternative is discarded from this image.
+The public getter checks the supported MAC fields; a separate read-only
+snapshot checks the vendor setter's control-register write footprint:
+
+| Control address | Required mask | Expected masked value | Bounded interpretation |
+| --- | --- | --- | --- |
+| `0x600a790c` | `0x30f8` | `0x3010` | Mode bit12=1, legacy/force mask bit13=1; SDK config0's control bit3=0 and coefficient bits7:4=1 |
+| `0x600a40fc` | `0x20000000` | `0` | First ACK-dump control bit29 clear |
+| `0x600a4100` | `0x20000000` | `0` | Second ACK-dump control bit29 clear |
+
+These addresses and masks are **private, binary-derived and source-specific**,
+not a documented portable PHY API. The same vendor functions repeatedly read
+these words while updating them; this adapter only reads each word once after
+configuration and performs no MMIO writes. It does not interpret unrelated
+bits, especially bit2. The coefficient value1 is not reported as
+`val_scale_cfg=1`, calibrated gain, a physical amplitude shift or automatic
+scaling. Public documentation gives the opaque configuration range0–8 only.
+Gain calibration and phase qualification remain absent.
+
+The build refuses other targets/IDF versions and checks SHA256 of all vendor
+inputs before enabling this private adapter. Pinned IDF commit:
+`7101770dc6db2667b3c477cc31365dd1acd6db4e` (v6.0.2); Wi-Fi submodule:
+`bb69e7e609c9a9a909ddd1ed175f36df2bd13801`; PHY submodule:
+`59c1234e929212aec0fdda75769b759951235536`.
+Exact header/library hashes are enforced in `main/c5_lltf8_sdk_pins.cmake`.
+
+Wire v1's byte8 continues to mean **genuine configuration state matched**;
+it does not promise that the public getter returned every field. Packing,
+PHY validity, frequency, sanitation, native grid and feature projection are
+unchanged. Unknown/mismatched readback remains blocked. Persistent diagnostics
+separate the public getter's unwritten fields from the raw and masked PHY
+snapshot; they emit at most three lines every five seconds. This startup
+snapshot is not a continuous hardware monitor. Physical callback shape,
+validity and packing still require a separate one-board check before capture.

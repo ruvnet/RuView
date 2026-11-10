@@ -1,3 +1,10 @@
+if(CONFIG_C5_MANAGED_LLTF8_V1)
+    if(NOT IDF_TARGET STREQUAL "esp32c5")
+        message(FATAL_ERROR "C5 LLTF8 private readback requires ESP32-C5")
+    endif()
+    include("${CMAKE_CURRENT_LIST_DIR}/c5_lltf8_sdk_pins.cmake")
+endif()
+
 set(SRCS
     "main.c" "csi_collector.c" "config_api.c" "config_rules.c" "node_log.c"
     "thermal.c" "stream_sender.c" "nvs_config.c"

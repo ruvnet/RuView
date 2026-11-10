@@ -19,12 +19,20 @@
 #include "c6_sync_espnow.h" /* ADR-110 §A0.11: mesh-aligned epoch for sync packet */
 #include "csi_he_gate.h"     /* ADR-423 D1: HE-LTF validity gate */
 #include "c5_lltf8_contract.h"
+#include "c5_lltf8_phy_receipt.h"
 
 #include <string.h>
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "esp_timer.h"
 #include "sdkconfig.h"
+#if defined(CONFIG_C5_MANAGED_LLTF8_V1)
+#include "esp_idf_version.h"
+#include "soc/soc.h"
+#if !defined(CONFIG_IDF_TARGET_ESP32C5) || ESP_IDF_VERSION != ESP_IDF_VERSION_VAL(6, 0, 2)
+#error "Private C5 PHY readback is qualified only against pinned ESP-IDF 6.0.2 inputs"
+#endif
+#endif
 #include "esp_netif.h"          /* #954: STA gateway lookup for self-ping CSI source */
 #include "ping/ping_sock.h"     /* #954: esp_ping gateway traffic generator */
 #include "lwip/ip_addr.h"       /* #954: ip_addr_t target for esp_ping */
@@ -144,6 +152,8 @@ static struct {
     unsigned phase;
     int set_result, get_result, bandwidth_result, register_result, enable_result;
     unsigned bandwidth_raw;
+    uint32_t phy_ctrl, ack0, ack1;
+    bool phy_matched;
     wifi_csi_config_t applied;
 } s_c5_diag = { .set_result=-1, .get_result=-1, .bandwidth_result=-1,
                .register_result=-1, .enable_result=-1 };
@@ -812,17 +822,25 @@ void csi_collector_init(void)
     s_c5_diag.bandwidth_result = bandwidth_result;
     s_c5_diag.bandwidth_raw = (unsigned)applied_bandwidth;
     s_c5_diag.applied = applied_config;
-    s_c5_diag.phase = 2; /* receipt obtained, predicate evaluated below */
+    /* These control addresses are derived from the exact vendor setter's
+     * repeated LW/SW operations. Only read once; never write/reconfigure PHY.
+     * SDK get_csi_config populates bits0..11 only, not mode/scale/dump fields. */
+    s_c5_diag.phy_ctrl = REG_READ(C5_LLTF8_PHY_CTRL_ADDR);
+    s_c5_diag.ack0 = REG_READ(C5_LLTF8_ACK0_ADDR);
+    s_c5_diag.ack1 = REG_READ(C5_LLTF8_ACK1_ADDR);
+    s_c5_diag.phy_matched = c5_lltf8_phy_receipt_matches(
+        s_c5_diag.phy_ctrl, s_c5_diag.ack0, s_c5_diag.ack1);
+    s_c5_diag.phase = 2; /* actual MAC+PHY receipts obtained */
     s_c5_lltf8_sta_bandwidth_mhz = bandwidth_result == ESP_OK && applied_bandwidth == WIFI_BW20 ? 20U : 0U;
     s_c5_lltf8_readback = readback_result == ESP_OK &&
         applied_config.enable == 1U && applied_config.acquire_csi_legacy == 1U &&
-        applied_config.acquire_csi_force_lltf == 1U && applied_config.lltf_bit_mode == 1U &&
+        applied_config.acquire_csi_force_lltf == 1U && s_c5_diag.phy_matched &&
         applied_config.acquire_csi_ht20 == 0U && applied_config.acquire_csi_ht40 == 0U &&
         applied_config.acquire_csi_vht == 0U && applied_config.acquire_csi_su == 0U &&
         applied_config.acquire_csi_mu == 0U && applied_config.acquire_csi_dcm == 0U &&
-        applied_config.acquire_csi_beamformed == 0U && applied_config.dump_ack_en == 0U &&
-        applied_config.val_scale_cfg == 0U && s_c5_lltf8_sta_bandwidth_mhz == 20U;
-    ESP_LOGI(TAG, "C5_LLTF8_CONFIG_V1 readback=%u requested_bits=8 applied_bit_mode=%u sta_bw_mhz=%u result=%d bw_result=%d",
+        applied_config.acquire_csi_beamformed == 0U &&
+        s_c5_lltf8_sta_bandwidth_mhz == 20U;
+    ESP_LOGI(TAG, "C5_LLTF8_CONFIG_V1 mac_phy_matched=%u requested_bits=8 api_unwritten_bit_mode=%u sta_bw_mhz=%u result=%d bw_result=%d",
              s_c5_lltf8_readback, (unsigned)applied_config.lltf_bit_mode,
              s_c5_lltf8_sta_bandwidth_mhz, readback_result, bandwidth_result);
     if (!s_c5_lltf8_readback) {
@@ -1104,7 +1122,7 @@ void csi_collector_diagnostic_tick(void)
              s_c5_diag.bandwidth_result, s_c5_diag.bandwidth_raw,
              s_c5_lltf8_sta_bandwidth_mhz, s_c5_lltf8_readback,
              s_c5_diag.register_result, s_c5_diag.enable_result);
-    ESP_LOGI(TAG, "C5_LLTF8_APPLIED enable=%u legacy=%u force=%u bits_mode=%u ht20=%u ht40=%u vht=%u su=%u mu=%u dcm=%u beamformed=%u dump_ack=%u scale=%u he_stbc=%u",
+    ESP_LOGI(TAG, "C5_LLTF8_APPLIED mac_getter_bits=0..11 enable=%u legacy=%u force=%u unwritten_bits_mode=%u ht20=%u ht40=%u vht=%u su=%u mu=%u dcm=%u beamformed=%u unwritten_dump_ack=%u unwritten_scale=%u he_stbc=%u",
              (unsigned)c->enable, (unsigned)c->acquire_csi_legacy,
              (unsigned)c->acquire_csi_force_lltf, (unsigned)c->lltf_bit_mode,
              (unsigned)c->acquire_csi_ht20, (unsigned)c->acquire_csi_ht40,
@@ -1112,5 +1130,15 @@ void csi_collector_diagnostic_tick(void)
              (unsigned)c->acquire_csi_mu, (unsigned)c->acquire_csi_dcm,
              (unsigned)c->acquire_csi_beamformed, (unsigned)c->dump_ack_en,
              (unsigned)c->val_scale_cfg, (unsigned)c->acquire_csi_he_stbc_mode);
+    ESP_LOGI(TAG, "C5_LLTF8_PHY origin=pinned-v602-binary ctrl_raw=%08lx masked=%04lx expected=3010 mode=%u force_mask=%u cfg0_control_bit3=%u coefficient=%u ack0_raw=%08lx ack1_raw=%08lx ack0_bit29=%u ack1_bit29=%u matched=%u",
+             (unsigned long)s_c5_diag.phy_ctrl,
+             (unsigned long)(s_c5_diag.phy_ctrl & C5_LLTF8_PHY_CTRL_MASK),
+             (unsigned)((s_c5_diag.phy_ctrl >> 12) & 1),
+             (unsigned)((s_c5_diag.phy_ctrl >> 13) & 1),
+             (unsigned)((s_c5_diag.phy_ctrl >> 3) & 1),
+             (unsigned)((s_c5_diag.phy_ctrl >> 4) & 15),
+             (unsigned long)s_c5_diag.ack0, (unsigned long)s_c5_diag.ack1,
+             (unsigned)((s_c5_diag.ack0 >> 29) & 1),
+             (unsigned)((s_c5_diag.ack1 >> 29) & 1), s_c5_diag.phy_matched);
 #endif
 }
