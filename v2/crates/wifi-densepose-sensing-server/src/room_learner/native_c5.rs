@@ -33,14 +33,16 @@ pub enum NativeFormatId {
 pub struct ValidatedNativeFormat {
     id: NativeFormatId,
     first_word_invalid: bool,
+    adr018_flags: Adr018Flags,
     header_binding: Option<(u8, u32, u64)>,
 }
 impl ValidatedNativeFormat {
     pub(super) fn legacy() -> Self {
-        Self { id: NativeFormatId::LegacyV2, first_word_invalid: false, header_binding: None }
+        Self { id: NativeFormatId::LegacyV2, first_word_invalid: false, adr018_flags: Adr018Flags::default(), header_binding: None }
     }
     pub fn id(self) -> NativeFormatId { self.id }
     pub(super) fn first_word_invalid(self) -> bool { self.first_word_invalid }
+    pub(super) fn flags_match(self, flags: Adr018Flags) -> bool { self.adr018_flags == flags }
     pub(super) fn header_matches(self, node: u8, sequence: u32, frequency_hz: u64) -> bool {
         self.header_binding == Some((node, sequence, frequency_hz))
     }
@@ -74,7 +76,10 @@ pub fn validate_adr018_native_format(
     if antennas != 1 || bins != 53 || ppdu != PpduType::HtLegacy || flags.bw40 {
         return Err("C5L8/v1 requires one antenna, 53 native slots, non-HT OFDM and 20 MHz");
     }
-    if packet[19] & !0x20 != 0 {
+    // ADR-018 bit4 is the producer's advisory cross-node sync-valid flag
+    // (ESP-NOW or 802.15.4), not a packing variant or source-clock proof.
+    // Bit5 retains its exact invalid-prefix meaning. All other bits reject.
+    if packet[19] & !0x30 != 0 {
         return Err("C5L8/v1 contains unsupported ADR-018 flag variants");
     }
     let frequency_mhz=u32::from_le_bytes(packet[8..12].try_into().expect("bounded header"));
@@ -97,6 +102,6 @@ pub fn validate_adr018_native_format(
     if first_word_invalid && packet.get(20..24) != Some(&[0, 0, 0, 0]) {
         return Err("C5L8/v1 sanitized prefix bytes are not zero");
     }
-    Ok(ValidatedNativeFormat { id: NativeFormatId::C5Lltf8V1, first_word_invalid,
+    Ok(ValidatedNativeFormat { id: NativeFormatId::C5Lltf8V1, first_word_invalid, adr018_flags: flags,
         header_binding: Some((packet[4],u32::from_le_bytes(packet[12..16].try_into().expect("bounded header")),u64::from(frequency_mhz)*1_000_000)) })
 }

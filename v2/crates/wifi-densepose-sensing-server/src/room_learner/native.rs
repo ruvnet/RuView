@@ -41,6 +41,9 @@ pub struct NativePacketInput<'a> {
 /// fn export(packet: &CanonicalPacket) { let _ = serde_json::to_string(packet); }
 /// ```
 pub struct CanonicalPacket {
+    /// Original bounded ADR-018 metadata. Sync-valid is advisory only; never
+    /// changes receiver-only timing, calibration, provenance or qualification.
+    pub adr018_flags: Adr018Flags,
     pub native_frame: RfFrameV2,
     /// Present only for the explicitly claimed C5 format. Never serialized or
     /// exposed by Debug; original signed wire bytes and nonuniform SDK order.
@@ -157,8 +160,11 @@ pub fn canonicalize_esp32_with_format(input: NativePacketInput<'_>, format: Vali
     if input.flags.first_word_sanitized { valid_mask[..2].fill(false); }
     let c5 = format.id() == NativeFormatId::C5Lltf8V1;
     if c5 {
-        if input.flags.stbc || input.flags.ldpc || input.flags.ieee802154_sync_valid {
-            return Err("C5L8/v1 input contains unsupported PHY/synchronization flags".into());
+        if input.flags.stbc || input.flags.ldpc {
+            return Err("C5L8/v1 input contains unsupported PHY flags".into());
+        }
+        if !format.flags_match(input.flags) {
+            return Err("C5L8/v1 format claim belongs to different ADR-018 flags".into());
         }
         if !format.header_matches(input.node_id,input.sequence,input.frequency_hz) {
             return Err("C5L8/v1 format claim belongs to a different source/sequence/frequency header".into());
@@ -206,7 +212,7 @@ pub fn canonicalize_esp32_with_format(input: NativePacketInput<'_>, format: Vali
     if amplitudes.len() != CANONICAL_PACKET_BINS || amplitudes.iter().any(|v| !v.is_finite() || *v < 0.0) {
         return Err("length-only magnitude projection produced an invalid feature vector".into());
     }
-    Ok(CanonicalPacket { native_frame,
+    Ok(CanonicalPacket { native_frame, adr018_flags: input.flags,
         native_iq_wire: c5.then(|| input.iq_bytes.to_vec()),
         native_tone_indices: if c5 { Some(&C5_LLTF53_TONES) } else { None }, source_id: input.node_id,
         grid_id,

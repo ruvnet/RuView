@@ -699,3 +699,43 @@ async fn enable_current_recovery_requires_explicit_versioned_consent_and_does_no
 
 #[path = "room_learner_api_temporal_tests.rs"]
 mod temporal_contract_tests;
+
+#[tokio::test]
+async fn c5_cross_node_sync_metadata_reaches_real_ingress_and_readiness_without_clock_upgrade() {
+    let (_dir,state)=fixture();let now=std::time::Instant::now();
+    {
+        let mut inner=state.write().await;
+        inner.node_states.clear();inner.room_learning_sources.clear();inner.room_learning_rejections.clear();
+        for row in 0..120 {
+            let at=now-std::time::Duration::from_millis((120-row)as u64*100);
+            for node in [20,21,22] {
+                let mut packet=c5_wire(node,row+1,5240,true);packet[19]|=0x10;
+                observe_wire_at(&mut inner,&packet,at);
+            }
+        }
+        for node in [20,21,22] {assert_eq!(native_candidates(&inner,node,now).len(),1);}
+        assert!(inner.room_learning_rejections.is_empty());
+    }
+    let router=app(state.clone());
+    let configured=json_request(router.clone(),"/configure",Method::POST,c5_config()).await;
+    assert_eq!(configured["success"],true,"{configured}");
+    for spec in configured["status"]["sources"].as_array().unwrap() {
+        assert_eq!(spec["grid_id"],native::C5_LLTF8_V1_GRID);
+        assert_eq!(spec["center_frequency_hz"],5_240_000_000u64);
+    }
+    let begun=json_request(router.clone(),"/phase",Method::POST,serde_json::json!({
+        "trial_id":"synthetic-c5-sync","session_id":"synthetic-c5-sync","role":"Train",
+        "label":"Empty","duration_ms":12000,"conditions_confirmed":true})).await;
+    assert_eq!(begun["success"],true,"{begun}");
+    for row in 0..8 {for node in [20,21,22] {
+        let mut packet=c5_wire(node,121+row,5240,true);
+        if row%2==0 {packet[19]|=0x10;} // Advisory bit may toggle; source grid is unchanged.
+        let mut inner=state.write().await;observe_wire_at(&mut inner,&packet,std::time::Instant::now());
+    }}
+    let read=json_request_status(router).await;
+    for source in read["capture"]["sources"].as_array().unwrap() {
+        assert_eq!(source["admitted_packets"],8);assert_eq!(source["live_buffer_frames"],8);
+    }
+    assert_eq!(read["physically_validated"],false);
+    assert!(state.read().await.field_model.is_none());
+}

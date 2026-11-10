@@ -1,0 +1,76 @@
+{
+  "c5_strict_accepted": 0,
+  "canonicalized_with_measured_receiver_interval": 0,
+  "capture_model_phase_accuracy_or_hardware_qualification": false,
+  "elapsed_seconds": 15.019938292,
+  "evidence": "EXECUTED / ACTUAL NODE23 UDP WIRE / RECEIVER METADATA ONLY",
+  "header_sequence": {
+    "duplicate_arrivals": 0,
+    "first": 1685,
+    "last": 2007,
+    "non_unit_transitions": 33
+  },
+  "node23_observed": true,
+  "node23_receiver_cadence": {
+    "gap_max_ns": 149005958,
+    "gap_mean_ns": 51645478.37370242,
+    "gap_min_ns": 16541,
+    "interval_count": 289,
+    "received_packets": 290,
+    "receiver_rate_hz": 19.362779307882143,
+    "receiver_span_ns": 14925543250,
+    "source_clock_or_source_sample_rate_qualified": false
+  },
+  "node_filter": 23,
+  "other_sources_discarded_before_parsing_or_export": true,
+  "raw_iq_or_derived_amplitudes_written_or_logged": false,
+  "schema": "ruview.c5.metadata-wire-probe.v1",
+  "source_commit": "8930b7bfff1bf3b41d267ee522b80ba2bd1c3875",
+  "strict_c5_frames_observed": false,
+  "strict_c5_receiver_cadence": {
+    "gap_max_ns": null,
+    "gap_mean_ns": null,
+    "gap_min_ns": null,
+    "interval_count": 0,
+    "received_packets": 0,
+    "receiver_rate_hz": null,
+    "receiver_span_ns": null,
+    "source_clock_or_source_sample_rate_qualified": false
+  },
+  "timestamp_method": "user-space monotonic dequeue time after recv_from; not kernel or source time",
+  "validator_accepted": 0,
+  "validator_rejections": {
+    "C5L8/v1 contains unsupported ADR-018 flag variants": 290
+  },
+  "variant_overflow_packets": 0,
+  "variants": [
+    {
+      "count": 290,
+      "metadata": {
+        "antennas": 1,
+        "c5_strict_accepted": false,
+        "c5_suffix_metadata": {
+          "bb_format": 1,
+          "component_bits": 8,
+          "component_order": 1,
+          "declared_iq_bytes": 106,
+          "estimator_valid": 1,
+          "first_word_invalid": 0,
+          "marker": "C5L8",
+          "sdk_readback": 1,
+          "secondary_channel": 0,
+          "sta_bandwidth_mhz": 20,
+          "tone_order": 1,
+          "version": 1
+        },
+        "declared_native_slots": 53,
+        "flags_byte": 16,
+        "format_validator_accepted": false,
+        "frequency_mhz": 5240,
+        "ppdu_byte": 0,
+        "validator_error": "C5L8/v1 contains unsupported ADR-018 flag variants",
+        "wire_bytes": 142
+      }
+    }
+  ]
+}

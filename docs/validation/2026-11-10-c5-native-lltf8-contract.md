@@ -91,3 +91,28 @@ malformed/unsupportedPHY refusal, changedfrequency/grid/model bindings,
 and bounded diagnostic expiry/privacy. Physical source/callback and the
 separate producer commit/artifact receipts must be recorded independently.
 No source changes are applied to the frozen server#2513b8review branch.
+
+## Existing ADR-018 advisory sync metadata
+
+The first metadata-only Node23 wire probe observed290 packets, all142bytes,
+53slots, PPDU0,5240MHz, with the exact C5L8/v1 suffix and header flag0x10.
+The strict8930 decoder rejected this known flag. The producer serializer sets
+bit4 when its ESP-NOW or802.15.4 cross-node synchronization helper reports valid;
+the historical host field name is `ieee802154_sync_valid`. This bit does not
+select IQ packing, bandwidth, sanitation or calibrated timing.
+
+The corrected C5 decoder accepts exactly flags0x00/0x10/0x20/0x30, with0x20
+still required to agree with suffix sanitation and zeroed prefix bytes. All
+other flag bits reject. The complete parsed flag metadata is bound to the
+validated token and retained in the private canonical packet. Flipping sync
+between the validated header and canonicalization input rejects. The bit does
+not change grid/projection/IQ/masks, receiver-only clock, unknown source sample
+rate, gain/phase qualification, capture authority or provenance.
+
+`tests/fixtures/c5-node23-wire-metadata-20261110.json` contains the actual
+metadata-only receipt and no IQ. The corresponding native test combines those
+observed header/suffix facts with explicitly **synthetic IQ**, not a captured
+wire replay. Exhaustive256-byte flag controls and real ingress/readiness
+regressions are synthetic contract evidence; physical admission requires a
+new wire probe against the corrected helper. Legacy64/256 math and IDs stay
+unchanged. No firmware change is required for this existing metadata bit.
