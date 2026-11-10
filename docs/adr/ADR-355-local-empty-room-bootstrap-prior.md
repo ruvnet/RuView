@@ -72,6 +72,27 @@ host to provide a protected state directory.
 
 ## Consequences
 
+### Explicit recovery without restarting, 2026-10-12
+
+`POST /api/v1/calibration/bootstrap/recover` requires administrator authority,
+the current server boot epoch and the stored payload digest. It validates the
+installation-bound file and original expiry before changing live state, and
+requires at least ten seconds of eligible raw CSI on its original source/grid.
+An active unfinished capture must be cancelled first.
+
+Recovery clears old source sequence faults and runtime windows, withdraws any
+full room session/receipt, and restores only `bootstrap_only`. New packets must
+build a complete matching runtime window before negative suppression applies.
+Duplicates and backward discontinuities remain rejected. No calibration frame
+count, training timestamp, threshold or expiry is renewed, and the stored file
+is not rewritten. Full calibrated evidence and numeric vitals remain disabled.
+
+The twelve-hour stale boundary still withdraws full calibrated authority. A
+restored negative-only prior may match fresh runtime windows while stale until
+its original twenty-four-hour hard expiry. Expiry stops matching and recovery.
+This resolves the mismatch between the advertised twenty-four-hour prior and
+the previous fresh-only runtime gate; it makes no room-selectivity claim.
+
 Startup can use recent measured background structure instead of only generic
 heuristics. No accuracy lift is claimed until occupied and empty held out data
 from multiple installations is recorded.
@@ -106,6 +127,45 @@ occupied sequences. Empty data is never relabeled as human training.
    performs the bounded one time held out refinement. It requires administrator
    authority when transport authentication is enabled.
 
+## Publication and diagnostics clarification, 2026-10-27
+
+The REST vital endpoint and both raw-CSI/edge sensing publishers share the same
+room aggregate and bound-model publication gates. REST must not substitute the
+single-link model's count for the room aggregate: a fresh second node can still
+make occupant attribution ambiguous. A cached candidate is bound to its producing
+node, packet tick/time and full immutable calibration receipt identity. A REST
+read may withdraw a previously published candidate as gates expire or change;
+it cannot promote a sample withheld at its original publication decision. A new
+qualifying packet is required. Candidate freshness is bounded independently of
+other nodes' arrival clocks.
+
+Raw CSI estimates carry the existing exact `ruview.vital-evidence.v1` envelope
+with capability `esp32_csi_spectral_vitals_v1`. `source_node_ids` names only the
+radio producing the estimate, not the active-node inventory or occupancy-model
+source. The legacy five-field mirror may remain for dashboard compatibility,
+but must match the exact envelope. Firmware edge estimates use the distinct
+`esp32_firmware_edge_vitals_v1` capability; this does not qualify them for a
+consumer that only accepts raw CSI spectral estimates. Calibrated presence tags
+the radio whose history the model actually scored, rather than the radio whose
+packet happened to trigger publication. Complementary vital/occupancy sensors
+are not silently claimed as joint vital inference.
+
+`GET /api/v1/vital-signs` retains its existing managed owner/account/paired-read
+authorization. Its bounded `ruview.vital-publication-diagnostics.v1` object
+separates the last packet's publication decision from current reevaluation for
+each node. It reports candidate kind/tick/time/age, occupancy source, gate
+outcomes, actual per-node detector buffers, reset count, and distinct detector
+and observed sample clocks. It contains no raw CSI, suppressed BPM, credentials,
+room names or user identity. It is not sensing authority or clinical evidence.
+No such diagnostic is added to public health. Privacy mode withholds node/buffer
+details and both vital envelopes. Diagnostic snapshots explain only their own
+observation time; they do not extend rate/model freshness.
+
+The single-link calibration algorithm and negative-only restart prior are
+unchanged by this clarification. Multiple radios in a room receipt do not imply
+separate trained baselines. A per-source model bank and fused presence require a
+separately reviewed capture, coverage, persistence and holdout contract.
+
 ## Measured installation evidence
 
 One physical empty home run on source Node 5 collected 1,762 accepted frames
@@ -118,6 +178,19 @@ ranged from 50.0 to 64.3 percent with a median of 54.3 percent.
 This is measured negative evidence for one installation. No occupied positive
 holdout was recorded, so it does not prove person recall, person counting, or
 cross home accuracy improvement.
+
+## Full room receipt versus restart prior (2026-10-22)
+
+An explicit room calibration can name multiple contributing radios, but this
+persisted field model remains bound to exactly one model-writing radio and its
+CSI grid. On helper restart, the full explicit session, room binding and receipt
+are not restored. Client history cannot recreate that live server authority.
+
+Verify all three radios' fresh reception independently of the restored prior's
+single source. A one-radio `bootstrap_only` source set is neither proof that
+other radios stopped receiving nor proof of a restored three-radio calibration.
+Original expiry and negative-only authority remain unchanged. Retaining a room
+or scan on an app is a separate lifecycle from restarting its paired helper.
 
 ## Acceptance test
 
@@ -132,3 +205,14 @@ the source set for the entire capture.
 After restart, a confirmed empty holdout may refine the restored boundary once.
 The stored snapshot must reject a second refinement and must continue to deny
 calibrated evidence and numeric vital authority.
+
+
+## Proposed amendment: bounded full-room restoration (2026-10-31)
+
+The bootstrap-only contract above remains the fallback for existing or incomplete saved images. A separately integrity-checked `room-receipt-v1.json` companion may now preserve the completed full-room receipt, but only after the server's independent held-out promotion succeeds. It binds the exact bootstrap payload digest, installation identity, room digest, original model ID, sorted contributor set, original frame count and completion time. It contains no raw CSI, room names, geometry, credentials or live history; its size is capped at 64 KiB and writes are private/atomic.
+
+On restart, both files must validate together under the current account-owned data directory and installation ID. No original lifetime is renewed. The process generates a new boot/session receipt for the same saved model and original completion time. Every recorded contributor must deliver fresh current-boot CSI on the frozen grid, the scored source must rebuild a full runtime window, and sequence faults or missing/stale sources withhold calibrated publication. A client with its own previously saved and passed check may reconnect the unchanged model only after account/origin/room binding, every immutable model field, current contributor readiness and a fresh matching calibrated stream are verified. It retains the original check timestamp and original model lifetime; it does not claim a new empty observation. A different or previously unverified model still requires explicit adoption and a new independent check. Bootstrap-only images cannot gain full authority from client history. Numeric Vitals still require their independent existing qualification gates.
+
+Reset, replacement capture and explicit downgrade to a bootstrap prior retire the companion receipt. A crash between the two writes leaves a digest mismatch and falls back to bootstrap-only, never a mismatched full model. Account erasure removes both through the owned helper data directory. Older saved priors cannot be upgraded from client history and require one new complete capture after installation of this change. Expiry/staleness policy (24/12 hours) is unchanged.
+
+Existing upstream PR #1529 was assessed before this amendment: it proposes aggregate FieldModel persistence but does not carry this installation/room/session authority boundary. The implementation reuses the reviewed snapshot/atomic-write infrastructure already present in ADR-355 rather than introducing a competing field-model format. Physical logout/relaunch acceptance remains required before claiming delivered restoration.

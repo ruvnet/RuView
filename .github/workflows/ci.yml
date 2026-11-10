@@ -132,12 +132,40 @@ jobs:
     # device" once the engine/benchmark crates landed; the same tree's local
     # debug target measured 151 GB). Debuginfo is useless in CI — tests either
     # pass or print their failure — so build without it; target shrinks ~5-10x.
+    - name: Verify temporal Debug/Release test classification
+      env:
+        CARGO_PROFILE_DEV_DEBUG: "0"
+        CARGO_PROFILE_TEST_DEBUG: "0"
+        CARGO_BUILD_JOBS: "2"
+      run: |
+        python3 scripts/ci/test_temporal_test_profiles.py
+        python3 scripts/ci/temporal_test_profiles.py debug-check --evidence-dir "${{ runner.temp }}/temporal-test-profiles"
+
     - name: Run Rust tests
       working-directory: v2
       env:
         CARGO_PROFILE_DEV_DEBUG: "0"
         CARGO_PROFILE_TEST_DEBUG: "0"
       run: cargo test --workspace --no-default-features
+
+    - name: Execute native temporal persistence journeys in Release
+      env:
+        CARGO_BUILD_JOBS: "2"
+      run: python3 scripts/ci/temporal_test_profiles.py release-run --evidence-dir "${{ runner.temp }}/temporal-test-profiles"
+
+    - name: Retain temporal profile registration and execution evidence
+      if: always()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: temporal-test-profiles
+        path: ${{ runner.temp }}/temporal-test-profiles
+
+    - name: Verify secure companion over real sockets
+      env:
+        CARGO_PROFILE_DEV_DEBUG: "0"
+      run: |
+        cargo build --manifest-path v2/Cargo.toml --locked -p wifi-densepose-sensing-server --bin sensing-server
+        python3 scripts/tests/companion_socket_probe.py v2/target/debug/sensing-server
 
     - name: Verify patched archive and cache compatibility
       working-directory: v2
@@ -392,6 +420,9 @@ jobs:
   # workflow, so it doesn't gate the rest of the pipeline.
   docker-build:
     name: Docker Build & Test
+    # Manual CI is verification only. Use the separate canonical publisher
+    # for an explicitly authorized image publication.
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     needs: [code-quality, test, rust-tests]
     continue-on-error: true
@@ -467,7 +498,7 @@ jobs:
     name: API Documentation
     runs-on: ubuntu-latest
     needs: [docker-build]
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && github.event_name != 'workflow_dispatch'
     permissions:
       contents: write   # gh-pages deploy needs write (GITHUB_TOKEN is read-only by default -> 403)
     steps:
@@ -512,7 +543,8 @@ jobs:
     name: Notify
     runs-on: ubuntu-latest
     needs: [code-quality, test, rust-tests, ui-tests, performance-test, docker-build, docs]
-    if: always()
+    # This job also creates releases and sends external notifications.
+    if: always() && github.event_name != 'workflow_dispatch'
     permissions:
       contents: write   # required by softprops/action-gh-release
     # GitHub Actions does not allow `secrets.X` directly in step-level `if:`

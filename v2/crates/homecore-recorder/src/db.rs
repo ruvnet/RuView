@@ -823,6 +823,20 @@ mod tests {
             .expect("open in-memory DB")
     }
 
+    #[tokio::test]
+    async fn runtime_sqlite_includes_wal_page_size_security_fix() {
+        let recorder = open_memory().await;
+        let (version,): (String,) = sqlx::query_as("SELECT sqlite_version()")
+            .fetch_one(&recorder.pool)
+            .await
+            .unwrap();
+        let components: Vec<u32> = version.split('.').map(|s| s.parse().unwrap()).collect();
+        assert!(
+            components.as_slice() >= [3, 54, 0].as_slice(),
+            "RUSTSEC-2026-0459 requires SQLite >= 3.54.0; loaded {version}"
+        );
+    }
+
     fn entity(s: &str) -> EntityId {
         EntityId::parse(s).unwrap()
     }

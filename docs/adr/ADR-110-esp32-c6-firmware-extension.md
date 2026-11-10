@@ -4,6 +4,7 @@
 |-------|-------|
 | **Status** | Accepted — P1–P10 complete, firmware-side substrate closed at **v0.7.0-esp32** (2026-05-23) |
 | **Date** | 2026-05-22 (created) · 2026-05-23 (last revision — P10 + sprint summary) |
+| **Updated** | 2026-11-04 — legacy calibration raw-grid compatibility boundary |
 | **Deciders** | ruv |
 | **Codename** | **C6-SOTA** |
 | **Relates to** | ADR-018 (CSI binary frame format), ADR-028 (ESP32 capability audit), ADR-029 (RuvSense multistatic), ADR-030 (RuvSense persistent field model), ADR-031 (RuView sensing-first), ADR-061 (QEMU CI), ADR-081 (adaptive CSI mesh kernel), ADR-097 (rvCSI adoption) |
@@ -209,3 +210,55 @@ The firmware-side substrate for ADR-110 is now closed. Three categories remain, 
 3. **IDF upstream fixes**:
    - 802.15.4 RX path on C6 + IDF v5.4 — `c6_timesync` ships and initialises but never RXes a frame (D1, 5 hypotheses tested + rejected). ESP-NOW workaround (`c6_sync_espnow`) is the working primary mesh transport. The 802.15.4 source stays in for the day IDF fixes the driver.
    - Soft-AP HE/TWT-Responder advertise API — `c6_softap_he` ships as the in-place hook for when IDF v5.5+ exposes it.
+
+
+## November 4, 2026: legacy calibration compatibility boundary
+
+The accepted firmware substrate above does not imply that HT-LTF and HE-LTF
+raw vectors can be combined in one legacy FieldModel. That baseline has exactly
+one author, one exact `(n_subcarriers, ppdu_type)` grid and one set of amplitude
+offsets. Other placed nodes remain in the full room binding and must contribute
+on that grid; they do not author or average their offsets into the model.
+Equal bin counts with different PPDU types are not an interchangeable grid.
+
+Before any bootstrap/model/session/receipt mutation, legacy calibration start
+checks every bound node's current raw-header evidence for the selected author's
+exact grid. It searches **all** eligible grids per node, not only that node's
+preferred or densest grid. Thus a C6 with a sufficiently sampled HT minority can
+participate in an HT baseline authored by another node. Author selection itself
+is unchanged; this does not automatically select a lower-density common grid.
+A qualified nonmatching stream is refused before spending a room-capture window.
+Missing, warming, weak or stale evidence is described separately and does not
+become a hardware compatibility claim inferred from a user-set board label.
+
+The existing protected start/status responses gain optional bounded
+`source_grid_readiness` diagnostics: the selected tuple and author, only the
+bound node IDs, at most eight reported observed/eligible grids per node,
+truncation flags and stable reasons. Reported eligible grids are a subset of
+reported observations, and an observed selected tuple remains visible even
+under truncation. The field is null without a valid active binding. No raw CSI,
+RF values, device addresses, unbound inventory or new endpoint/grant is exposed.
+Older clients may ignore this additive diagnostic.
+
+Current status recomputes these diagnostics without changing historical
+contribution membership. For a **new unfinished** finalization only, a bound node
+that now supplies a qualified different grid and lacks a current matching stream
+blocks the new receipt while retaining the unfinished model and history. This
+is not an additional blanket ten-second readiness gate on stop: unknown,
+warming or stale diagnostics do not prove a hardware change, and existing
+author freshness, contribution and sequence guards remain. Completed historical
+receipts/metadata do not acquire this new finalization restriction.
+
+This rule applies only to the legacy single-author baseline. The separate
+managed learner in Proposed ADR-420 preserves each source's own supported PHY/
+grid and projection; it must not inherit a global equality rule. Accepted
+ADR-151's statistical specialist stages and Proposed ADR-008's distributed
+coordination are not a claim that the legacy FieldModel is a joint heterogeneous
+learner or that mixed-source sensing is physically qualified.
+
+The compatibility amendment is verified with synthetic raw-header fixtures
+through the actual server start/status/stop handlers, including pre-mutation
+preservation, PPDU mismatch, a shared minority grid, missing/warming/stale
+sources, truncation/unbound exclusion and post-start drift. These software
+results do not replace physical C5/C6/S3 or sensing-accuracy acceptance. No
+firmware, production minimum duration, frame target or live node was changed.

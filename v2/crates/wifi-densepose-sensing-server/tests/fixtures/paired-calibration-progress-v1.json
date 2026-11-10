@@ -1,0 +1,173 @@
+{
+  "cases": [
+    {
+      "name": "configured",
+      "payload": {
+        "blocker": null,
+        "conditions": [
+          {
+            "held_out_recorded": 0,
+            "label": "Empty",
+            "train_recorded": 0
+          },
+          {
+            "held_out_recorded": 0,
+            "label": "OccupiedStatic",
+            "train_recorded": 0
+          },
+          {
+            "held_out_recorded": 0,
+            "label": "OccupiedMoving",
+            "train_recorded": 0
+          },
+          {
+            "held_out_recorded": 0,
+            "label": "AdjacentOnly",
+            "train_recorded": 0
+          }
+        ],
+        "context_match": true,
+        "expires_at_unix_ms": 1793805643128,
+        "installation_id": "synthetic-install",
+        "observed_at_unix_ms": 1793805633128,
+        "phase": null,
+        "qualification": {
+          "model_sha256": null,
+          "receipt_sha256": null,
+          "state": "not_reported"
+        },
+        "room": {
+          "binding_digest": "c396e10e54432dc5403dbb7719c40902464ad558568b947017b75c0fa5b28a30",
+          "revision": 1
+        },
+        "runtime_epoch": "cal-boot-synthetic",
+        "save_status": "not_reported",
+        "schema": "ruview.room-learner.progress.v1",
+        "selection": {
+          "current_usable": false,
+          "model_sha256": null,
+          "selection_sha256": null,
+          "state": "not_selected"
+        },
+        "sources": {
+          "ready": 2,
+          "required": 2
+        },
+        "stage": "train",
+        "state": "idle",
+        "success": true
+      }
+    },
+    {
+      "name": "preparing_empty",
+      "payload": {
+        "blocker": null,
+        "conditions": [
+          {
+            "held_out_recorded": 0,
+            "label": "Empty",
+            "train_recorded": 0
+          },
+          {
+            "held_out_recorded": 0,
+            "label": "OccupiedStatic",
+            "train_recorded": 0
+          },
+          {
+            "held_out_recorded": 0,
+            "label": "OccupiedMoving",
+            "train_recorded": 0
+          },
+          {
+            "held_out_recorded": 0,
+            "label": "AdjacentOnly",
+            "train_recorded": 0
+          }
+        ],
+        "context_match": true,
+        "expires_at_unix_ms": 1793805643129,
+        "installation_id": "synthetic-install",
+        "observed_at_unix_ms": 1793805633129,
+        "phase": {
+          "capture_elapsed_ms": 0,
+          "label": "Empty",
+          "lead_in_remaining_ms": 14999,
+          "representative_cohorts": 0,
+          "required_cohorts": 4,
+          "role": "Train",
+          "stage": "lead_in",
+          "target_ms": 600000
+        },
+        "qualification": {
+          "model_sha256": null,
+          "receipt_sha256": null,
+          "state": "not_reported"
+        },
+        "room": {
+          "binding_digest": "c396e10e54432dc5403dbb7719c40902464ad558568b947017b75c0fa5b28a30",
+          "revision": 1
+        },
+        "runtime_epoch": "cal-boot-synthetic",
+        "save_status": "not_reported",
+        "schema": "ruview.room-learner.progress.v1",
+        "selection": {
+          "current_usable": false,
+          "model_sha256": null,
+          "selection_sha256": null,
+          "state": "not_selected"
+        },
+        "sources": {
+          "ready": 2,
+          "required": 2
+        },
+        "stage": "train",
+        "state": "idle",
+        "success": true
+      }
+    },
+    {
+      "name": "context_mismatch",
+      "payload": {
+        "blocker": "context_mismatch",
+        "conditions": null,
+        "context_match": false,
+        "expires_at_unix_ms": 1793805643136,
+        "installation_id": "synthetic-install",
+        "observed_at_unix_ms": 1793805633136,
+        "phase": null,
+        "qualification": {
+          "model_sha256": null,
+          "receipt_sha256": null,
+          "state": "not_reported"
+        },
+        "room": {
+          "binding_digest": "d2c78eec26671ef83d4431456746ab6786b2c994517aecbb3587e81ad0051353",
+          "revision": 2
+        },
+        "runtime_epoch": "cal-boot-synthetic",
+        "save_status": "not_reported",
+        "schema": "ruview.room-learner.progress.v1",
+        "selection": {
+          "current_usable": false,
+          "model_sha256": null,
+          "selection_sha256": null,
+          "state": "not_reported"
+        },
+        "sources": null,
+        "stage": "blocked",
+        "state": "idle",
+        "success": true
+      }
+    },
+    {
+      "name": "privacy_redacted",
+      "payload": {
+        "error_code": "privacy_redacted",
+        "schema": "ruview.room-learner.progress.v1",
+        "success": false
+      }
+    }
+  ],
+  "evidence": "SYNTHETIC_ACTUAL_HTTP_PRODUCER_NOT_PHYSICAL_QUALIFICATION",
+  "schema": "ruview.test.paired-progress-producer.v1"
+}

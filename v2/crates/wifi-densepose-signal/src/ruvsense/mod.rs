@@ -38,6 +38,7 @@
 pub mod adversarial;
 pub mod cross_room;
 pub mod field_model;
+pub mod source_field_bank;
 pub mod gesture;
 pub mod intention;
 pub mod longitudinal;
