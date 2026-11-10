@@ -13,7 +13,7 @@
 //!
 //! `wifi-densepose-vitals` has zero tokio deps and the extract loops
 //! are pure-sync DSP. Wrap the `.extract(...)` calls in
-//! `py.allow_threads(|| ...)` so Python users can run inference in a
+//! `py.detach(|| ...)` so Python users can run inference in a
 //! tokio-backed web server without GIL contention starving the
 //! event loop.
 
@@ -35,7 +35,7 @@ use wifi_densepose_vitals::{
 /// VitalStatus.Unreliable  # single RSSI source / low quality
 /// VitalStatus.Unavailable # no measurement possible
 /// ```
-#[pyclass(eq, eq_int, hash, frozen, name = "VitalStatus")]
+#[pyclass(from_py_object, eq, eq_int, hash, frozen, name = "VitalStatus")]
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PyVitalStatus {
     Valid = 0,
@@ -81,7 +81,7 @@ impl PyVitalStatus {
 /// est = VitalEstimate(72.4, confidence=0.9, status=VitalStatus.Valid)
 /// print(est.value_bpm, est.confidence, est.status)
 /// ```
-#[pyclass(frozen, name = "VitalEstimate")]
+#[pyclass(from_py_object, frozen, name = "VitalEstimate")]
 #[derive(Clone)]
 pub struct PyVitalEstimate {
     inner: VitalEstimate,
@@ -230,7 +230,7 @@ impl PyBreathingExtractor {
         // GIL release: see ADR-117 §7 and the Q5 tokio audit. The DSP
         // loop is pure sync, no Python objects touched, safe to run
         // without the GIL.
-        let est = py.allow_threads(|| self.inner.extract(&residuals, &weights));
+        let est = py.detach(|| self.inner.extract(&residuals, &weights));
         est.map(PyVitalEstimate::from_rust)
     }
 
@@ -293,7 +293,7 @@ impl PyHeartRateExtractor {
         residuals: Vec<f64>,
         phases: Vec<f64>,
     ) -> Option<PyVitalEstimate> {
-        let est = py.allow_threads(|| self.inner.extract(&residuals, &phases));
+        let est = py.detach(|| self.inner.extract(&residuals, &phases));
         est.map(PyVitalEstimate::from_rust)
     }
 

@@ -38,7 +38,7 @@
 //! ## GIL release (per ADR-117 §7, matching bindings/vitals.rs)
 //!
 //! `normalize`, `encode`, `adapt`, and `evaluate` are pure-sync numeric
-//! ops touching no Python objects, so they run inside `py.allow_threads`.
+//! ops touching no Python objects, so they run inside `py.detach`.
 
 use std::collections::HashMap;
 
@@ -55,7 +55,7 @@ use wifi_densepose_train::rapid_adapt::{AdaptationLoss, AdaptationResult, RapidA
 // ─── HardwareType ────────────────────────────────────────────────────
 
 /// WiFi chipset family, keyed by subcarrier count.
-#[pyclass(eq, eq_int, frozen, hash, name = "HardwareType")]
+#[pyclass(from_py_object, eq, eq_int, frozen, hash, name = "HardwareType")]
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PyHardwareType {
     Esp32S3 = 0,
@@ -186,7 +186,7 @@ impl PyHardwareNormalizer {
         hardware: PyHardwareType,
     ) -> PyResult<PyCanonicalCsiFrame> {
         let hw = hardware.as_rust();
-        py.allow_threads(|| self.inner.normalize(&amplitude, &phase, hw))
+        py.detach(|| self.inner.normalize(&amplitude, &phase, hw))
             .map(|inner| PyCanonicalCsiFrame { inner })
             .map_err(|e| PyValueError::new_err(e.to_string()))
     }
@@ -202,7 +202,7 @@ impl PyHardwareNormalizer {
 // ─── MeridianGeometryConfig ──────────────────────────────────────────
 
 /// Config for the geometry encoder (Fourier bands + DeepSets output dim).
-#[pyclass(frozen, name = "MeridianGeometryConfig")]
+#[pyclass(from_py_object, frozen, name = "MeridianGeometryConfig")]
 #[derive(Clone)]
 pub struct PyMeridianGeometryConfig {
     inner: MeridianGeometryConfig,
@@ -290,7 +290,7 @@ impl PyGeometryEncoder {
             }
             coords.push([p[0], p[1], p[2]]);
         }
-        Ok(py.allow_threads(|| self.inner.encode(&coords)))
+        Ok(py.detach(|| self.inner.encode(&coords)))
     }
 
     #[getter]
@@ -411,7 +411,7 @@ impl PyRapidAdaptation {
     /// `ValueError` if the buffer is empty or `lora_rank == 0`. GIL
     /// released during the finite-difference optimization.
     fn adapt(&self, py: Python<'_>) -> PyResult<PyAdaptationResult> {
-        py.allow_threads(|| self.inner.adapt())
+        py.detach(|| self.inner.adapt())
             .map(|inner| PyAdaptationResult { inner })
             .map_err(|e| PyValueError::new_err(e.to_string()))
     }
@@ -456,7 +456,7 @@ impl PyCrossDomainEvaluator {
                 domain_labels.len()
             )));
         }
-        let m = py.allow_threads(|| self.inner.evaluate(&predictions, &domain_labels));
+        let m = py.detach(|| self.inner.evaluate(&predictions, &domain_labels));
         let mut out = HashMap::with_capacity(6);
         out.insert("in_domain_mpjpe".to_string(), m.in_domain_mpjpe);
         out.insert("cross_domain_mpjpe".to_string(), m.cross_domain_mpjpe);

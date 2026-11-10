@@ -3,7 +3,8 @@ resolver = "2"
 members = [
     # Checksum-verified dependency patches; keep their upstream tests in CI.
     "vendor/security/zip-0.6.6",
-    "vendor/security/wasmtime-internal-cache-36.0.19",
+    "vendor/security/wasmtime-internal-cache-36.0.20",
+    "vendor/security/sqlx-sqlite-0.8.6",
     "crates/wifi-densepose-core",
     "crates/wifi-densepose-physics", # ADR-323 bounded pose assessment/correction
     "crates/wifi-densepose-signal",
@@ -239,7 +240,10 @@ pcap = "1.1"
 petgraph = "0.6"
 
 # Data loading
-ndarray-npy = "0.10"
+# NPY-only: no consumer reads or writes .npz, so the `npz`/`compressed_npz`
+# defaults (and their zip 6.x dependency, RUSTSEC-2026-0367/0368/0369/0429)
+# are switched off.
+ndarray-npy = { version = "0.10", default-features = false, features = ["num-complex-0_4"] }
 walkdir = "2.4"
 
 # Hashing (for proof)
@@ -276,8 +280,8 @@ wiremock = "0.5"
 # The transitive security floors live in Cargo.lock, which the gating
 # Security Scanning job audits: quinn-proto >=0.11.18
 # (RUSTSEC-2026-0338/0339/0340/0341/0342), rustls >=0.23.46
-# (RUSTSEC-2026-0346/0347/0348/0349) and wasmtime >=36.0.19
-# (RUSTSEC-2026-0363/0379/0380). A plain `cargo update` can walk them backwards;
+# (RUSTSEC-2026-0346/0347/0348/0349) and wasmtime >=36.0.20
+# (RUSTSEC-2026-0363/0379/0380/0424). A plain `cargo update` can walk them backwards;
 # keep the lockfile at or above these until the direct requirements
 # enforce them.
 #
@@ -343,8 +347,12 @@ inherits = "release"
 debug = true
 
 # Narrow, checksum-verified parent manifest patches. Source/API code is
-# unchanged; both parents use the fixed zstd 0.14.3 implementation.
+# unchanged. The Wasmtime cache and legacy ZIP parents use the fixed zstd
+# 0.14.3 implementation; sqlx-sqlite selects libsqlite3-sys 0.39.1, which
+# bundles SQLite 3.54.1 (RUSTSEC-2026-0459). sqlx-sqlite 0.8.6 and 0.9.0 both
+# cap libsqlite3-sys below 0.39, so no registry release can reach it yet.
 # See each directory's RUVIEW-PROVENANCE.md for archive digests and scope.
 [patch.crates-io]
 zip-legacy = { package = "zip", path = "vendor/security/zip-0.6.6" }
-wasmtime-internal-cache = { path = "vendor/security/wasmtime-internal-cache-36.0.19" }
+wasmtime-internal-cache = { path = "vendor/security/wasmtime-internal-cache-36.0.20" }
+sqlx-sqlite = { path = "vendor/security/sqlx-sqlite-0.8.6" }

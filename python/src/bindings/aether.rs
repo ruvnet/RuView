@@ -27,7 +27,7 @@
 //!
 //! `extract`, `augment_pair`, and `info_nce_loss` are pure-sync matrix
 //! ops touching no Python objects, so they run inside
-//! `py.allow_threads(|| ...)`.
+//! `py.detach(|| ...)`.
 
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -56,7 +56,7 @@ const MAX_LAYERS: usize = 64;
 /// from wifi_densepose.aether import AetherConfig
 /// cfg = AetherConfig(d_model=64, d_proj=128, temperature=0.07, normalize=True)
 /// ```
-#[pyclass(frozen, name = "AetherConfig")]
+#[pyclass(from_py_object, frozen, name = "AetherConfig")]
 #[derive(Clone)]
 pub struct PyAetherConfig {
     inner: EmbeddingConfig,
@@ -154,7 +154,7 @@ impl PyCsiAugmenter {
         window: Vec<Vec<f32>>,
         seed: u64,
     ) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
-        py.allow_threads(|| self.inner.augment_pair(&window, seed))
+        py.detach(|| self.inner.augment_pair(&window, seed))
     }
 
     fn __repr__(&self) -> String {
@@ -236,7 +236,7 @@ impl PyEmbeddingExtractor {
     /// Returns a `d_proj`-length vector (L2-normed when the config's
     /// `normalize` is set). GIL released during the forward pass.
     fn embed(&mut self, py: Python<'_>, csi_features: Vec<Vec<f32>>) -> Vec<f32> {
-        py.allow_threads(|| self.inner.extract(&csi_features))
+        py.detach(|| self.inner.extract(&csi_features))
     }
 
     #[getter]
@@ -260,14 +260,14 @@ impl PyEmbeddingExtractor {
     /// missing/corrupt file or a param-count mismatch with this architecture.
     /// GIL released during file I/O + deserialization.
     fn load_weights(&mut self, py: Python<'_>, path: String) -> PyResult<()> {
-        py.allow_threads(|| self.inner.load_weights(&path))
+        py.detach(|| self.inner.load_weights(&path))
             .map_err(PyValueError::new_err)
     }
 
     /// Serialize the current weights to `path` (magic `AETHERW1` + `u32` count
     /// + little-endian `f32` payload). GIL released.
     fn save_weights(&self, py: Python<'_>, path: String) -> PyResult<()> {
-        py.allow_threads(|| self.inner.save_weights(&path))
+        py.detach(|| self.inner.save_weights(&path))
             .map_err(|e| PyValueError::new_err(e.to_string()))
     }
 
@@ -288,7 +288,7 @@ fn info_nce_loss(
     embeddings_b: Vec<Vec<f32>>,
     temperature: f32,
 ) -> f32 {
-    py.allow_threads(|| rust_info_nce_loss(&embeddings_a, &embeddings_b, temperature))
+    py.detach(|| rust_info_nce_loss(&embeddings_a, &embeddings_b, temperature))
 }
 
 /// Cosine similarity between two embeddings — the re-ID scoring
