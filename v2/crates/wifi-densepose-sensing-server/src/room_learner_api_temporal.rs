@@ -187,10 +187,11 @@ where
         Ok(result) => result,
         Err(_) => return failure("learner_status_unavailable", "learner_status_worker_unavailable"),
     };
-    match result.and_then(|status| {
+    match result.and_then(|mut status| {
         if status["mutation_guard"] != serde_json::to_value(&expected).map_err(|_| "learner_status_guard_invalid")? {
             return Err("learner_state_changed".into());
         }
+        status["native_source_diagnostics"] = ingress::source_rejection_diagnostics(&current, std::time::Instant::now());
         Ok(status)
     }) {
         Ok(status) => Json(serde_json::json!({"success":true,"status":status})),
@@ -302,11 +303,7 @@ pub(crate) async fn configure_dispatch(
                 "A selected native source/PHY stream is not ready.",
             );
         };
-        let grid_id = match native::grid_id(
-            key.n_antennas as usize,
-            key.raw_bins as usize,
-            wifi_densepose_hardware::PpduType::from_byte(key.ppdu_type),
-        ) {
+        let grid_id = match key.grid_id() {
             Ok(grid) => grid,
             Err(e) => return failure("learner_grid_unsupported", e),
         };

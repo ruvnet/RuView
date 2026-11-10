@@ -174,3 +174,111 @@ fn valid_native_spectral_nulls_are_admitted_without_negative_projected_magnitude
         }
     }
 }
+
+fn c5_datagram(payload: &[u8], first_word_invalid: bool) -> Vec<u8> {
+    let mut packet = vec![0;20];
+    packet[..4].copy_from_slice(&0xC5110001u32.to_le_bytes());
+    packet[4]=20;packet[5]=1;packet[6..8].copy_from_slice(&53u16.to_le_bytes());
+    packet[8..12].copy_from_slice(&5180u32.to_le_bytes());
+    packet[12..16].copy_from_slice(&23u32.to_le_bytes());
+    packet[18]=0;packet[19]=if first_word_invalid {0x20}else{0};
+    packet.extend(payload);
+    packet.extend([b'C',b'5',b'L',b'8',1,8,1,1,1,1,0,20,1,u8::from(first_word_invalid),106,0]);
+    packet
+}
+fn c5_input(payload: &[u8], sanitized: bool) -> NativePacketInput<'_> {
+    NativePacketInput {node_id:20,n_antennas:1,raw_bins:53,frequency_hz:5_180_000_000,
+        ppdu_type:PpduType::HtLegacy,sequence:23,received_at_ns:1_234_000_000,
+        receiver_sample_rate_hz:10.,iq_bytes:payload,
+        flags:Adr018Flags{first_word_sanitized:sanitized,..Adr018Flags::default()},
+        provenance:CaptureProvenance::Synthetic}
+}
+#[test]
+fn c5_lltf8_claim_retains_original_bytes_slots_order_dc_mask_and_feature_identity() {
+    let payload:Vec<u8>=(0..53).flat_map(|n|[(n as i8-30) as u8,(53-n as i8) as u8]).collect();
+    let wire=c5_datagram(&payload,false);let i=c5_input(&payload,false);
+    let format=validate_adr018_native_format(&wire,1,53,i.ppdu_type,i.flags).unwrap();
+    let packet=canonicalize_esp32_with_format(i,format).unwrap();
+    assert_eq!(packet.native_iq_wire.as_deref(),Some(payload.as_slice()));
+    assert_eq!(packet.native_frame.native_shape,vec![1,53,1]);
+    for (native,raw) in packet.native_frame.native_iq.iter().zip(payload.chunks_exact(2)) {
+        assert_eq!((native.im,native.re),(f64::from(raw[0] as i8),f64::from(raw[1] as i8)));
+    }
+    assert!(!packet.native_frame.valid_mask[0]);
+    assert!(packet.native_frame.valid_mask[1..].iter().all(|x|*x));
+    assert_eq!(packet.native_tone_indices.unwrap(),&C5_LLTF53_TONES);
+    assert_eq!(&C5_LLTF53_TONES[..27],&(0..=26).collect::<Vec<i16>>());
+    assert_eq!(&C5_LLTF53_TONES[27..],&(-26..=-1).collect::<Vec<i16>>());
+    let magnitudes:Vec<_>=payload.chunks_exact(2).skip(2).map(|p|
+        f64::from(p[0] as i8).hypot(f64::from(p[1] as i8))).collect();
+    assert_eq!(packet.amplitudes,HardwareNormalizer::new().resample_magnitude_to_canonical(&magnitudes).unwrap());
+    assert_eq!(packet.grid_id,C5_LLTF8_V1_GRID);
+    assert_eq!((packet.frequency_hz,packet.bandwidth_hz),(5_180_000_000,20_000_000));
+    assert!(!packet.phase_consumed && !packet.temporal_sample_rate_known && !packet.signal_quality_known);
+    assert_eq!(packet.clock.kind,ClockKind::ReceiverOnly);
+    assert_eq!(packet.native_frame.provenance.class,ProvenanceClass::Synthetic);
+    assert!(packet.native_frame.transmitter_pose.is_none() && packet.native_frame.receiver_pose.is_none());
+    let public=serde_json::to_string(&packet.summary()).unwrap();let debug=format!("{packet:?}");
+    for raw in ["native_iq","native_iq_wire","native_tone_indices","amplitudes","valid_mask"] {
+        assert!(!public.contains(raw) && !debug.contains(raw));
+    }
+}
+#[test]
+fn c5_lltf8_invalid_first_word_keeps_two_masked_complex_slots_without_renumbering() {
+    let payload=bytes(53,-3,4);let mut sanitized=payload.clone();sanitized[..4].fill(0);
+    let wire=c5_datagram(&sanitized,true);let i=c5_input(&sanitized,true);
+    let format=validate_adr018_native_format(&wire,1,53,i.ppdu_type,i.flags).unwrap();
+    let packet=canonicalize_esp32_with_format(i,format).unwrap();
+    assert_eq!(&packet.native_frame.valid_mask[..2],&[false,false]);
+    assert!(packet.native_frame.valid_mask[2..].iter().all(|x|*x));
+    assert_eq!(packet.native_iq_wire.as_deref(),Some(sanitized.as_slice()));
+    assert_eq!(packet.native_frame.native_iq.len(),53);
+    assert!(packet.amplitudes.iter().all(|x|*x==5.));
+    assert_eq!(packet.grid_id,C5_LLTF8_V1_GRID);
+}
+#[test]
+fn c5_lltf8_missing_wrong_or_ambiguous_claim_never_becomes_a_supported_grid() {
+    let payload=bytes(53,-3,4);let wire=c5_datagram(&payload,false);let i=c5_input(&payload,false);
+    assert!(grid_id(1,53,PpduType::HtLegacy).is_err());
+    assert!(canonicalize_esp32(c5_input(&payload,false)).is_err());
+    assert!(validate_adr018_native_format(&wire[..126],1,53,i.ppdu_type,i.flags).is_err());
+    for field in 0..16 {
+        let mut changed=wire.clone();changed[126+field]^=1;
+        assert!(validate_adr018_native_format(&changed,1,53,i.ppdu_type,i.flags).is_err(),"field {field}");
+    }
+    let mut trailing=wire.clone();trailing.push(0);
+    assert!(validate_adr018_native_format(&trailing,1,53,i.ppdu_type,i.flags).is_err());
+    for ppdu in [PpduType::HeSu,PpduType::HeMu,PpduType::HeTb,PpduType::Unknown] {
+        assert!(validate_adr018_native_format(&wire,1,53,ppdu,i.flags).is_err());
+    }
+    assert!(validate_adr018_native_format(&wire,1,53,i.ppdu_type,Adr018Flags{bw40:true,..i.flags}).is_err());
+    assert!(validate_adr018_native_format(&wire,2,53,i.ppdu_type,i.flags).is_err());
+    for bit in [0x02,0x04,0x08,0x10,0x40,0x80] {
+        let mut changed=wire.clone();changed[19]|=bit;
+        assert!(validate_adr018_native_format(&changed,1,53,i.ppdu_type,Adr018Flags::from_byte(changed[19])).is_err());
+    }
+    for mhz in [2437u32,5185,5470,5730,5955] {
+        let mut changed=wire.clone();changed[8..12].copy_from_slice(&mhz.to_le_bytes());
+        assert!(validate_adr018_native_format(&changed,1,53,i.ppdu_type,i.flags).is_err());
+    }
+    let mut channel112=wire.clone();channel112[8..12].copy_from_slice(&5560u32.to_le_bytes());
+    assert!(validate_adr018_native_format(&channel112,1,53,i.ppdu_type,i.flags).is_ok());
+}
+#[test]
+fn c5_lltf8_format_token_cannot_bypass_exact_iq_width_or_supported_frequency() {
+    let payload=bytes(53,-3,4);let wire=c5_datagram(&payload,false);let i=c5_input(&payload,false);
+    let format=validate_adr018_native_format(&wire,1,53,i.ppdu_type,i.flags).unwrap();
+    for size in [0,1,104,105,107,108,128] {
+        let wrong=vec![1;size];assert!(canonicalize_esp32_with_format(c5_input(&wrong,false),format).is_err());
+    }
+    for frequency in [0,5_180_000_001,8_000_000_000] {
+        let mut input=c5_input(&payload,false);input.frequency_hz=frequency;
+        assert!(canonicalize_esp32_with_format(input,format).is_err());
+    }
+    let mut foreign=c5_input(&payload,false);foreign.node_id=21;
+    assert!(canonicalize_esp32_with_format(foreign,format).is_err());
+    let mut foreign=c5_input(&payload,false);foreign.sequence+=1;
+    assert!(canonicalize_esp32_with_format(foreign,format).is_err());
+    let mut foreign=c5_input(&payload,false);foreign.frequency_hz=5_200_000_000;
+    assert!(canonicalize_esp32_with_format(foreign,format).is_err());
+}

@@ -13,7 +13,7 @@ use wifi_densepose_sensing_server::room_learner::{
 #[path = "room_learner_ingress.rs"]
 mod ingress;
 use ingress::native_candidates;
-pub(super) use ingress::{observe, observe_with_receiver_timing, ReceiverIngressTiming, LiveSource, NativeSourceKey};
+pub(super) use ingress::{observe, observe_with_receiver_timing, ReceiverIngressTiming, LiveSource, NativeSourceKey, NativePacketRejection};
 
 fn failure(code: &str, error: impl ToString) -> Json<serde_json::Value> {
     let message = error.to_string();
@@ -58,11 +58,7 @@ fn source_ready(state: &AppStateInner, spec: &SourceSpec, now: std::time::Instan
     native_candidates(state, spec.source_id, now)
         .iter()
         .any(|(key, meta)| {
-            native::grid_id(
-                key.n_antennas as usize,
-                key.raw_bins as usize,
-                wifi_densepose_hardware::PpduType::from_byte(key.ppdu_type),
-            )
+            key.grid_id()
             .ok()
             .as_deref()
                 == Some(spec.grid_id.as_str())
@@ -162,11 +158,7 @@ pub(super) async fn configure(
         sources.push(SourceSpec {
             source_id: id,
             device_id: format!("esp32-node-{id}"),
-            grid_id: match native::grid_id(
-                key.n_antennas as usize,
-                key.raw_bins as usize,
-                wifi_densepose_hardware::PpduType::from_byte(key.ppdu_type),
-            ) {
+            grid_id: match key.grid_id() {
                 Ok(id) => id,
                 Err(error) => return failure("learner_grid_unsupported", error),
             },

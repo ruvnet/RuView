@@ -9,6 +9,10 @@ use ruview_unified::RfModality;
 use serde::Serialize;
 use wifi_densepose_hardware::{Adr018Flags, PpduType};
 use wifi_densepose_signal::hardware_norm::HardwareNormalizer;
+#[path = "native_c5.rs"]
+mod c5;
+pub use c5::{validate_adr018_native_format, NativeFormatId, ValidatedNativeFormat,
+    C5_LLTF53_TONES, C5_LLTF8_V1_GRID};
 
 pub const CANONICAL_PACKET_BINS: usize = 56;
 
@@ -38,6 +42,10 @@ pub struct NativePacketInput<'a> {
 /// ```
 pub struct CanonicalPacket {
     pub native_frame: RfFrameV2,
+    /// Present only for the explicitly claimed C5 format. Never serialized or
+    /// exposed by Debug; original signed wire bytes and nonuniform SDK order.
+    pub native_iq_wire: Option<Vec<u8>>,
+    pub native_tone_indices: Option<&'static [i16]>,
     pub source_id: u8,
     pub grid_id: String,
     pub sequence: u32,
@@ -95,6 +103,16 @@ pub fn grid_id(n_antennas: usize, raw_bins: usize, ppdu_type: PpduType) -> Resul
     Ok(format!("ant{n_antennas}-bins{raw_bins}-ppdu{}-usable-drop2-linear-v2", ppdu_type.to_byte()))
 }
 
+pub fn grid_id_for_format(n_antennas: usize, raw_bins: usize, ppdu_type: PpduType,
+                          format: NativeFormatId) -> Result<String, String> {
+    if format == NativeFormatId::C5Lltf8V1 {
+        return if n_antennas == 1 && raw_bins == 53 && ppdu_type == PpduType::HtLegacy {
+            Ok(C5_LLTF8_V1_GRID.into())
+        } else { Err("C5L8/v1 grid does not match its native format".into()) };
+    }
+    grid_id(n_antennas, raw_bins, ppdu_type)
+}
+
 pub fn is_supported_frequency_hz(frequency_hz: u64) -> bool {
     let mhz = frequency_hz / 1_000_000;
     frequency_hz % 1_000_000 == 0
@@ -106,7 +124,12 @@ pub fn is_supported_frequency_hz(frequency_hz: u64) -> bool {
 /// length-only normalizer for the derived magnitude features. Never calls
 /// `normalize()` or `RfFrameV2::to_canonical()` (both remove amplitude gain).
 pub fn canonicalize_esp32(input: NativePacketInput<'_>) -> Result<CanonicalPacket, String> {
-    let grid_id = grid_id(input.n_antennas, input.raw_bins, input.ppdu_type)?;
+    canonicalize_esp32_with_format(input, ValidatedNativeFormat::legacy())
+}
+
+pub fn canonicalize_esp32_with_format(input: NativePacketInput<'_>, format: ValidatedNativeFormat)
+    -> Result<CanonicalPacket, String> {
+    let grid_id = grid_id_for_format(input.n_antennas, input.raw_bins, input.ppdu_type, format.id())?;
     if input.flags.bw40 { return Err("native capture does not support the reported 40 MHz bandwidth".into()); }
     if input.received_at_ns == 0 { return Err("native receiver time is unavailable".into()); }
     if !input.receiver_sample_rate_hz.is_finite() || input.receiver_sample_rate_hz <= 0.0 {
@@ -124,8 +147,26 @@ pub fn canonicalize_esp32(input: NativePacketInput<'_>) -> Result<CanonicalPacke
     // record their invalidity; every packet uses the same drop2 projection.
     let mut valid_mask = vec![true; input.raw_bins];
     if input.flags.first_word_sanitized { valid_mask[..2].fill(false); }
-    let iq: Vec<_> = input.iq_bytes.chunks_exact(2).map(|pair|
-        Complex64::new(f64::from(pair[0] as i8), f64::from(pair[1] as i8))).collect();
+    let c5 = format.id() == NativeFormatId::C5Lltf8V1;
+    if c5 {
+        if !format.header_matches(input.node_id,input.sequence,input.frequency_hz) {
+            return Err("C5L8/v1 format claim belongs to a different source/sequence/frequency header".into());
+        }
+        if format.first_word_invalid() != input.flags.first_word_sanitized {
+            return Err("C5L8/v1 format and input invalid-prefix metadata differ".into());
+        }
+        if input.flags.first_word_sanitized && input.iq_bytes[..4] != [0, 0, 0, 0] {
+            return Err("C5L8/v1 sanitized prefix bytes are not zero".into());
+        }
+        valid_mask[0] = false; // SDK L-LTF DC slot is not a valid carrier.
+    }
+    let iq: Vec<_> = input.iq_bytes.chunks_exact(2).map(|pair| {
+        if c5 {
+            // The explicit new format follows SDK-documented imag/real order.
+            // Do not change the existing 64/256 convention or consume phase.
+            Complex64::new(f64::from(pair[1] as i8), f64::from(pair[0] as i8))
+        } else { Complex64::new(f64::from(pair[0] as i8), f64::from(pair[1] as i8)) }
+    }).collect();
     let frame_id = (u128::from(input.received_at_ns) << 40)
         | (u128::from(input.node_id) << 32) | u128::from(input.sequence);
     let (class, evidence) = match input.provenance {
@@ -154,7 +195,9 @@ pub fn canonicalize_esp32(input: NativePacketInput<'_>) -> Result<CanonicalPacke
     if amplitudes.len() != CANONICAL_PACKET_BINS || amplitudes.iter().any(|v| !v.is_finite() || *v < 0.0) {
         return Err("length-only magnitude projection produced an invalid feature vector".into());
     }
-    Ok(CanonicalPacket { native_frame, source_id: input.node_id,
+    Ok(CanonicalPacket { native_frame,
+        native_iq_wire: c5.then(|| input.iq_bytes.to_vec()),
+        native_tone_indices: if c5 { Some(&C5_LLTF53_TONES) } else { None }, source_id: input.node_id,
         grid_id,
         sequence: input.sequence, frequency_hz: input.frequency_hz, bandwidth_hz: 20_000_000,
         amplitudes, clock: ClockInfo { kind: ClockKind::ReceiverOnly, uncertainty_ns: u64::MAX },
