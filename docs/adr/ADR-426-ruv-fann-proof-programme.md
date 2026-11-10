@@ -220,6 +220,24 @@ Limits, each of which could change the numbers:
   block, closer in time to the empty rows than to the occupied Train session, which works against
   that explanation but does not exclude it.
 
+### 8. Live shadow of the reference-fitted head: it degrades on a later session
+
+The balanced candidate (fitted on the Train rows of result 7, digest `b91d2d59…`) then shadowed
+the live server for about seven minutes with the operator back at the desk: 1,439 observations
+scored, none unavailable. Only 153 of them fell in input-confirmed windows.
+
+- Candidate on those 153: occupied 110, empty 40, abstain 3. Sensitivity 71.9 %, down from
+  87.2 % on the HeldOut session an hour earlier.
+- Existing classifier on the same 153: present on 143 (93.5 %), which is what an always-on
+  detector scores.
+- Over all 1,439 observations the candidate said occupied 59 % of the time. Without a reference
+  for the other windows that figure cannot be scored.
+
+MEASURED, 153 observations, one session. The drop suggests the features drift over tens of
+minutes (absolute RSSI and band powers are in the feature vector) and that a head fitted on one
+occupied session does not hold. The fix to try is more occupied sessions spread over time, and
+features expressed relative to a slow baseline.
+
 ## Consequences
 
 - Fitting must be treated as platform-specific until the engine uses a portable `exp`. Reported
