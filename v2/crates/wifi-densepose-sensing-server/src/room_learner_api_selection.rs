@@ -48,7 +48,6 @@ pub(super) fn enriched_status(
     let mut status = rt.status(now);
     status["model_selection"] = serde_json::to_value(selection_snapshot(state, rt, now))
         .expect("bounded model selection status serializes");
-    status["native_source_diagnostics"] = ingress::source_rejection_diagnostics(state, std::time::Instant::now());
     status
 }
 
