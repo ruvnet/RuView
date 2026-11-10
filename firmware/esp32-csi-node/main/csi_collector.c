@@ -137,6 +137,18 @@ static uint32_t s_he_invalid = 0;
 static bool s_c5_lltf8_readback = false;
 static unsigned s_c5_lltf8_sta_bandwidth_mhz = 0;
 static int64_t s_c5_lltf8_last_log_us = 0;
+/* Diagnostic-only immutable startup receipt. adaptive_controller_init starts
+ * its timers after csi_collector_init returns, so readers never race writes.
+ * Negative one means that API was not attempted, not an SDK error code. */
+static struct {
+    unsigned phase;
+    int set_result, get_result, bandwidth_result, register_result, enable_result;
+    unsigned bandwidth_raw;
+    wifi_csi_config_t applied;
+} s_c5_diag = { .set_result=-1, .get_result=-1, .bandwidth_result=-1,
+               .register_result=-1, .enable_result=-1 };
+static int64_t s_c5_diag_last_log_us;
+
 #endif
 
 /* ---- ADR-029: Channel-hop state ---- */
@@ -783,13 +795,24 @@ void csi_collector_init(void)
     };
 #endif
 
+#if defined(CONFIG_C5_MANAGED_LLTF8_V1)
+    s_c5_diag.phase = 1; /* entering SDK configuration */
+    s_c5_diag.set_result = esp_wifi_set_csi_config(&csi_config);
+    ESP_ERROR_CHECK(s_c5_diag.set_result);
+#else
     ESP_ERROR_CHECK(esp_wifi_set_csi_config(&csi_config));
+#endif
 #if defined(CONFIG_C5_MANAGED_LLTF8_V1)
     wifi_csi_config_t applied_config;
     memset(&applied_config, 0, sizeof(applied_config));
     const esp_err_t readback_result = esp_wifi_get_csi_config(&applied_config);
     wifi_bandwidth_t applied_bandwidth = WIFI_BW40;
     const esp_err_t bandwidth_result = esp_wifi_get_bandwidth(WIFI_IF_STA, &applied_bandwidth);
+    s_c5_diag.get_result = readback_result;
+    s_c5_diag.bandwidth_result = bandwidth_result;
+    s_c5_diag.bandwidth_raw = (unsigned)applied_bandwidth;
+    s_c5_diag.applied = applied_config;
+    s_c5_diag.phase = 2; /* receipt obtained, predicate evaluated below */
     s_c5_lltf8_sta_bandwidth_mhz = bandwidth_result == ESP_OK && applied_bandwidth == WIFI_BW20 ? 20U : 0U;
     s_c5_lltf8_readback = readback_result == ESP_OK &&
         applied_config.enable == 1U && applied_config.acquire_csi_legacy == 1U &&
@@ -803,12 +826,23 @@ void csi_collector_init(void)
              s_c5_lltf8_readback, (unsigned)applied_config.lltf_bit_mode,
              s_c5_lltf8_sta_bandwidth_mhz, readback_result, bandwidth_result);
     if (!s_c5_lltf8_readback) {
+        s_c5_diag.phase = 3; /* fail-closed refusal; no callback/enable calls */
         ESP_LOGE(TAG, "C5 L-LTF8 profile readback failed; CSI remains disabled");
         return;
     }
 #endif
+#if defined(CONFIG_C5_MANAGED_LLTF8_V1)
+    s_c5_diag.phase = 4;
+    s_c5_diag.register_result = esp_wifi_set_csi_rx_cb(wifi_csi_callback, NULL);
+    ESP_ERROR_CHECK(s_c5_diag.register_result);
+    s_c5_diag.phase = 5;
+    s_c5_diag.enable_result = esp_wifi_set_csi(true);
+    ESP_ERROR_CHECK(s_c5_diag.enable_result);
+    s_c5_diag.phase = 6; /* enabled; does not assert callback eligibility */
+#else
     ESP_ERROR_CHECK(esp_wifi_set_csi_rx_cb(wifi_csi_callback, NULL));
     ESP_ERROR_CHECK(esp_wifi_set_csi(true));
+#endif
 
     if (g_nvs_config.filter_mac_set) {
         ESP_LOGI(TAG, "MAC filter active: %02x:%02x:%02x:%02x:%02x:%02x",
@@ -1054,4 +1088,29 @@ void csi_collector_get_he_validity(uint32_t *valid, uint32_t *invalid)
 {
     if (valid)   *valid = s_he_valid;
     if (invalid) *invalid = s_he_invalid;
+}
+
+/* No fresh SDK calls, payloads, identifiers, credentials or gate decisions.
+ * Persistent receipt survives missed startup logs, not a reboot. */
+void csi_collector_diagnostic_tick(void)
+{
+#if defined(CONFIG_C5_MANAGED_LLTF8_V1)
+    const int64_t now = esp_timer_get_time();
+    if (now - s_c5_diag_last_log_us < 5000000) return;
+    s_c5_diag_last_log_us = now;
+    const wifi_csi_config_t *c = &s_c5_diag.applied;
+    ESP_LOGI(TAG, "C5_LLTF8_DIAG phase=%u set=%d get=%d bw_result=%d bw_raw=%u bw_mhz=%u matched=%u register=%d enable_result=%d",
+             s_c5_diag.phase, s_c5_diag.set_result, s_c5_diag.get_result,
+             s_c5_diag.bandwidth_result, s_c5_diag.bandwidth_raw,
+             s_c5_lltf8_sta_bandwidth_mhz, s_c5_lltf8_readback,
+             s_c5_diag.register_result, s_c5_diag.enable_result);
+    ESP_LOGI(TAG, "C5_LLTF8_APPLIED enable=%u legacy=%u force=%u bits_mode=%u ht20=%u ht40=%u vht=%u su=%u mu=%u dcm=%u beamformed=%u dump_ack=%u scale=%u he_stbc=%u",
+             (unsigned)c->enable, (unsigned)c->acquire_csi_legacy,
+             (unsigned)c->acquire_csi_force_lltf, (unsigned)c->lltf_bit_mode,
+             (unsigned)c->acquire_csi_ht20, (unsigned)c->acquire_csi_ht40,
+             (unsigned)c->acquire_csi_vht, (unsigned)c->acquire_csi_su,
+             (unsigned)c->acquire_csi_mu, (unsigned)c->acquire_csi_dcm,
+             (unsigned)c->acquire_csi_beamformed, (unsigned)c->dump_ack_en,
+             (unsigned)c->val_scale_cfg, (unsigned)c->acquire_csi_he_stbc_mode);
+#endif
 }

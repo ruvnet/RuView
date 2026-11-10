@@ -176,4 +176,7 @@ uint8_t csi_collector_get_gate_seq_period(void);
  */
 void csi_collector_get_he_validity(uint32_t *valid, uint32_t *invalid);
 
+/** Experimental C5 diagnostic receipt; no-op for all normal profiles. */
+void csi_collector_diagnostic_tick(void);
+
 #endif /* CSI_COLLECTOR_H */

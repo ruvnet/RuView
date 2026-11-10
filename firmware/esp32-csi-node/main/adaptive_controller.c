@@ -214,6 +214,9 @@ static void apply_decision(const adapt_decision_t *dec)
 static void fast_loop_cb(TimerHandle_t t)
 {
     (void)t;
+#if defined(CONFIG_C5_MANAGED_LLTF8_V1)
+    csi_collector_diagnostic_tick();
+#endif
     adapt_observation_t obs;
     collect_observation(&obs);
 
