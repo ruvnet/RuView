@@ -5,7 +5,7 @@ class DiagnosticTests(unittest.TestCase):
  def test_actual_formatter_is_bounded_and_preserves_snapshot(self):
   src=(ROOT/'main/csi_collector.c').read_text()
   start=src.index('void csi_collector_diagnostic_tick(void)')
-  fn=src[start:]
+  fn=src[start:src.index('\n}',start)+2]
   fields=['enable','acquire_csi_legacy','acquire_csi_force_lltf','lltf_bit_mode','acquire_csi_ht20','acquire_csi_ht40','acquire_csi_vht','acquire_csi_su','acquire_csi_mu','acquire_csi_dcm','acquire_csi_beamformed','dump_ack_en','val_scale_cfg','acquire_csi_he_stbc_mode']
   decl='typedef struct {'+''.join('unsigned '+x+';' for x in fields)+'} wifi_csi_config_t;\n'
   state=src[src.index('static struct {\n    unsigned phase;'):src.index('static int64_t s_c5_diag_last_log_us;')+len('static int64_t s_c5_diag_last_log_us;')]
