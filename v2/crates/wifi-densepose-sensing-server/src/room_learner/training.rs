@@ -47,9 +47,87 @@ pub struct TrainingReport {
     pub evidence: String,
 }
 struct Row {
+    // Train-only inputs are immutable for the complete fit. Conditioning and
+    // task skips do not depend on any optimized parameter, so compute them once
+    // rather than allocating/rescanning raw tokens for every numerical probe.
     tokens: Vec<Vec<Vec<f32>>>,
+    skips: Vec<[f32; 2]>,
     occupied: f32,
     contrastive: bool,
+}
+impl Row {
+    fn prepare(
+        model: &RoomModel,
+        tokens: Vec<Vec<Vec<f32>>>,
+        occupied: f32,
+        contrastive: bool,
+    ) -> Result<Self, String> {
+        if tokens.len() != model.profiles.len()
+            || tokens.iter().any(|source| {
+                source.len() != model.config.temporal_tokens
+                    || source.iter().any(|row| {
+                        row.len() != model.config.bins + model.config.source_count
+                            || row.iter().any(|value| !value.is_finite())
+                    })
+            })
+        {
+            return Err("invalid immutable training representation shape or value".into());
+        }
+        let mut conditioned = Vec::with_capacity(tokens.len());
+        let mut skips = Vec::with_capacity(tokens.len());
+        for (index, source) in tokens.into_iter().enumerate() {
+            // Keep the exact operation/order used by model::represent_with_encoder.
+            let mean = source
+                .iter()
+                .flat_map(|row| row[..model.config.bins].iter())
+                .sum::<f32>()
+                / (model.config.temporal_tokens * model.config.bins) as f32;
+            let temporal = source
+                .windows(2)
+                .flat_map(|w| {
+                    w[0][..model.config.bins]
+                        .iter()
+                        .zip(&w[1][..model.config.bins])
+                })
+                .map(|(a, b)| (a - b).abs())
+                .sum::<f32>()
+                / ((model.config.temporal_tokens - 1) * model.config.bins) as f32;
+            skips.push([mean, temporal]);
+            let mut source = source;
+            for row in &mut source {
+                for value in &mut row[..model.config.bins] {
+                    *value /= model.profiles[index].max_normalized;
+                }
+            }
+            conditioned.push(source);
+        }
+        Ok(Self {
+            tokens: conditioned,
+            skips,
+            occupied,
+            contrastive,
+        })
+    }
+}
+fn represent_row(
+    model: &RoomModel,
+    row: &Row,
+    encoder: &mut crate::embedding::EmbeddingExtractor,
+    projectors: &[crate::embedding::ProjectionHead],
+) -> Result<(Vec<f32>, Vec<Vec<f32>>), String> {
+    let mut features = Vec::with_capacity(model.profiles.len() * (model.config.embedding_dim + 2));
+    let mut embeddings = Vec::with_capacity(row.tokens.len());
+    for (index, source) in row.tokens.iter().enumerate() {
+        encoder.projection = projectors[index].clone();
+        let embedding = encoder.extract(source);
+        features.extend_from_slice(&embedding);
+        features.extend_from_slice(&row.skips[index]);
+        embeddings.push(embedding);
+    }
+    if !features.iter().all(|value| value.is_finite()) {
+        return Err("non-finite representation".into());
+    }
+    Ok((features, embeddings))
 }
 fn occupied(label: RoomLabel) -> f32 {
     if matches!(label, RoomLabel::OccupiedStatic | RoomLabel::OccupiedMoving) {
@@ -86,8 +164,7 @@ fn objective(
         .transformer
         .unflatten_weights(&params[..model.encoder_weights.len()])?;
     for row in rows {
-        let (features, embeddings) =
-            model.represent_with_encoder(&row.tokens, &mut encoder, &projectors)?;
+        let (features, embeddings) = represent_row(model, row, &mut encoder, &projectors)?;
         supervised += bce(model.logit(&features, head), row.occupied);
         // One event per independent trial per batch. Sibling/overlapping windows
         // in the same trial cannot accidentally become contrastive negatives.
@@ -270,11 +347,12 @@ impl RoomModel {
             if contrastive {
                 independent.push(c);
             }
-            rows.push(Row {
-                tokens: model.tokens(c, false)?,
-                occupied: occupied(c.label),
+            rows.push(Row::prepare(
+                &model,
+                model.tokens(c, false)?,
+                occupied(c.label),
                 contrastive,
-            });
+            )?);
         }
         let contrastive_trials = independent.len();
         if contrastive_trials < 2 {

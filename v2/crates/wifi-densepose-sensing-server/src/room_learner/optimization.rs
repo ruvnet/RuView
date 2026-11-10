@@ -1,6 +1,6 @@
 //! Bounded RF descent followed by exact linear-task block descent.
 //! Both blocks minimize the same declared joint objective; no validation tuning.
-use super::{objective, FitConfig, ObjectiveValues, Row};
+use super::{objective, represent_row, FitConfig, ObjectiveValues, Row};
 use crate::{
     room_learner::model::{extractor, sigmoid, RoomModel},
     trainer::{clip_gradients, estimate_gradient, SgdOptimizer},
@@ -24,7 +24,7 @@ pub(super) fn head_step(
     let projectors = model.source_projectors(params)?;
     for row in rows {
         check()?;
-        let (features, _) = model.represent_with_encoder(&row.tokens, &mut encoder, &projectors)?;
+        let (features, _) = represent_row(model, row, &mut encoder, &projectors)?;
         let residual = (sigmoid(model.logit(&features, &params[offset..])) - row.occupied)
             * config.supervised_weight
             / rows.len() as f32;

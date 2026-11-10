@@ -125,6 +125,83 @@ fn config() -> FitConfig {
 }
 
 #[test]
+fn prepared_training_rows_match_uncached_representation_for_parameter_probes() {
+    use super::{represent_row, Row};
+    for width in [8, 56, 128] {
+        let ds = dataset(width);
+        let (model, _) = RoomModel::fit(
+            &ds,
+            FitConfig {
+                epochs: 1,
+                hidden_dim: if width == 128 { 2 } else { 3 },
+                embedding_dim: if width == 128 { 2 } else { 3 },
+                ..config()
+            },
+        )
+        .unwrap();
+        let parameters = model.parameters();
+        for cohort in ds.train() {
+            let tokens = model.tokens(cohort, false).unwrap();
+            let prepared = Row::prepare(&model, tokens.clone(), 0.0, true).unwrap();
+            // Include the unchanged parameters and every positive/negative
+            // finite-difference probe, across backbone, projectors and head.
+            for probe in 0..=parameters.len() * 2 {
+                let mut params = parameters.clone();
+                if probe > 0 {
+                    let index = (probe - 1) / 2;
+                    params[index] += if probe % 2 == 1 { 0.002 } else { -0.002 };
+                }
+                let expected = model.represent(&tokens, &params).unwrap();
+                let mut encoder = extractor(&model.config);
+                encoder
+                    .transformer
+                    .unflatten_weights(&params[..model.encoder_weights.len()])
+                    .unwrap();
+                let projectors = model.source_projectors(&params).unwrap();
+                let actual = represent_row(&model, &prepared, &mut encoder, &projectors).unwrap();
+                let bits = |values: &[f32]| values.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+                assert_eq!(
+                    bits(&actual.0),
+                    bits(&expected.0),
+                    "width={width} probe={probe}"
+                );
+                assert_eq!(
+                    actual.1.iter().map(|x| bits(x)).collect::<Vec<_>>(),
+                    expected.1.iter().map(|x| bits(x)).collect::<Vec<_>>(),
+                    "width={width} probe={probe}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn prepared_training_rows_reject_wrong_source_time_width_and_nonfinite_values() {
+    use super::Row;
+    let ds = dataset(8);
+    let (model, _) = RoomModel::fit(
+        &ds,
+        FitConfig {
+            epochs: 1,
+            ..config()
+        },
+    )
+    .unwrap();
+    let valid = model.tokens(&ds.train()[0], false).unwrap();
+    let mut wrong_source = valid.clone();
+    wrong_source.pop();
+    let mut wrong_time = valid.clone();
+    wrong_time[0].pop();
+    let mut wrong_width = valid.clone();
+    wrong_width[0][0].pop();
+    let mut nonfinite = valid.clone();
+    nonfinite[0][0][0] = f32::NAN;
+    for invalid in [wrong_source, wrong_time, wrong_width, nonfinite] {
+        assert!(Row::prepare(&model, invalid, 0.0, true).is_err());
+    }
+}
+
+#[test]
 fn actual_encoder_and_head_weights_reduce_declared_objective_and_learn_controls() {
     let ds = dataset(8);
     let (model, report) = RoomModel::fit(&ds, config()).unwrap();
