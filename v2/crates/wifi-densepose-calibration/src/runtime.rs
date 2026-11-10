@@ -6,7 +6,7 @@
 //!   suppresses positive vitals/posture rather than propagating a hallucination;
 //! - **presence = absent** short-circuits breathing/heartbeat/posture to `None`
 //!   (you cannot have a respiration rate in an empty room);
-//! - a **STALE** bank (baseline drift) flags every reading.
+//! - a **STALE** bank (baseline drift) abstains instead of emitting readings.
 
 use serde::{Deserialize, Serialize};
 
@@ -63,6 +63,9 @@ impl MixtureOfSpecialists {
             stale: self.bank.is_stale(current_baseline_id),
             ..Default::default()
         };
+        if state.stale {
+            return state;
+        }
 
         // Anomaly first — it can veto everything else.
         state.anomaly = self.bank.anomaly.as_ref().and_then(|a| a.infer(f));
@@ -79,8 +82,8 @@ impl MixtureOfSpecialists {
             .presence
             .as_ref()
             .map(|r| r.value > 0.5)
-            // No presence specialist → assume present so vitals still run.
-            .unwrap_or(true);
+            // An incomplete bank has no authority to unlock dependent output.
+            .unwrap_or(false);
 
         // Restlessness is reported regardless of presence (movement implies presence).
         state.restlessness = self.bank.restlessness.as_ref().and_then(|r| r.infer(f));
@@ -174,5 +177,36 @@ mod tests {
         let mix = MixtureOfSpecialists::new(bank());
         let s = mix.infer(&live(10.0, 0.2, 0.3, 0.9), "base-2");
         assert!(s.stale);
+        assert!(s.presence.is_none(), "stale presence must abstain");
+        assert!(s.breathing.is_none(), "stale vitals must abstain");
+        assert!(s.posture.is_none(), "stale posture must abstain");
+        assert!(s.heartbeat.is_none());
+        assert!(s.restlessness.is_none());
+        assert!(s.anomaly.is_none());
+        assert!(!s.vetoed, "abstention is not an observed anomaly veto");
+        let json = serde_json::to_value(&s).unwrap();
+        assert!(json["presence"].is_null(), "unknown must not serialize as absent");
+        assert_eq!(json["stale"], true);
+    }
+
+    #[test]
+    fn missing_presence_specialist_abstains_and_suppresses_vitals() {
+        let mut incomplete = bank();
+        incomplete.presence = None;
+        let mix = MixtureOfSpecialists::new(incomplete);
+
+        let mut features = live(10.0, 0.2, 0.3, 0.9);
+        features.heart_score = 0.95;
+        features.heart_hz = 1.2;
+        let s = mix.infer(&features, "base-1");
+
+        assert!(!s.stale);
+        assert!(s.anomaly.is_some(), "unaffected specialist still executes");
+        assert!(s.restlessness.is_some(), "independent movement evidence is retained");
+        assert!(serde_json::to_value(&s).unwrap()["presence"].is_null());
+        assert!(s.presence.is_none());
+        assert!(s.breathing.is_none());
+        assert!(s.heartbeat.is_none());
+        assert!(s.posture.is_none());
     }
 }
