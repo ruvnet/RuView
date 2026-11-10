@@ -1,0 +1,11 @@
+# Local bare ESP32-S3-N16R8 experiment; no display or external PSRAM.
+# Apply after sdkconfig.defaults and sdkconfig.defaults.4mb.
+CONFIG_CSI_NODE_ID=5
+# CONFIG_DISPLAY_ENABLE is not set
+# CONFIG_SPIRAM is not set
+# CONFIG_WASM_ENABLE is not set
+CONFIG_S3_DISABLE_STATUS_LED=y
+# CONFIG_LED_GAMMA_VIZ is not set
+# CONFIG_ESP_CONSOLE_UART_DEFAULT is not set
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+# CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG is not set

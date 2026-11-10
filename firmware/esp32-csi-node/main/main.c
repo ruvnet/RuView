@@ -404,7 +404,7 @@ void app_main(void)
      * common module). On C6, GPIO 38/48 don't exist (only 0-30) — gate by target.
      * Behaviour is set by CONFIG_LED_GAMMA_VIZ (ADR-183): on = 40 Hz gamma flicker
      * coloured by CSI motion; off = clear the LED at boot. */
-#if !defined(CONFIG_IDF_TARGET_ESP32C5) || CONFIG_C5_STATUS_LED_GPIO >= 0
+#if !defined(CONFIG_S3_DISABLE_STATUS_LED) && (!defined(CONFIG_IDF_TARGET_ESP32C5) || CONFIG_C5_STATUS_LED_GPIO >= 0)
 #if defined(CONFIG_IDF_TARGET_ESP32C5)
     const int led_gpio = CONFIG_C5_STATUS_LED_GPIO;
 #elif defined(CONFIG_IDF_TARGET_ESP32C6)

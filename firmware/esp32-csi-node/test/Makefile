@@ -221,7 +221,12 @@ test_mmwave_pins: test_mmwave_pins.c $(MAIN_DIR)/mmwave_pins.h
 run_mmwave_pins: test_mmwave_pins
 	./test_mmwave_pins
 
-host_tests: run_mmwave_pins run_self_ping run_edge_stbc run_edge_current_grid run_csi_he_gate run_node_mdns run_adr110 run_vitals run_mmwave_detect run_thermal run_csi_sanitize \
+run_s3_headless_led:
+	python3 test_s3_headless_led.py
+
+.PHONY: run_s3_headless_led
+
+host_tests: run_s3_headless_led run_mmwave_pins run_self_ping run_edge_stbc run_edge_current_grid run_csi_he_gate run_node_mdns run_adr110 run_vitals run_mmwave_detect run_thermal run_csi_sanitize \
             run_c6_antenna run_serial_onboarding run_onboarding_identity run_onboarding_console run_delivery_contract run_ota_health \
             run_config_rules run_config_recovery
 	@echo "Host tests passed (firmware contracts, DSP, configuration recovery, onboarding and OTA health)"

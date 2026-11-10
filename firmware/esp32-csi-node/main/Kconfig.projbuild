@@ -585,8 +585,18 @@ endmenu
 
 menu "Onboard LED (ADR-183)"
 
+    config S3_DISABLE_STATUS_LED
+        bool "Do not initialize an ESP32-S3 status LED GPIO"
+        depends on IDF_TARGET_ESP32S3
+        default n
+        help
+            Use for a bare headless board whose LED wiring is not selected.
+            Unlike disabling the visualization, this also skips the boot-time
+            LED clear and never initializes an RMT channel for the LED.
+
     config LED_GAMMA_VIZ
         bool "Onboard WS2812: 40 Hz gamma flicker + CSI-motion colour"
+        depends on !S3_DISABLE_STATUS_LED
         default y
         help
             Drive the onboard WS2812 as a GENUS-style 40 Hz gamma square wave

@@ -21,6 +21,19 @@ This firmware captures WiFi Channel State Information (CSI) from an ESP32-S3 (pr
 
 ## ESP32-C5 candidate: installation and qualification
 
+### Separate local bare S3 Node 5 native USB experiment
+
+The local `sdkconfig.defaults.s3-node5-headless-usb` overlay is for a bare
+ESP32-S3-N16R8 without a display. It keeps the normal 2.4 GHz S3 radio, selects
+node ID 5 and primary native USB Serial/JTAG, and disables display, external
+PSRAM, WASM and all status-LED GPIO initialization. Apply after
+`sdkconfig.defaults` and `sdkconfig.defaults.4mb` using a separate build tree
+with ESP-IDF 6.0.2. The complete 4 MB layout leaves the extra 12 MB unused.
+Embedded local version `0.8.18-s3n5-usb` is not an official release tag.
+Credentials are entered through operator setup, never included in this image.
+This source profile does not establish physical boot, provisioning or sensing
+accuracy; test it independently from the C5 5 GHz experiment.
+
 The source checkout adds an experimental ESP32-C5 headless target. Bounded
 real-board boot and CSI transport checks are recorded below; they do not
 establish sensing accuracy, consistent cadence or long-run reliability.
