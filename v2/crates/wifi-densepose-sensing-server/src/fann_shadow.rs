@@ -20,7 +20,10 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::sync::{Mutex, OnceLock};
 
-use ruview_fann_head::features::{encode, NodeFeatures, NODE_FEATURE_COUNT, NODE_FEATURE_SCHEMA};
+use ruview_fann_head::features::{
+    encode, NodeFeatures, WindowEncoder, NODE_FEATURE_COUNT, NODE_FEATURE_SCHEMA,
+    WINDOW_FEATURE_COUNT, WINDOW_FEATURE_SCHEMA,
+};
 use ruview_fann_head::shadow::{CandidateOutcome, ExternalShadow};
 use ruview_fann_head::FannHead;
 use serde_json::json;
@@ -57,12 +60,18 @@ pub struct Counters {
     /// Fresh observations from nodes the head was not fitted for.
     pub skipped_other_node: u64,
     pub synthetic_observations: u64,
+    /// Observations a windowed head could not score yet: its 30 s window was
+    /// still filling, or had restarted after a gap.
+    pub candidate_warming: u64,
     pub logged: u64,
     pub log_dropped: u64,
 }
 
 pub struct Shadow {
     head: Option<(ExternalShadow, Vec<u8>)>,
+    /// True when the head takes `ruview.node-features/2`.
+    windowed: bool,
+    encoders: HashMap<u8, WindowEncoder>,
     log: Option<Box<dyn Write + Send>>,
     log_bytes: u64,
     max_log_bytes: u64,
@@ -90,16 +99,19 @@ impl Shadow {
         log_bytes: u64,
         now_ms: i64,
     ) -> Result<Self, String> {
+        let mut windowed = false;
         let head = match head_json {
             None => None,
             Some(text) => {
                 let head = FannHead::from_json(text).map_err(|e| e.to_string())?;
                 let context = head.context().clone();
-                if context.feature_schema != NODE_FEATURE_SCHEMA
-                    || head.features() != NODE_FEATURE_COUNT
+                windowed = context.feature_schema == WINDOW_FEATURE_SCHEMA;
+                let expected = if windowed { WINDOW_FEATURE_COUNT } else { NODE_FEATURE_COUNT };
+                if (!windowed && context.feature_schema != NODE_FEATURE_SCHEMA)
+                    || head.features() != expected
                 {
                     return Err(format!(
-                        "head is for schema {:?} with {} features; this server scores {NODE_FEATURE_SCHEMA} with {NODE_FEATURE_COUNT}",
+                        "head is for schema {:?} with {} features; this server scores                          {NODE_FEATURE_SCHEMA} ({NODE_FEATURE_COUNT}) or {WINDOW_FEATURE_SCHEMA} ({WINDOW_FEATURE_COUNT})",
                         context.feature_schema,
                         head.features()
                     ));
@@ -111,6 +123,8 @@ impl Shadow {
         };
         Ok(Self {
             head,
+            windowed,
+            encoders: HashMap::new(),
             log,
             log_bytes,
             max_log_bytes: MAX_LOG_BYTES,
@@ -142,7 +156,18 @@ impl Shadow {
         }
         let candidate = match &mut self.head {
             Some((shadow, nodes)) if nodes.contains(&o.node_id) => {
-                Some(shadow.score(&x, o.presence))
+                if self.windowed {
+                    // Same encoder as `ruview-fann-window`, one per node.
+                    match self.encoders.entry(o.node_id).or_default().push(o.timestamp_ms, x) {
+                        Some(w) => Some(shadow.score(&w, o.presence)),
+                        None => {
+                            self.counters.candidate_warming += 1;
+                            None
+                        }
+                    }
+                } else {
+                    Some(shadow.score(&x, o.presence))
+                }
             }
             Some(_) => {
                 self.counters.skipped_other_node += 1;
@@ -204,6 +229,9 @@ impl Shadow {
             "mode": if self.head.is_some() { "shadow" } else { "capture" },
             "authority": "none: diagnostic only, never published",
             "feature_schema": NODE_FEATURE_SCHEMA,
+            "candidate_feature_schema": self.head.as_ref().map(|_| {
+                if self.windowed { WINDOW_FEATURE_SCHEMA } else { NODE_FEATURE_SCHEMA }
+            }),
             "uptime_s": (now_ms - self.started_ms).max(0) / 1000,
             "counters": self.counters,
             "log_bytes": self.log_bytes,
@@ -359,6 +387,54 @@ mod tests {
     }
 
     /// SYNTHETIC head: occupied when motion band power is high.
+    /// SYNTHETIC windowed head: occupied when RSSI varies over the window.
+    fn windowed_head_json() -> String {
+        let mut x = Vec::new();
+        let mut labels = Vec::new();
+        for i in 0..64 {
+            let occupied = i % 2 == 0;
+            let mut row = [0.0f32; WINDOW_FEATURE_COUNT];
+            if occupied {
+                row[0] = 0.3 + i as f32 * 0.002;
+                row[NODE_FEATURE_COUNT] = 0.4;
+            }
+            x.extend(row);
+            labels.push(occupied);
+        }
+        let context = HeadContext {
+            feature_schema: WINDOW_FEATURE_SCHEMA.into(),
+            sources: vec!["csi-node-1".into()],
+            room_revision: "test".into(),
+        };
+        fit(&x, &labels, context, FitConfig::candidate()).unwrap().head.to_json()
+    }
+
+    #[test]
+    fn adr426_windowed_head_warms_up_then_scores_variability() {
+        let sink = Sink::default();
+        let mut s =
+            Shadow::new(Some(&windowed_head_json()), Some(Box::new(sink.clone())), 0, 0).unwrap();
+        // 30 s of a steady link, then 30 s where RSSI swings by 4 dB each step.
+        for k in 0..200i64 {
+            let mut o = obs(1_000 + k * 300, 1, 10.0, k >= 100);
+            if k >= 100 {
+                o.features.mean_rssi += if k % 2 == 0 { 4.0 } else { -4.0 };
+            }
+            s.observe(&o);
+        }
+        let status = s.status(0);
+        assert_eq!(status["candidate_feature_schema"], WINDOW_FEATURE_SCHEMA);
+        // 15 s at 300 ms spacing before the first score.
+        assert_eq!(status["counters"]["candidate_warming"], 50);
+        assert_eq!(status["candidate"]["counters"]["scored"], 150);
+        let lines = sink.lines();
+        assert!(lines[10]["candidate"].is_null());
+        assert_eq!(lines[80]["candidate"]["decision"], "empty");
+        assert_eq!(lines[199]["candidate"]["decision"], "occupied");
+        // The log keeps the lossless base features, not the windowed ones.
+        assert_eq!(lines[199]["features"].as_array().unwrap().len(), NODE_FEATURE_COUNT);
+    }
+
     fn head_json(schema: &str, source: &str) -> String {
         let mut x = Vec::new();
         let mut labels = Vec::new();

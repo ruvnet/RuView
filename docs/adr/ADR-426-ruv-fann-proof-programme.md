@@ -277,6 +277,19 @@ The limits listed under result 7 all still apply. One more: variability detects 
 moving, even slightly. A motionless person may look like an empty room, and that session has not
 been recorded.
 
+### 10. Live shadow of the windowed head
+
+The server shadow scores `/2` heads with one `WindowEncoder` per node, the same code the
+offline tool uses. The balanced windowed candidate (73 parameters, digest `d132a06d…`) shadowed
+the live server for seven minutes with the operator at the desk: 1,621 observations scored after
+a 60-observation warm-up, none unavailable.
+
+- On the 210 input-confirmed occupied observations it said occupied 210 times. Sensitivity 100 %.
+- Over all 1,621 it said occupied 1,599 times, abstained 15 and said empty 7.
+
+MEASURED, 210 observations, one session, occupied only. No empty-room time was recorded live with
+this head; its false-positive figure is the replay one in result 9.
+
 ## Consequences
 
 - Fitting must be treated as platform-specific until the engine uses a portable `exp`. Reported
@@ -285,7 +298,7 @@ been recorded.
   presence head, was wrong: those runs imitated a classifier that is itself always on. With
   reference labels the features carry usable signal (result 7).
 - The existing per-node classifier's thresholds need replacing or calibrating per link. That is a
-  defect in what RuView publishes today, independent of ruv-FANN.
+  defect in what RuView publishes today, independent of ruv-FANN. Filed as issue #2522.
 - Claim 3 has a first positive answer in one room and is not settled. It needs repeat sessions on
   other days, a motionless-person session, an adjacent-room session, a second room, and a radar
   so that "empty" and "still" are confirmed by something other than the operator.
