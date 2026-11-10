@@ -174,17 +174,64 @@ observations, of which 429 fall in windows where typing proved the desk was occu
 - The short "absent" bursts seen in sessions 1 and 2 (28 runs of 0.3 to 1.2 s in five minutes)
   did not recur. Nothing was changed in the classifier on the strength of one session.
 
+### 7. First two-class reference-labelled comparison
+
+The operator then left the room for 32 minutes while the capture and the input logger ran. With
+30 seconds trimmed from each end that is 31.0 minutes of declared-empty recording (6,104
+observations, none contradicted by the input reference).
+
+**The existing per-node classifier is effectively always on.** It reported present on 6,093 of
+the 6,104 empty-room observations: a false-positive rate of 99.8 %. Its thresholds assume a motion
+score scale this link does not have. On reference labels, variance, motion-band and breathing-band
+power are *higher* in the empty room than with a person seated at the desk (single-feature AUC
+0.75 to 0.81 in that inverted direction), so the information is present and the fixed thresholds
+point the wrong way.
+
+Replay, Train on one occupied session (429 input-gated rows) plus the first half of the empty
+recording (2,871 rows); HeldOut on a different occupied session (759 rows) plus the second half of
+the empty recording (3,069 rows). MEASURED, labels `input_gated` and `operator_declared`:
+
+| Model | False positives on empty | Sensitivity on occupied | Coverage (empty / occupied) |
+|---|---|---|---|
+| Existing per-node classifier | 99.6 % | 93.7 % | 100 % / 100 % |
+| Linear control, balanced fit | 11.9 % | 55.3 % | 80.8 % / 76.0 % |
+| ruv-FANN candidate 8 → 4 → 1, balanced fit | 2.6 % | 87.2 % | 99.5 % / 97.5 % |
+
+- **Class balance matters.** The Train set is 87 % empty. Fitted unbalanced, the candidate fell to
+  24.8 % sensitivity and the linear control to 0.1 %. `FitConfig::balance` (CLI `--balance`) thins
+  the larger class evenly to the size of the smaller, and is what the table uses.
+- **The candidate beats its linear control here**, on both error rates. This is the first result
+  in which the extra capacity is worth something.
+- **It does not pass the gates.** Sensitivity is 87.2 % against a 90 % floor, and only two of the
+  four conditions were recorded, so the gate verdict is "not judged".
+- **Learning curve:** the candidate reaches this level with the occupied session plus about 400
+  empty rows (roughly eight minutes of recording in total) and does not improve with more empty
+  rows.
+
+Limits, each of which could change the numbers:
+
+- One node, one room, one afternoon.
+- The two empty halves are one continuous recording split in time, not independent sessions.
+- "Occupied" means seated and typing. A motionless person, a person elsewhere in the room, and
+  activity in an adjacent room were not recorded.
+- "Empty" is the operator's declaration. Nothing independent confirms nobody else was present.
+- A drift shortcut is possible in principle (the model learning the time of day rather than
+  occupancy). The HeldOut occupied rows were recorded immediately before and after the empty
+  block, closer in time to the empty rows than to the occupied Train session, which works against
+  that explanation but does not exclude it.
+
 ## Consequences
 
 - Fitting must be treated as platform-specific until the engine uses a portable `exp`. Reported
   upstream. RuView ships head documents, never recipes.
-- The per-node feature vector is not sufficient for a presence head. The room-learner features
-  (ADR-420) remain the intended input, which makes PR #2423 the blocker for a meaningful
-  candidate.
-- The accuracy question (claim 3) is still open. The next step needs no new hardware: an
-  operator-declared empty session, to get a false-positive rate and the first two-class
-  reference-labelled fit. The full protocol still needs a radar, two rooms, and sessions under
-  each of the four conditions, including adjacent-room activity.
+- The earlier reading in results 3 and 4, that the per-node features are not enough for a
+  presence head, was wrong: those runs imitated a classifier that is itself always on. With
+  reference labels the features carry usable signal (result 7).
+- The existing per-node classifier's thresholds need replacing or calibrating per link. That is a
+  defect in what RuView publishes today, independent of ruv-FANN.
+- Claim 3 has a first positive answer in one room and is not settled. It needs repeat sessions on
+  other days, a motionless-person session, an adjacent-room session, a second room, and a radar
+  so that "empty" and "still" are confirmed by something other than the operator.
 - Claim 2 needs the Pi 5 back online.
 - The server gains one optional dependency behind a feature that is off by default, and one
   read-only status route.

@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! ruview-fann-replay --rows replay.jsonl --feature-schema aether-skip/1 \
-//!     --sources node-a,node-b [--out report.json] [--learning-curve curve.json]
+//!     --sources node-a,node-b [--out report.json] [--learning-curve curve.json] [--balance]
 //! ```
 
 use std::process::ExitCode;
@@ -26,7 +26,7 @@ fn main() -> ExitCode {
         arg(&args, "--feature-schema"),
         arg(&args, "--sources"),
     ) else {
-        eprintln!("usage: ruview-fann-replay --rows <jsonl> --feature-schema <id> --sources <a,b> [--out <json>] [--learning-curve <json>]");
+        eprintln!("usage: ruview-fann-replay --rows <jsonl> --feature-schema <id> --sources <a,b> [--out <json>] [--learning-curve <json>] [--balance]");
         return ExitCode::from(2);
     };
     let text = match std::fs::read_to_string(&rows_path) {
@@ -48,8 +48,12 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    let config = FitConfig {
+        balance: args.iter().any(|a| a == "--balance"),
+        ..FitConfig::candidate()
+    };
     if let Some(path) = arg(&args, "--learning-curve") {
-        let curve = match learning_curve(&rows, &context, FitConfig::candidate()) {
+        let curve = match learning_curve(&rows, &context, config) {
             Ok(c) => c,
             Err(e) => {
                 eprintln!("error: {e}");
@@ -73,7 +77,7 @@ fn main() -> ExitCode {
             );
         }
     }
-    let report = match evaluate(&rows, &context, FitConfig::candidate()) {
+    let report = match evaluate(&rows, &context, config) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("error: {e}");

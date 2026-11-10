@@ -22,8 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Linux targets but differ on Windows (`f32::exp` differs), while one exported
   head scores identically on all four. On a live ESP32-C6 with incumbent
   labels, the candidate and the linear control both collapse to "always
-  occupied", so the per-node features are not enough for a presence head.
-  No reference-labelled accuracy run has been done.
+  occupied", because the classifier they were imitating is itself always on:
+  MEASURED against keyboard-activity and operator-declared labels on one node
+  in one room, the existing per-node classifier reported present on 99.6 % of
+  held-out empty-room observations. On the same held-out data a class-balanced
+  fit (`--balance`) gave the ruv-FANN candidate 2.6 % false positives at
+  87.2 % sensitivity and the linear control 11.9 % at 55.3 %. One afternoon,
+  seated-and-typing occupancy only; the 90 % sensitivity gate is not met.
 
 - **Any-source sensor fusion: per-zone presence from CSI plus any sensor (ADR-424).**
   `POST /api/v1/sources/readings` accepts JSON-line readings from any sensor or

@@ -32,7 +32,7 @@ fn run(args: &[String]) -> Result<(), String> {
     ) else {
         return Err(
             "usage: ruview-fann-fit --rows <jsonl> --room <name> --feature-schema <id> \
-             --sources <a,b> --out <head.json> [--linear]"
+             --sources <a,b> --out <head.json> [--linear] [--balance]"
                 .into(),
         );
     };
@@ -63,6 +63,10 @@ fn run(args: &[String]) -> Result<(), String> {
         feature_schema: schema,
         sources: sources.split(',').map(str::to_string).collect(),
         room_revision: room.clone(),
+    };
+    let config = FitConfig {
+        balance: args.iter().any(|a| a == "--balance"),
+        ..config
     };
     let report = fit(&features, &labels, context, config).map_err(|e| e.to_string())?;
     std::fs::write(&out, report.head.to_json() + "\n")

@@ -421,3 +421,50 @@ fn external_shadow_counts_agreement_abstention_and_failures() {
     let head = FannHead::from_linear(&LinearHead::new(vec![4.0, 0.0]).unwrap(), context()).unwrap();
     assert!(ExternalShadow::new(head, &other).is_err());
 }
+
+#[test]
+fn balancing_thins_the_larger_class_evenly_and_keeps_order() {
+    use ruview_fann_head::train::balance_classes;
+    // 2 occupied rows among 10; one feature holding the row index.
+    let labels: Vec<bool> = (0..10).map(|i| i == 3 || i == 7).collect();
+    let features: Vec<f32> = (0..10).map(|i| i as f32).collect();
+    let (x, y) = balance_classes(&features, &labels, 1);
+    assert_eq!(y.iter().filter(|&&l| l).count(), 2);
+    assert_eq!(y.iter().filter(|&&l| !l).count(), 2);
+    // Both occupied rows kept; the empty rows come from both halves, in order.
+    assert!(x.contains(&3.0) && x.contains(&7.0));
+    assert!(x.windows(2).all(|w| w[0] < w[1]), "{x:?}");
+    let empties: Vec<f32> = x
+        .iter()
+        .zip(&y)
+        .filter(|(_, &l)| !l)
+        .map(|(v, _)| *v)
+        .collect();
+    assert!(empties[0] < 5.0 && empties[1] >= 5.0, "{empties:?}");
+    // Already balanced, or one class only: unchanged.
+    let even = [true, false];
+    assert_eq!(balance_classes(&[1.0, 2.0], &even, 1).1, even);
+    assert_eq!(balance_classes(&[1.0, 2.0], &[true, true], 1).1.len(), 2);
+
+    // An unbalanced fit reports the rows it actually used.
+    let mut feats = Vec::new();
+    let mut labs = Vec::new();
+    for i in 0..100 {
+        let occupied = i % 10 == 0;
+        feats.extend([if occupied { 1.0f32 } else { -1.0 }, 0.0]);
+        labs.push(occupied);
+    }
+    let config = FitConfig {
+        balance: true,
+        ..FitConfig::candidate()
+    };
+    let report = fit(&feats, &labs, context2(), config).unwrap();
+    assert_eq!(report.rows, 20);
+}
+
+fn context2() -> HeadContext {
+    HeadContext {
+        sources: vec!["node-a".into()],
+        ..context()
+    }
+}
