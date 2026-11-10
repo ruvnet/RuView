@@ -1,5 +1,14 @@
 menu "CSI Node Configuration"
 
+    config C5_MANAGED_LLTF8_V1
+        bool "Experimental C5 explicit 8-bit L-LTF producer contract v1"
+        depends on IDF_TARGET_ESP32C5
+        default n
+        help
+            Separately test an 8-bit L-LTF-only acquisition with SDK readback
+            and a versioned metadata suffix. Unsupported callback metadata is
+            reported and withheld, never relabelled or padded for learning.
+
     config C5_WIFI_5GHZ_ONLY
         bool "Experimental ESP32-C5 5 GHz-only association"
         depends on IDF_TARGET_ESP32C5

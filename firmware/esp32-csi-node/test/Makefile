@@ -224,9 +224,15 @@ run_mmwave_pins: test_mmwave_pins
 run_c5_wifi_band:
 	python3 test_c5_wifi_band.py
 
-.PHONY: run_c5_wifi_band
+test_c5_lltf8_contract: test_c5_lltf8_contract.c $(MAIN_DIR)/c5_lltf8_contract.h
+	cc -std=c11 -Wall -Wextra -Werror -I$(MAIN_DIR) $< -o $@
 
-host_tests: run_c5_wifi_band run_mmwave_pins run_self_ping run_edge_stbc run_edge_current_grid run_csi_he_gate run_node_mdns run_adr110 run_vitals run_mmwave_detect run_thermal run_csi_sanitize \
+run_c5_lltf8_contract: test_c5_lltf8_contract
+	./test_c5_lltf8_contract
+
+.PHONY: run_c5_wifi_band run_c5_lltf8_contract
+
+host_tests: run_c5_lltf8_contract run_c5_wifi_band run_mmwave_pins run_self_ping run_edge_stbc run_edge_current_grid run_csi_he_gate run_node_mdns run_adr110 run_vitals run_mmwave_detect run_thermal run_csi_sanitize \
             run_c6_antenna run_serial_onboarding run_onboarding_identity run_onboarding_console run_delivery_contract run_ota_health \
             run_config_rules run_config_recovery
 	@echo "Host tests passed (firmware contracts, DSP, configuration recovery, onboarding and OTA health)"

@@ -1,0 +1,2 @@
+# Experimental C5 L-LTF8 producer contract. Apply after the C5 Node20 USB profile.
+CONFIG_C5_MANAGED_LLTF8_V1=y

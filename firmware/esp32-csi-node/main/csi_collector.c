@@ -18,6 +18,7 @@
 #include "c6_timesync.h"  /* ADR-110: 802.15.4 epoch for cross-node alignment */
 #include "c6_sync_espnow.h" /* ADR-110 §A0.11: mesh-aligned epoch for sync packet */
 #include "csi_he_gate.h"     /* ADR-423 D1: HE-LTF validity gate */
+#include "c5_lltf8_contract.h"
 
 #include <string.h>
 #include "esp_log.h"
@@ -132,6 +133,10 @@ static uint32_t s_early_drop = 0;
 #endif
 static uint32_t s_he_valid = 0;
 static uint32_t s_he_invalid = 0;
+#if defined(CONFIG_C5_MANAGED_LLTF8_V1)
+static bool s_c5_lltf8_readback = false;
+static int64_t s_c5_lltf8_last_log_us = 0;
+#endif
 
 /* ---- ADR-029: Channel-hop state ---- */
 
@@ -300,6 +305,31 @@ size_t csi_serialize_frame(const wifi_csi_info_t *info, uint8_t *buf, size_t buf
 static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
 {
     (void)ctx;
+#if defined(CONFIG_C5_MANAGED_LLTF8_V1)
+    if (info == NULL || info->buf == NULL) return;
+    const c5_lltf8_v1_metadata_t native_metadata = {
+        .config_readback = s_c5_lltf8_readback,
+        .bb_format = info->rx_ctrl.cur_bb_format,
+        .secondary = info->rx_ctrl.second,
+        .bandwidth = info->rx_ctrl.cwb,
+        .estimate_valid = info->rx_ctrl.rx_channel_estimate_info_vld,
+        .first_word_invalid = info->first_word_invalid,
+        .iq_bytes = info->len,
+    };
+    uint8_t native_claim[C5_LLTF8_V1_BYTES];
+    const bool native_eligible = c5_lltf8_v1_encode(&native_metadata, native_claim);
+    const int64_t native_log_now = esp_timer_get_time();
+    if (native_log_now - s_c5_lltf8_last_log_us >= 5000000) {
+        ESP_LOGI(TAG, "C5_LLTF8_V1 readback=%u bits=8 len=%u bb=%u second=%u bw=%u vld=%u first_invalid=%u channel=%u eligible=%u",
+                 s_c5_lltf8_readback, (unsigned)info->len,
+                 native_metadata.bb_format, native_metadata.secondary,
+                 native_metadata.bandwidth, native_metadata.estimate_valid,
+                 native_metadata.first_word_invalid, info->rx_ctrl.channel,
+                 native_eligible);
+        s_c5_lltf8_last_log_us = native_log_now;
+    }
+    if (!native_eligible) return;
+#endif
 
     /* ADR-060: MAC address filtering — MOVED ABOVE the rate gate.
      *
@@ -405,7 +435,11 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
 #endif
 
     uint8_t frame_buf[CSI_MAX_FRAME_SIZE];
-    size_t frame_len = csi_serialize_frame(info, frame_buf, sizeof(frame_buf));
+    const size_t raw_frame_len = csi_serialize_frame(info, frame_buf, sizeof(frame_buf));
+    size_t frame_len = raw_frame_len;
+#if defined(CONFIG_C5_MANAGED_LLTF8_V1)
+    frame_len = c5_lltf8_v1_append(frame_buf, sizeof(frame_buf), raw_frame_len, native_claim);
+#endif
     if (he_action == CSI_HE_ACTION_TAG && frame_len > 19) {
         frame_buf[19] |= CSI_FRAME_FLAG_HE_ESTIMATE_INVALID;  /* ADR-423 D1 */
     }
@@ -446,7 +480,7 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
             /* Reuse the sanitized ADR-018 payload. Feeding info->buf here
              * would reintroduce first_word_invalid artifacts on device. */
             (void)edge_enqueue_csi(&frame_buf[CSI_HEADER_SIZE],
-                                   (uint16_t)(frame_len - CSI_HEADER_SIZE),
+                                   (uint16_t)(raw_frame_len - CSI_HEADER_SIZE),
                                    (int8_t)info->rx_ctrl.rssi, info->rx_ctrl.channel);
 
             /* Preserve the configured sample clock instead of resetting it to
@@ -726,6 +760,16 @@ void csi_collector_init(void)
     csi_config.val_scale_cfg = 0U;
 #endif
     csi_config.dump_ack_en = 0U;
+#if defined(CONFIG_C5_MANAGED_LLTF8_V1)
+    csi_config.lltf_bit_mode = 1U;
+    csi_config.acquire_csi_ht20 = 0U;
+    csi_config.acquire_csi_ht40 = 0U;
+    csi_config.acquire_csi_vht = 0U;
+    csi_config.acquire_csi_su = 0U;
+    csi_config.acquire_csi_mu = 0U;
+    csi_config.acquire_csi_dcm = 0U;
+    csi_config.acquire_csi_beamformed = 0U;
+#endif
 #else
     wifi_csi_config_t csi_config = {
         .lltf_en = true,
@@ -739,6 +783,24 @@ void csi_collector_init(void)
 #endif
 
     ESP_ERROR_CHECK(esp_wifi_set_csi_config(&csi_config));
+#if defined(CONFIG_C5_MANAGED_LLTF8_V1)
+    wifi_csi_config_t applied_config;
+    memset(&applied_config, 0, sizeof(applied_config));
+    const esp_err_t readback_result = esp_wifi_get_csi_config(&applied_config);
+    s_c5_lltf8_readback = readback_result == ESP_OK &&
+        applied_config.enable == 1U && applied_config.acquire_csi_legacy == 1U &&
+        applied_config.acquire_csi_force_lltf == 1U && applied_config.lltf_bit_mode == 1U &&
+        applied_config.acquire_csi_ht20 == 0U && applied_config.acquire_csi_ht40 == 0U &&
+        applied_config.acquire_csi_vht == 0U && applied_config.acquire_csi_su == 0U &&
+        applied_config.acquire_csi_mu == 0U && applied_config.acquire_csi_dcm == 0U &&
+        applied_config.acquire_csi_beamformed == 0U && applied_config.dump_ack_en == 0U;
+    ESP_LOGI(TAG, "C5_LLTF8_CONFIG_V1 readback=%u requested_bits=8 applied_bit_mode=%u result=%d",
+             s_c5_lltf8_readback, (unsigned)applied_config.lltf_bit_mode, readback_result);
+    if (!s_c5_lltf8_readback) {
+        ESP_LOGE(TAG, "C5 L-LTF8 profile readback failed; CSI remains disabled");
+        return;
+    }
+#endif
     ESP_ERROR_CHECK(esp_wifi_set_csi_rx_cb(wifi_csi_callback, NULL));
     ESP_ERROR_CHECK(esp_wifi_set_csi(true));
 
