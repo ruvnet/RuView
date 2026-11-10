@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="340" viewBox="0 0 880 340" role="img" aria-labelledby="title desc"><title id="title">ruv-FANN presence head in shadow</title><desc id="desc">One feature vector is scored by two heads: the incumbent linear head, whose decision is the only one published, and a 49-parameter ruv-FANN candidate that runs in shadow and produces a diagnostic record only. Bars show measured engine times on one development workstation with a synthetic 10-feature vector: 6.5 nanoseconds for the hand-written incumbent, 33.6 for the same head through ruv-FANN, and 61 to 70 for the candidate. These are engine timings, not sensing accuracy.</desc><defs><linearGradient id="wash" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0b303a"/><stop offset=".55" stop-color="#06171e"/><stop offset="1" stop-color="#030c13"/></linearGradient><linearGradient id="accent"><stop stop-color="#91f6df"/><stop offset="1" stop-color="#26bad7"/></linearGradient></defs><style>
+text{font-family:"Avenir Next","Segoe UI",Helvetica,Arial,sans-serif;fill:#d9f3f2}
+.mono{font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace;letter-spacing:1.2px}
+.dim{fill:#7fa6ad}
+.flow{stroke-dasharray:5 12;animation:flow 3s linear infinite}
+.shadow{stroke-dasharray:3 9;animation:flow 4.5s linear infinite}
+.grow{animation:grow 5s ease-out infinite;transform-box:fill-box;transform-origin:left center}
+.node{animation:node 3s ease-in-out infinite}
+@keyframes flow{to{stroke-dashoffset:-136}}
+@keyframes grow{0%{transform:scaleX(.08)}30%,100%{transform:scaleX(1)}}
+@keyframes node{0%,100%{opacity:.45}50%{opacity:1}}
+@media (prefers-reduced-motion:reduce){.flow,.shadow,.grow,.node{animation:none}}
+</style>
+<rect width="880" height="340" rx="18" fill="url(#wash)"/>
+<text x="32" y="44" font-size="20" font-weight="600">ruv-FANN presence head: parity first, then shadow</text>
+<text x="32" y="66" font-size="12.5" class="dim">default off · the candidate scores the same vector and has no path to a published result</text>
+
+<rect x="32" y="126" width="150" height="56" rx="10" fill="#082028" stroke="#26bad7" stroke-opacity=".55"/>
+<text x="107" y="150" font-size="13" font-weight="600" text-anchor="middle">feature vector</text>
+<text x="107" y="169" class="mono dim" font-size="10" text-anchor="middle">10 frozen features</text>
+
+<path d="M182 146 C230 146 236 112 286 112" fill="none" stroke="url(#accent)" stroke-width="2" class="flow"/>
+<path d="M182 162 C230 162 236 202 286 202" fill="none" stroke="#7fa6ad" stroke-width="1.6" class="shadow"/>
+
+<rect x="286" y="86" width="210" height="52" rx="10" fill="#082028" stroke="#35d4db" stroke-opacity=".7"/>
+<text x="302" y="108" font-size="13" font-weight="600">incumbent linear head</text>
+<text x="302" y="126" class="mono dim" font-size="10">sigmoid(Σ x·w + b) · 11 params</text>
+
+<rect x="286" y="176" width="210" height="64" rx="10" fill="#07191f" stroke="#7fa6ad" stroke-opacity=".6" stroke-dasharray="4 4"/>
+<text x="302" y="198" font-size="13" font-weight="600">ruv-FANN candidate</text>
+<text x="302" y="216" class="mono dim" font-size="10">10 → 4 → 1 · 49 params</text>
+<g class="node"><circle cx="446" cy="226" r="3" fill="#91f6df"/><circle cx="458" cy="226" r="3" fill="#91f6df"/><circle cx="470" cy="226" r="3" fill="#91f6df"/><circle cx="482" cy="226" r="3" fill="#91f6df"/></g>
+
+<path d="M496 112 H556" fill="none" stroke="url(#accent)" stroke-width="2" class="flow"/>
+<path d="M496 208 H556" fill="none" stroke="#7fa6ad" stroke-width="1.6" class="shadow"/>
+<rect x="556" y="92" width="140" height="40" rx="20" fill="#0c3a36" stroke="#91f6df"/>
+<text x="626" y="117" font-size="12.5" font-weight="600" text-anchor="middle">published</text>
+<rect x="556" y="188" width="140" height="40" rx="20" fill="#07191f" stroke="#7fa6ad" stroke-dasharray="4 4"/>
+<text x="626" y="213" font-size="12.5" text-anchor="middle" class="dim">diagnostic only</text>
+
+<text x="724" y="104" class="mono dim" font-size="10">engine time, one row</text>
+<text x="724" y="126" class="mono" font-size="10">incumbent</text>
+<rect x="724" y="132" width="12" height="9" rx="2" fill="url(#accent)" class="grow"/><text x="742" y="140.5" class="mono dim" font-size="9.5">6.5 ns</text>
+<text x="724" y="162" class="mono" font-size="10">same head, ruv-FANN</text>
+<rect x="724" y="168" width="61" height="9" rx="2" fill="url(#accent)" class="grow"/><text x="791" y="176.5" class="mono dim" font-size="9.5">33.6 ns</text>
+<text x="724" y="198" class="mono" font-size="10">candidate</text>
+<rect x="724" y="204" width="118" height="9" rx="2" fill="url(#accent)" class="grow"/><text x="724" y="228" class="mono dim" font-size="9.5">61–70 ns</text>
+
+<text x="32" y="276" font-size="12.5">Parity gate: the same head through ruv-FANN is bit-identical to the incumbent on 20,000 vectors,</text>
+<text x="32" y="294" font-size="12.5">including the 0.45 / 0.55 abstention boundaries.</text>
+<text x="32" y="320" class="mono dim" font-size="10.5">MEASURED engine times on one workstation, synthetic input. Not sensing accuracy. Tests use SYNTHETIC features.</text>
+</svg>

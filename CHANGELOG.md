@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Any-source sensor fusion: per-zone presence from CSI plus any sensor (ADR-424).**
+  `POST /api/v1/sources/readings` accepts JSON-line readings from any sensor or
+  time series; `GET /api/v1/zones` returns one fused presence probability per
+  zone with confidence, agreement, an evidence grade and each source's own
+  contribution. CSI nodes join a zone through `RUVIEW_NODE_ZONES`. A stale
+  source lowers confidence and never reads as empty; any synthetic input grades
+  the result SYNTHETIC; a reading posted to the open route is a claim (CLAIMED),
+  and only the server's own hardware readings are MEASURED. Fusion weights are
+  placeholders (`weights_measured: false`). `/api/v1/pose/zones/summary` no
+  longer returns four invented zones. Tests use SYNTHETIC readings; no accuracy
+  claim.
+- **Track-aware benchmark (ADR-424 D7).** `scripts/track_benchmark.py` scores
+  predicted person tracks against a per-person reference, one held-out room at
+  a time. Windows the reference cannot resolve (count disagreement, tracks too
+  close, a track just appeared or left, a missing position) are their own
+  `ambiguous` class, reported with share and reasons and never forced into a
+  count. Protocol in `docs/adr/ADR-424/track-benchmark-protocol.md`. No hardware
+  run yet.
+- **Default-off ruv-FANN presence head (ADR-425).** New crate
+  `ruview-fann-head`: bit-identical parity with the incumbent linear head, a
+  fixed 49-parameter candidate with a feature-matched linear control, export and
+  load bound to engine revision and context, shadow scoring with no authority,
+  and `ruview-fann-replay` with the qualification gates fixed in code. Nothing
+  in the server depends on it. Engine times on one workstation (MEASURED):
+  incumbent 6.5 ns, same head through ruv-FANN 33.6 ns, candidate 61-70 ns.
+  Tests use SYNTHETIC features; no sensing-accuracy claim.
+
 - **ESP32 firmware 0.8.18: HE-LTF validity gate for C5/C6 and node mDNS discovery (ADR-423).**
   On the ESP32-C6 bench, 77-90 % of HE-SU CSI frames arrived with
   `rx_ctrl.rx_channel_estimate_info_vld = 0` and an unstable estimate (MEASURED).
