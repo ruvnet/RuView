@@ -39,7 +39,7 @@ jobs:
           - { label: 'ruflo',            flags: '--features ruflo' }
           - { label: 'full+train',       flags: '--features full,train' }
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           submodules: recursive
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
@@ -61,7 +61,7 @@ jobs:
     name: clippy (-D warnings, --no-deps)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           submodules: recursive
       # v2/rust-toolchain.toml pins channel "1.89" with profile "minimal" (no
@@ -96,7 +96,7 @@ jobs:
     name: build train_marl bin
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           submodules: recursive
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
@@ -132,7 +132,7 @@ jobs:
     name: ITAR / publish guard
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           submodules: recursive
       - name: publish = false is present (no accidental crates.io publish)
