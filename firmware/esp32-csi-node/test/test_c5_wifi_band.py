@@ -17,17 +17,28 @@ class C5WifiBandTests(unittest.TestCase):
             probe = root / "probe.c"
             probe.write_text(r'''
 #include <assert.h>
-enum { WIFI_BAND_MODE_2G_ONLY = 2, WIFI_BAND_MODE_5G_ONLY = 5 };
-static int configured_band, connected, calls, failure;
+enum { WIFI_BAND_MODE_2G_ONLY = 2, WIFI_BAND_MODE_5G_ONLY = 5,
+       WIFI_IF_STA = 0, WIFI_BW20 = 1 };
+static int configured_band, connected, calls, failure, bandwidth_failure;
 static int esp_wifi_set_band_mode(int band) {
     assert(calls == 0 && connected == 0);
     configured_band = band;
     calls++;
     return failure;
 }
+static int esp_wifi_set_bandwidth(int iface, int width) {
+    assert(iface == WIFI_IF_STA && width == WIFI_BW20);
+    assert(calls == 1 && connected == 0);
+    calls++;
+    return bandwidth_failure;
+}
 static void esp_wifi_connect(void) {
 #if defined(CONFIG_IDF_TARGET_ESP32C5)
+#if defined(CONFIG_C5_MANAGED_LLTF8_V1)
+    assert(calls == 2);
+#else
     assert(calls == 1);
+#endif
 #else
     assert(calls == 0);
 #endif
@@ -50,6 +61,11 @@ int main(void) {
     failure = -1;
     start_wifi();
     assert(calls == 1 && connected == 0);
+#if defined(CONFIG_C5_MANAGED_LLTF8_V1)
+    calls = 0; failure = 0; bandwidth_failure = -7;
+    start_wifi();
+    assert(calls == 2 && connected == 0);
+#endif
 #else
     assert(configured_band == 0);
 #endif
@@ -57,7 +73,9 @@ int main(void) {
 }
 ''')
             for defines in [[], ["-DCONFIG_IDF_TARGET_ESP32C5=1"],
-                            ["-DCONFIG_IDF_TARGET_ESP32C5=1", "-DCONFIG_C5_WIFI_5GHZ_ONLY=1"]]:
+                            ["-DCONFIG_IDF_TARGET_ESP32C5=1", "-DCONFIG_C5_WIFI_5GHZ_ONLY=1"],
+                            ["-DCONFIG_IDF_TARGET_ESP32C5=1", "-DCONFIG_C5_WIFI_5GHZ_ONLY=1",
+                             "-DCONFIG_C5_MANAGED_LLTF8_V1=1"]]:
                 binary = root / "probe"
                 subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
                                 "-Wno-unused-function", *defines, str(probe), "-o", str(binary)], check=True)

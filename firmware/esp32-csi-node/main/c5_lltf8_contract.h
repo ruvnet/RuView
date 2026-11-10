@@ -11,7 +11,7 @@
 
 typedef struct {
     bool config_readback;
-    unsigned bb_format, secondary, bandwidth, estimate_valid;
+    unsigned bb_format, secondary, sta_bandwidth_mhz, estimate_valid;
     bool first_word_invalid;
     size_t iq_bytes;
 } c5_lltf8_v1_metadata_t;
@@ -23,11 +23,11 @@ static inline bool c5_lltf8_v1_encode(const c5_lltf8_v1_metadata_t *m,
                                     uint8_t out[C5_LLTF8_V1_BYTES])
 {
     if (!m || !out || !m->config_readback || m->bb_format != 1u ||
-        m->secondary != 0u || m->bandwidth != 0u || m->estimate_valid != 1u ||
+        m->secondary != 0u || m->sta_bandwidth_mhz != 20u || m->estimate_valid != 1u ||
         m->iq_bytes != C5_LLTF8_V1_IQ_BYTES) return false;
     const uint8_t claim[C5_LLTF8_V1_BYTES] = {
         'C', '5', 'L', '8', 1, 8, 1, 1, 1,
-        1, 0, 0, 1, m->first_word_invalid ? 1u : 0u, 106, 0
+        1, 0, 20, 1, m->first_word_invalid ? 1u : 0u, 106, 0
     };
     memcpy(out, claim, sizeof(claim));
     return true;

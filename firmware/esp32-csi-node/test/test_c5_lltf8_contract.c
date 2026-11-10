@@ -6,12 +6,12 @@ int main(void)
 {
     const c5_lltf8_v1_metadata_t valid = {
         .config_readback = true, .bb_format = 1, .secondary = 0,
-        .bandwidth = 0, .estimate_valid = 1, .first_word_invalid = false,
+        .sta_bandwidth_mhz = 20, .estimate_valid = 1, .first_word_invalid = false,
         .iq_bytes = 106,
     };
     uint8_t claim[16], frame[142], before[142];
     assert(c5_lltf8_v1_encode(&valid, claim));
-    const uint8_t expected[16] = {'C','5','L','8',1,8,1,1,1,1,0,0,1,0,106,0};
+    const uint8_t expected[16] = {'C','5','L','8',1,8,1,1,1,1,0,20,1,0,106,0};
     assert(memcmp(claim, expected, sizeof(claim)) == 0);
     for (unsigned mutant = 0; mutant < 11; mutant++) {
         c5_lltf8_v1_metadata_t m = valid;
@@ -22,8 +22,8 @@ int main(void)
         case 3: m.bb_format = 4; break;
         case 4: m.secondary = 1; break;
         case 5: m.secondary = 2; break;
-        case 6: m.bandwidth = 1; break;
-        case 7: m.bandwidth = 2; break;
+        case 6: m.sta_bandwidth_mhz = 40; break;
+        case 7: m.sta_bandwidth_mhz = 0; break;
         case 8: m.estimate_valid = 0; break;
         case 9: m.iq_bytes = 105; break;
         default: m.iq_bytes = 108; break;

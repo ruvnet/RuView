@@ -7,15 +7,21 @@ components, not the signed int8 packing assumed by ADR-018. Its observed
 106-byte callbacks therefore do not establish 53 native complex int8 samples.
 
 Primary references: [ESP-IDF v6.0.2 CSI configuration](https://github.com/espressif/esp-idf/blob/v6.0.2/components/esp_wifi/include/esp_wifi_he_types.h),
-[C5 vendor features](https://github.com/espressif/esp-idf/blob/v6.0.2/docs/en/api-guides/wifi-vendor-features.rst),
+[C5 vendor features](https://github.com/espressif/esp-idf/blob/v6.0.2/docs/en/api-guides/wifi-driver/wifi-vendor-features.rst),
 and [Espressif's packing clarification](https://github.com/espressif/esp-idf/issues/18982#issuecomment-5420118269).
 
 The new opt-in profile requests only legacy/forced L-LTF with
 `lltf_bit_mode=1`, reads the actual configuration back through the SDK, and
 withholds CSI if that readback differs. A callback can carry this claim only
 when its original metadata reports non-HT OFDM (`cur_bb_format=1`, 11g/11a),
-no secondary channel, primary 20 MHz, valid channel estimate and exactly 106
+no secondary channel, valid channel estimate and exactly 106
 bytes. Rejected metadata is logged at a bounded rate without raw samples.
+The profile sets STA bandwidth to `WIFI_BW20` before association and verifies
+it through `esp_wifi_get_bandwidth` before CSI acquisition. C5 has no per-frame
+`cwb` field; the suffix explicitly reports that interface readback, combined
+with the original non-HT OFDM/secondary-none callback metadata, not an invented
+per-frame bandwidth value. CSI-format fields and zero scaling are read back;
+HE-STBC selection is irrelevant to this non-HT profile.
 Physical readback/callback validation is required before managed capture;
 unknown shape, estimator-validity starvation or another PHY remains blocked.
 
@@ -34,7 +40,7 @@ can still read the declared IQ payload; the suffix must never enter edge DSP.
 | 8 | SDK configuration readback matched, 1 |
 | 9 | Original `cur_bb_format`, required 1 |
 | 10 | Original secondary-channel field, required 0 |
-| 11 | Original bandwidth field, required 0 (20 MHz) |
+| 11 | STA bandwidth API readback in MHz, required 20 |
 | 12 | Original `rx_channel_estimate_info_vld`, required 1 |
 | 13 | Original `first_word_invalid`, 0 or 1 |
 | 14–15 | Original IQ byte count, little-endian 106 |

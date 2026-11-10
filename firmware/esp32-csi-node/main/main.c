@@ -126,6 +126,9 @@ static void event_handler(void *arg, esp_event_base_t event_base,
 #else
         ESP_ERROR_CHECK(esp_wifi_set_band_mode(WIFI_BAND_MODE_2G_ONLY));
 #endif
+#if defined(CONFIG_C5_MANAGED_LLTF8_V1)
+        ESP_ERROR_CHECK(esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW20));
+#endif
 #endif
         esp_wifi_connect();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {

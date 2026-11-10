@@ -135,6 +135,7 @@ static uint32_t s_he_valid = 0;
 static uint32_t s_he_invalid = 0;
 #if defined(CONFIG_C5_MANAGED_LLTF8_V1)
 static bool s_c5_lltf8_readback = false;
+static unsigned s_c5_lltf8_sta_bandwidth_mhz = 0;
 static int64_t s_c5_lltf8_last_log_us = 0;
 #endif
 
@@ -311,7 +312,7 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
         .config_readback = s_c5_lltf8_readback,
         .bb_format = info->rx_ctrl.cur_bb_format,
         .secondary = info->rx_ctrl.second,
-        .bandwidth = info->rx_ctrl.cwb,
+        .sta_bandwidth_mhz = s_c5_lltf8_sta_bandwidth_mhz,
         .estimate_valid = info->rx_ctrl.rx_channel_estimate_info_vld,
         .first_word_invalid = info->first_word_invalid,
         .iq_bytes = info->len,
@@ -320,10 +321,10 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
     const bool native_eligible = c5_lltf8_v1_encode(&native_metadata, native_claim);
     const int64_t native_log_now = esp_timer_get_time();
     if (native_log_now - s_c5_lltf8_last_log_us >= 5000000) {
-        ESP_LOGI(TAG, "C5_LLTF8_V1 readback=%u bits=8 len=%u bb=%u second=%u bw=%u vld=%u first_invalid=%u channel=%u eligible=%u",
+        ESP_LOGI(TAG, "C5_LLTF8_V1 readback=%u bits=8 len=%u bb=%u second=%u sta_bw_mhz=%u vld=%u first_invalid=%u channel=%u eligible=%u",
                  s_c5_lltf8_readback, (unsigned)info->len,
                  native_metadata.bb_format, native_metadata.secondary,
-                 native_metadata.bandwidth, native_metadata.estimate_valid,
+                 native_metadata.sta_bandwidth_mhz, native_metadata.estimate_valid,
                  native_metadata.first_word_invalid, info->rx_ctrl.channel,
                  native_eligible);
         s_c5_lltf8_last_log_us = native_log_now;
@@ -787,15 +788,20 @@ void csi_collector_init(void)
     wifi_csi_config_t applied_config;
     memset(&applied_config, 0, sizeof(applied_config));
     const esp_err_t readback_result = esp_wifi_get_csi_config(&applied_config);
+    wifi_bandwidth_t applied_bandwidth = WIFI_BW40;
+    const esp_err_t bandwidth_result = esp_wifi_get_bandwidth(WIFI_IF_STA, &applied_bandwidth);
+    s_c5_lltf8_sta_bandwidth_mhz = bandwidth_result == ESP_OK && applied_bandwidth == WIFI_BW20 ? 20U : 0U;
     s_c5_lltf8_readback = readback_result == ESP_OK &&
         applied_config.enable == 1U && applied_config.acquire_csi_legacy == 1U &&
         applied_config.acquire_csi_force_lltf == 1U && applied_config.lltf_bit_mode == 1U &&
         applied_config.acquire_csi_ht20 == 0U && applied_config.acquire_csi_ht40 == 0U &&
         applied_config.acquire_csi_vht == 0U && applied_config.acquire_csi_su == 0U &&
         applied_config.acquire_csi_mu == 0U && applied_config.acquire_csi_dcm == 0U &&
-        applied_config.acquire_csi_beamformed == 0U && applied_config.dump_ack_en == 0U;
-    ESP_LOGI(TAG, "C5_LLTF8_CONFIG_V1 readback=%u requested_bits=8 applied_bit_mode=%u result=%d",
-             s_c5_lltf8_readback, (unsigned)applied_config.lltf_bit_mode, readback_result);
+        applied_config.acquire_csi_beamformed == 0U && applied_config.dump_ack_en == 0U &&
+        applied_config.val_scale_cfg == 0U && s_c5_lltf8_sta_bandwidth_mhz == 20U;
+    ESP_LOGI(TAG, "C5_LLTF8_CONFIG_V1 readback=%u requested_bits=8 applied_bit_mode=%u sta_bw_mhz=%u result=%d bw_result=%d",
+             s_c5_lltf8_readback, (unsigned)applied_config.lltf_bit_mode,
+             s_c5_lltf8_sta_bandwidth_mhz, readback_result, bandwidth_result);
     if (!s_c5_lltf8_readback) {
         ESP_LOGE(TAG, "C5 L-LTF8 profile readback failed; CSI remains disabled");
         return;
