@@ -69,41 +69,51 @@ The system is designed to be feature-gated: compile with `--features wasmtime` t
 
 Native plugin (P1):
 
+```toml
+[dependencies]
+homecore = "0.1.0-alpha.0"
+homecore-plugins = "0.1.0-alpha.1"
+async-trait = "0.1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
+
 ```rust
-use homecore_plugins::{HomeCorePlugin, PluginManifest, InProcessRuntime};
+use std::sync::Arc;
+
 use async_trait::async_trait;
+use homecore::HomeCore;
+use homecore_plugins::{
+    HomeCorePlugin, InProcessRuntime, PluginError, PluginId, PluginManifest, PluginRuntime,
+};
 
 struct MyPlugin;
 
 #[async_trait]
 impl HomeCorePlugin for MyPlugin {
-    async fn setup(&mut self) -> Result<(), homecore_plugins::PluginError> {
+    async fn setup(&self, _hc: HomeCore) -> Result<(), PluginError> {
         println!("Plugin setup");
         Ok(())
     }
 
-    async fn teardown(&mut self) -> Result<(), homecore_plugins::PluginError> {
-        println!("Plugin teardown");
-        Ok(())
-    }
-
-    async fn on_state_changed(&mut self, _event: &homecore_plugins::StateChangedEventJson) -> Result<(), homecore_plugins::PluginError> {
+    async fn unload(&self) -> Result<(), PluginError> {
+        println!("Plugin unload");
         Ok(())
     }
 }
 
 #[tokio::main]
-async fn main() {
-    let manifest = PluginManifest {
-        domain: "my_plugin".to_string(),
-        name: "My Plugin".to_string(),
-        ..Default::default()
-    };
+async fn main() -> Result<(), PluginError> {
+    let manifest = PluginManifest::parse_json(
+        r#"{ "domain": "my_plugin", "name": "My Plugin", "version": "0.1.0" }"#,
+    )?;
 
-    let mut runtime = InProcessRuntime::new();
-    let plugin_id = runtime.load(manifest.clone(), MyPlugin).await.expect("load plugin");
-    println!("Loaded plugin: {:?}", plugin_id);
-    runtime.unload(&plugin_id).await.ok();
+    let loaded = InProcessRuntime
+        .load(PluginId::new("my_plugin"), manifest, Arc::new(MyPlugin))
+        .await?;
+    loaded.setup(HomeCore::new()).await?;
+    println!("Loaded plugin: {:?}", loaded.id);
+    loaded.unload().await?;
+    Ok(())
 }
 ```
 

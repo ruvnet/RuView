@@ -139,24 +139,12 @@ jobs:
         CARGO_PROFILE_TEST_DEBUG: "0"
       run: cargo test --workspace --no-default-features
 
-    - name: Verify patched archive, SQLite and cache compatibility
+    - name: Verify patched archive and cache compatibility
       working-directory: v2
       env:
         CARGO_PROFILE_DEV_DEBUG: "0"
         CARGO_PROFILE_TEST_DEBUG: "0"
-      run: >-
-        cargo test --locked -p zip@0.6.6 -p wasmtime-internal-cache
-        -p homecore-recorder -p ndarray-npy
-        --features ndarray-npy/npz,ndarray-npy/compressed_npz
-
-    - name: Verify patched Wasmtime runtime and model archive readers
-      working-directory: v2
-      env:
-        CARGO_PROFILE_DEV_DEBUG: "0"
-        CARGO_PROFILE_TEST_DEBUG: "0"
-      run: |
-        cargo test --locked -p homecore-plugins --features wasmtime
-        cargo test --locked -p cog-pose-estimation --test zip_compatibility --no-default-features
+      run: cargo test --locked -p zip@0.6.6 -p wasmtime-internal-cache -p sqlx-sqlite
 
     - name: Run ADR-147 worldmodel tests
       working-directory: v2

@@ -36,7 +36,7 @@ use numpy::{Complex64, PyArray3, PyUntypedArrayMethods, PyReadonlyArray3};
 /// from wifi_densepose import BfldKind
 /// BfldKind.CompressedHE80   # 802.11ax 80 MHz compressed BFR
 /// ```
-#[pyclass(eq, eq_int, hash, frozen, name = "BfldKind")]
+#[pyclass(from_py_object, eq, eq_int, hash, frozen, name = "BfldKind")]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum PyBfldKind {
     CompressedHE20 = 0,
@@ -216,7 +216,7 @@ impl PyBfldFrame {
     /// shape `[n_rows, n_cols, n_subcarriers]`. Allocates a fresh
     /// Python-owned array; the BfldFrame keeps its own copy.
     fn feedback_matrix<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray3<Complex64>> {
-        PyArray3::from_vec3_bound(
+        PyArray3::from_vec3(
             py,
             &self.reshape_to_vec3(),
         )

@@ -5,7 +5,6 @@ members = [
     "vendor/security/zip-0.6.6",
     "vendor/security/wasmtime-internal-cache-36.0.20",
     "vendor/security/sqlx-sqlite-0.8.6",
-    "vendor/security/ndarray-npy-0.10.0",
     "crates/wifi-densepose-core",
     "crates/wifi-densepose-physics", # ADR-323 bounded pose assessment/correction
     "crates/wifi-densepose-signal",
@@ -149,9 +148,6 @@ members = [
 # excluded for the same reason. Build separately:
 #   cargo build --target wasm32-unknown-unknown --release -p homecore-plugin-example
 exclude = [
-    # Preserve Candle's original consumer-selected feature graph; making this
-    # parent a member adds unused accelerator dependencies. Cog tests cover it.
-    "vendor/security/candle-core-0.9.2",
     "crates/wifi-densepose-wasm-edge",
     "crates/homecore-plugin-example",
     # ADR-368: napi-rs transport for ruview-kernel. Own workspace so napi never
@@ -244,7 +240,10 @@ pcap = "1.1"
 petgraph = "0.6"
 
 # Data loading
-ndarray-npy = "0.10"
+# NPY-only: no consumer reads or writes .npz, so the `npz`/`compressed_npz`
+# defaults (and their zip 6.x dependency, RUSTSEC-2026-0367/0368/0369/0429)
+# are switched off.
+ndarray-npy = { version = "0.10", default-features = false, features = ["num-complex-0_4"] }
 walkdir = "2.4"
 
 # Hashing (for proof)
@@ -347,12 +346,13 @@ strip = false
 inherits = "release"
 debug = true
 
-# Narrow, checksum-verified parent patches select fixed zstd, SQLite and ZIP
-# releases. ZIP consumers include small adapters for its fallible filename API.
+# Narrow, checksum-verified parent manifest patches. Source/API code is
+# unchanged. The Wasmtime cache and legacy ZIP parents use the fixed zstd
+# 0.14.3 implementation; sqlx-sqlite selects libsqlite3-sys 0.39.1, which
+# bundles SQLite 3.54.1 (RUSTSEC-2026-0459). sqlx-sqlite 0.8.6 and 0.9.0 both
+# cap libsqlite3-sys below 0.39, so no registry release can reach it yet.
 # See each directory's RUVIEW-PROVENANCE.md for archive digests and scope.
 [patch.crates-io]
 zip-legacy = { package = "zip", path = "vendor/security/zip-0.6.6" }
 wasmtime-internal-cache = { path = "vendor/security/wasmtime-internal-cache-36.0.20" }
 sqlx-sqlite = { path = "vendor/security/sqlx-sqlite-0.8.6" }
-ndarray-npy = { path = "vendor/security/ndarray-npy-0.10.0" }
-candle-core = { path = "vendor/security/candle-core-0.9.2" }
