@@ -49,6 +49,20 @@ class BuildRows(unittest.TestCase):
         self.assertEqual(rows[0]["condition"], "adjacent_only")
         self.assertEqual(stats["radar_disagrees"], 1)
 
+    def test_input_activity_reference_and_declared_sessions(self):
+        typing = dict(radar(0, True), sensor="input_activity")
+        index = b.RadarIndex([typing])
+        rows, _ = b.build_rows([cap(500)], room="office", session="s1", split="train",
+                               labels="radar", condition="moving_occupied", radar=index)
+        self.assertEqual(rows[0]["label_source"], "input_gated")
+        # A declared-empty session drops rows where someone was typing.
+        rows, stats = b.build_rows([cap(500), cap(5000)], room="office", session="e1",
+                                   split="train", labels="declared", condition="quiet_empty",
+                                   radar=index)
+        self.assertEqual([r["timestamp_ms"] for r in rows], [5000])
+        self.assertEqual(rows[0]["label_source"], "operator_declared")
+        self.assertEqual(stats["contradicted_by_reference"], 1)
+
     def test_incumbent_labels_are_marked_as_such(self):
         capture = [cap(1, presence=False, level="absent", conf=0.9), cap(2), cap(3, level="active"),
                    cap(4, presence="yes")]

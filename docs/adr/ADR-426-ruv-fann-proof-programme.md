@@ -52,9 +52,16 @@ It is run on each machine the head is meant for and reported per machine.
   - `radar_gated`: the operator records a session under one declared condition and a radar
     (`radar_window_logger.py`) gates it. A row is kept only when a healthy radar window covers it
     and agrees with the declared occupancy. Everything else is dropped and counted.
+  - `input_gated`: the same gate with `input_activity_logger.py` as the reference. Keyboard or
+    mouse input within the last three seconds proves someone is at the workstation. It records
+    idle time only. It is one-sided: no input says nothing, so it can never label a row empty.
+  - `operator_declared`: the operator declares the session's condition and leaves. Any row a
+    reference contradicts is dropped. This is the available way to label an empty room without
+    a radar.
   - `incumbent`: the label is the server's own classification.
 - Every replay and curve report states `label_sources` and `labels_are_reference`. Only
-  `radar_gated` or `reference` labels make a report an accuracy result. The CLI prints a warning
+  `radar_gated`, `input_gated`, `operator_declared` or `reference` labels make a report an
+  accuracy result, and the report lists which were used because they differ in strength. The CLI prints a warning
   otherwise.
 - `ruview-fann-fit` fits and exports a head from a room's Train rows only.
 
@@ -155,6 +162,18 @@ The head fitted on session 1 shadowed the live server during session 2: 998 obse
 above: server says absent, candidate says occupied. The shadow had no effect on published state.
 Five minutes on one node is a functional check, not the multi-day run the claim needs.
 
+### 6. First reference-backed figure: occupied only
+
+A third session recorded the C6 beside the input-activity reference for 7.3 minutes: 1,506
+observations, of which 429 fall in windows where typing proved the desk was occupied.
+
+- The server's per-node classifier reported present on all 429. Sensitivity 100 % on
+  input-confirmed occupied observations. MEASURED, one node, one room, one session.
+- It reported present on 1,505 of the 1,506 observations overall, so this figure cannot tell a
+  working detector from one that is always on. The false-positive rate needs an empty room.
+- The short "absent" bursts seen in sessions 1 and 2 (28 runs of 0.3 to 1.2 s in five minutes)
+  did not recur. Nothing was changed in the classifier on the strength of one session.
+
 ## Consequences
 
 - Fitting must be treated as platform-specific until the engine uses a portable `exp`. Reported
@@ -162,8 +181,10 @@ Five minutes on one node is a functional check, not the multi-day run the claim 
 - The per-node feature vector is not sufficient for a presence head. The room-learner features
   (ADR-420) remain the intended input, which makes PR #2423 the blocker for a meaningful
   candidate.
-- The accuracy question (claim 3) is still open and needs: a radar reference, two rooms, and
-  sessions recorded under each of the four conditions, including adjacent-room activity.
+- The accuracy question (claim 3) is still open. The next step needs no new hardware: an
+  operator-declared empty session, to get a false-positive rate and the first two-class
+  reference-labelled fit. The full protocol still needs a radar, two rooms, and sessions under
+  each of the four conditions, including adjacent-room activity.
 - Claim 2 needs the Pi 5 back online.
 - The server gains one optional dependency behind a feature that is off by default, and one
   read-only status route.

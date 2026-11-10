@@ -72,8 +72,16 @@ pub struct ReplayRow {
     pub label_source: Option<String>,
 }
 
-/// Label sources that are independent of the models being compared.
-pub const REFERENCE_LABEL_SOURCES: [&str; 2] = ["radar_gated", "reference"];
+/// Label sources that are independent of the models being compared:
+/// a radar, keyboard/mouse activity (occupied only), an operator's declared
+/// condition, or another stated reference. They differ in strength, so a
+/// report lists the ones it used.
+pub const REFERENCE_LABEL_SOURCES: [&str; 4] = [
+    "radar_gated",
+    "input_gated",
+    "operator_declared",
+    "reference",
+];
 
 /// Distinct label sources in `rows`, and whether every row has a reference label.
 pub fn label_provenance(rows: &[ReplayRow]) -> (Vec<String>, bool) {

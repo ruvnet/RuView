@@ -18,6 +18,18 @@ Two label modes, and they are not interchangeable:
     mode whose replay report is an accuracy result, and it inherits the
     radar's own accuracy (a datasheet figure, CLAIMED).
 
+    The same mode accepts any reference in that window format. With
+    ``input_activity_logger.py`` the rows are written ``input_gated``; that
+    reference only ever confirms *occupied*, so it cannot gate an empty
+    session.
+
+``--labels declared``
+    The operator declares the session's condition and nothing confirms it
+    (``label_source: "operator_declared"``). Meant for empty-room sessions,
+    where the operator starts the recording and leaves. If ``--radar`` is
+    given, any row inside a window where that reference saw someone is
+    dropped, so a session cannot be declared empty while someone is typing.
+
 ``--labels incumbent``
     The label is the server's own classification. A replay on such rows
     measures how well a head imitates the server, nothing else; the rows carry
@@ -70,6 +82,7 @@ class RadarIndex:
 
     def __init__(self, windows: Iterable[dict]):
         spans = []
+        self.label_source = "radar_gated"
         for w in windows:
             start, end = w.get("window_start_ms"), w.get("timestamp_ms")
             if (w.get("health") != "ok" or not isinstance(w.get("presence"), bool)
@@ -77,6 +90,8 @@ class RadarIndex:
                 continue
             src = w.get("source") if isinstance(w.get("source"), dict) else {}
             spans.append((start, end, w["presence"], bool(src.get("simulated"))))
+            if w.get("sensor") == "input_activity":
+                self.label_source = "input_gated"
         spans.sort()
         self.spans = spans
         self.starts = [s[0] for s in spans]
@@ -115,7 +130,7 @@ def build_rows(capture: Iterable[dict], *, room: str, session: str, split: str, 
                node: Optional[int] = None, condition: Optional[str] = None,
                radar: Optional[RadarIndex] = None) -> Tuple[List[dict], Dict[str, int]]:
     stats = {"capture_rows": 0, "kept": 0, "other_node": 0, "bad_row": 0, "no_radar_window": 0,
-             "radar_disagrees": 0, "no_incumbent_label": 0}
+             "radar_disagrees": 0, "no_incumbent_label": 0, "contradicted_by_reference": 0}
     rows = []
     for rec in capture:
         stats["capture_rows"] += 1
@@ -139,7 +154,14 @@ def build_rows(capture: Iterable[dict], *, room: str, session: str, split: str, 
             if presence != (condition in OCCUPIED):
                 stats["radar_disagrees"] += 1
                 continue
-            row_condition, source, synthetic = condition, "radar_gated", synthetic or simulated
+            row_condition, source = condition, radar.label_source
+            synthetic = synthetic or simulated
+        elif labels == "declared":
+            hit = radar.lookup(ts) if radar else None
+            if hit is not None and hit[0] != (condition in OCCUPIED):
+                stats["contradicted_by_reference"] += 1
+                continue
+            row_condition, source = condition, "operator_declared"
         else:
             row_condition = incumbent_condition(inc)
             if row_condition is None:
@@ -162,10 +184,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--room", required=True)
     ap.add_argument("--session", required=True)
     ap.add_argument("--split", required=True, choices=SPLITS)
-    ap.add_argument("--labels", required=True, choices=("radar", "incumbent"))
-    ap.add_argument("--radar", help="radar-window JSONL (required for --labels radar)")
+    ap.add_argument("--labels", required=True, choices=("radar", "declared", "incumbent"))
+    ap.add_argument("--radar", help="reference-window JSONL from radar_window_logger.py or "
+                                    "input_activity_logger.py (required for --labels radar)")
     ap.add_argument("--condition", choices=CONDITIONS,
-                    help="condition the session was recorded under (required for --labels radar)")
+                    help="condition the session was recorded under "
+                         "(required for --labels radar and declared)")
+    ap.add_argument("--trim-s", type=float, default=0.0,
+                    help="drop this many seconds from each end of the capture, e.g. the "
+                         "time it takes the operator to leave and come back")
     ap.add_argument("--node", type=int, help="keep one node id only")
     ap.add_argument("--out", required=True)
     args = ap.parse_args(argv)
@@ -174,13 +201,21 @@ def main(argv: Optional[List[str]] = None) -> int:
         if not NAME_RE.match(name):
             ap.error(f"{name!r}: use 1-64 letters, digits, '_', '.', '-'")
     radar = None
-    if args.labels == "radar":
-        if not args.radar or not args.condition:
-            ap.error("--labels radar needs --radar and --condition")
+    if args.labels == "radar" and not args.radar:
+        ap.error("--labels radar needs --radar")
+    if args.labels in ("radar", "declared") and not args.condition:
+        ap.error(f"--labels {args.labels} needs --condition")
+    if args.radar and args.labels != "incumbent":
         with open(args.radar, encoding="utf-8") as f:
             radar = RadarIndex(parse_jsonl(f)[0])
     with open(args.capture, encoding="utf-8") as f:
         capture, bad_lines = parse_jsonl(f)
+    if args.trim_s > 0:
+        times = [c["timestamp_ms"] for c in capture if isinstance(c.get("timestamp_ms"), int)]
+        if times:
+            lo, hi = min(times) + args.trim_s * 1000, max(times) - args.trim_s * 1000
+            capture = [c for c in capture
+                       if isinstance(c.get("timestamp_ms"), int) and lo <= c["timestamp_ms"] <= hi]
     rows, stats = build_rows(capture, room=args.room, session=args.session, split=args.split,
                              labels=args.labels, node=args.node, condition=args.condition,
                              radar=radar)
