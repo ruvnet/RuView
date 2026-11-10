@@ -146,7 +146,7 @@ ignore = [
     "RUSTSEC-2025-0100",   # unic-ucd-ident
 
     # -----------------------------------------------------------------------
-    # zip 0.6.x / 6.x / 7.x — RUSTSEC-2026-0367, RUSTSEC-2026-0368,
+    # Remaining legacy zip 0.6.x — RUSTSEC-2026-0367, RUSTSEC-2026-0368,
     # RUSTSEC-2026-0369
     # Three privilege-escalation advisories, all confined to the zip crate's
     # EXTRACTION path:
@@ -163,10 +163,10 @@ ignore = [
     # NOT REACHABLE from this workspace: the vulnerable API is
     # `ZipArchive::extract` / `ZipStreamReader::extract`, and no crate in
     # the resolved graph calls either one.
-    #   - ndarray-npy 0.10.0 (src/npz.rs) uses ZipArchive::new + by_name /
-    #     by_index for reading and ZipWriter for writing.
-    #   - candle-core 0.4.1 (src/npy.rs, src/pickle.rs) and 0.9.2
-    #     (src/py.rs, src/pickle.rs) use the same read/write subset.
+    #   - candle-core 0.4.1 (src/npy.rs, src/pickle.rs) uses ZipArchive::new
+    #     + by_name / by_index for reading and ZipWriter for writing.
+    #   - ndarray-npy 0.10.0 and candle-core 0.9.2 now use patched ZIP 9;
+    #     they no longer need these exclusions.
     #   - torch-sys 0.24.0 (build.rs) extracts the libtorch archive with its
     #     own per-entry loop — archive.by_index(i), fs::File::create and
     #     io::copy — so it never calls extract(), never creates a symlink
@@ -175,11 +175,9 @@ ignore = [
     # The single archive it does extract is the pinned libtorch build
     # downloaded over HTTPS from download.pytorch.org.
     #
-    # Mitigation: a version bump is not possible yet — no published release
-    # of the parents moves to zip >= 9.0.0 (ndarray-npy 0.10.0 -> zip ^6,
-    # candle-core 0.11.0 -> zip ^8.6, tch/torch-sys 0.26.0 -> zip ^0.6).
-    # Re-evaluate when candle-core / ndarray-npy / tch ship a release that
-    # adopts zip 9.x, then delete this block and bump the lockfile.
+    # Re-evaluate when the remaining legacy Candle / tch consumers can move
+    # off ZIP 0.6, then delete this block. No new advisory is suppressed by
+    # the SQLite / Wasmtime / ZIP 9 compatibility update.
     "RUSTSEC-2026-0367",   # zip: SUID/SGID preserved during extraction
     "RUSTSEC-2026-0368",   # zip: extract() symlink target escapes destination
     "RUSTSEC-2026-0369",   # zip: extract() applies permissions through symlinks

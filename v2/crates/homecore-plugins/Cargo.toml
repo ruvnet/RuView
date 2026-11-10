@@ -59,7 +59,7 @@ base64 = "0.22"
 # Upgraded from 25.0.3 to remediate the Cranelift/Winch sandbox advisories;
 # 40.0.4 was subsequently replaced because of RUSTSEC-2026-0114.
 # Patched 36.x retains HOMECORE's Rust 1.89 MSRV.
-wasmtime = { version = "36.0.8", optional = true }
+wasmtime = { version = "36.0.20", optional = true }
 
 
 [dev-dependencies]
