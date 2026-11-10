@@ -1,0 +1,335 @@
+/* ==========================================================================
+   RuView Physical Telemetry Interface — ElmasCore Theme
+   Strictly WCAG 2.2 AA Compliant, High-Density, Low-Power
+   ========================================================================== */
+
+:root {
+  --bg-primary: #0f141c;
+  --bg-surface: #18202c;
+  --bg-card: #1e2837;
+  --border-color: #2b3a4f;
+  --border-focus: #3b82f6;
+
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+
+  --accent-blue: #38bdf8;
+  --accent-cyan: #06b6d4;
+  --status-ok: #10b981;
+  --status-warn: #f59e0b;
+  --status-alert: #ef4444;
+
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+[data-theme="light"] {
+  --bg-primary: #f8fafc;
+  --bg-surface: #ffffff;
+  --bg-card: #f1f5f9;
+  --border-color: #cbd5e1;
+  --border-focus: #2563eb;
+
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+
+  --accent-blue: #0284c7;
+  --accent-cyan: #0891b2;
+  --status-ok: #059669;
+  --status-warn: #d97706;
+  --status-alert: #dc2626;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  line-height: 1.5;
+  font-size: 14px;
+}
+
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: 0;
+  background: var(--border-focus);
+  color: #fff;
+  padding: 8px 16px;
+  z-index: 100;
+  text-decoration: none;
+  font-weight: 600;
+  border-radius: 0 0 4px 0;
+}
+
+.skip-link:focus {
+  top: 0;
+}
+
+.num, code, pre, .stat-value, td.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.container {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 16px 24px;
+}
+
+/* Header */
+header.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 16px;
+  margin-bottom: 20px;
+}
+
+.header-brand {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.header-brand h1 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.tagline {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.header-controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.badge-ok { background: rgba(16, 185, 129, 0.15); color: var(--status-ok); border: 1px solid var(--status-ok); }
+.badge-warn { background: rgba(245, 158, 11, 0.15); color: var(--status-warn); border: 1px solid var(--status-warn); }
+.badge-alert { background: rgba(239, 68, 68, 0.15); color: var(--status-alert); border: 1px solid var(--status-alert); }
+.badge-idle { background: rgba(100, 116, 139, 0.15); color: var(--text-muted); border: 1px solid var(--border-color); }
+
+.pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: currentColor;
+}
+
+/* Alert Banner */
+.alert-banner {
+  display: none;
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid var(--status-alert);
+  color: var(--status-alert);
+  padding: 12px 16px;
+  border-radius: 6px;
+  margin-bottom: 20px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.alert-banner.active {
+  display: flex;
+}
+
+.alert-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-weight: 600;
+}
+
+/* Metrics Grid */
+.telemetry-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.metric-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+}
+
+.metric-header {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.metric-value-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.metric-value {
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.metric-unit {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.metric-sub {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  margin-top: 6px;
+}
+
+/* Main Display Panels */
+.panels-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+@media (max-width: 900px) {
+  .panels-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.panel {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.panel-header {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.panel-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.canvas-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 16px;
+  min-height: 320px;
+  background: var(--bg-card);
+}
+
+canvas {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+
+/* Node Table */
+.table-panel {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  margin-bottom: 20px;
+  overflow: hidden;
+}
+
+table.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+table.data-table th, table.data-table td {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+table.data-table th {
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+table.data-table tr:last-child td {
+  border-bottom: none;
+}
+
+/* Buttons and Controls */
+button.btn-action {
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+button.btn-action:hover {
+  background: var(--border-color);
+}
+
+button.btn-action:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 1px;
+}
+
+/* Footer */
+footer.app-footer {
+  border-top: 1px solid var(--border-color);
+  padding-top: 16px;
+  margin-top: 24px;
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+

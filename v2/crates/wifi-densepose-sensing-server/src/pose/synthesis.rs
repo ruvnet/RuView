@@ -1,26 +1,49 @@
-//! Skeleton derivation, pose estimation, and temporal smoothing.
+use crate::domain::types::{BoundingBox, PersonDetection, PoseKeypoint, SensingUpdate};
 
-use crate::types::*;
+const KP_NAMES: [&str; 17] = [
+    "nose",
+    "left_eye",
+    "right_eye",
+    "left_ear",
+    "right_ear",
+    "left_shoulder",
+    "right_shoulder",
+    "left_elbow",
+    "right_elbow",
+    "left_wrist",
+    "right_wrist",
+    "left_hip",
+    "right_hip",
+    "left_knee",
+    "right_knee",
+    "left_ankle",
+    "right_ankle",
+];
 
-/// Expected bone lengths in pixel-space for the COCO-17 skeleton.
-pub const POSE_BONE_PAIRS: &[(usize, usize)] = &[
-    (5, 7),
-    (7, 9),
-    (6, 8),
-    (8, 10),
-    (5, 11),
-    (6, 12),
-    (11, 13),
-    (13, 15),
-    (12, 14),
-    (14, 16),
-    (5, 6),
-    (11, 12),
+const KP_OFFSETS: [(f64, f64); 17] = [
+    (0.0, -80.0),   // 0  nose
+    (-8.0, -88.0),  // 1  left_eye
+    (8.0, -88.0),   // 2  right_eye
+    (-16.0, -82.0), // 3  left_ear
+    (16.0, -82.0),  // 4  right_ear
+    (-30.0, -50.0), // 5  left_shoulder
+    (30.0, -50.0),  // 6  right_shoulder
+    (-45.0, -15.0), // 7  left_elbow
+    (45.0, -15.0),  // 8  right_elbow
+    (-50.0, 20.0),  // 9  left_wrist
+    (50.0, 20.0),   // 10 right_wrist
+    (-20.0, 20.0),  // 11 left_hip
+    (20.0, 20.0),   // 12 right_hip
+    (-22.0, 70.0),  // 13 left_knee
+    (22.0, 70.0),   // 14 right_knee
+    (-24.0, 120.0), // 15 left_ankle
+    (24.0, 120.0),  // 16 right_ankle
 ];
 
 const TORSO_KP: [usize; 4] = [5, 6, 11, 12];
 const EXTREMITY_KP: [usize; 4] = [9, 10, 15, 16];
 
+/// Generate a single person's skeleton with per-person spatial offset and phase stagger.
 pub fn derive_single_person_pose(
     update: &SensingUpdate,
     person_idx: usize,
@@ -58,55 +81,16 @@ pub fn derive_single_person_pose(
     let burst = (feat.change_points as f64 / 20.0).clamp(0.0, 0.3);
     let noise_seed = person_idx as f64 * 97.1;
     let noise_val = (noise_seed.sin() * 43758.545).fract();
+
     let snr_factor = ((feat.variance - 0.5) / 10.0).clamp(0.0, 1.0);
     let base_confidence = cls.confidence * (0.6 + 0.4 * snr_factor) * conf_decay;
 
     let base_x = 320.0 + stride_x + lean_x * 0.5 + person_x_offset;
     let base_y = 240.0 - motion_score * 8.0;
 
-    let kp_names = [
-        "nose",
-        "left_eye",
-        "right_eye",
-        "left_ear",
-        "right_ear",
-        "left_shoulder",
-        "right_shoulder",
-        "left_elbow",
-        "right_elbow",
-        "left_wrist",
-        "right_wrist",
-        "left_hip",
-        "right_hip",
-        "left_knee",
-        "right_knee",
-        "left_ankle",
-        "right_ankle",
-    ];
-
-    let kp_offsets: [(f64, f64); 17] = [
-        (0.0, -80.0),
-        (-8.0, -88.0),
-        (8.0, -88.0),
-        (-16.0, -82.0),
-        (16.0, -82.0),
-        (-30.0, -50.0),
-        (30.0, -50.0),
-        (-45.0, -15.0),
-        (45.0, -15.0),
-        (-50.0, 20.0),
-        (50.0, 20.0),
-        (-20.0, 20.0),
-        (20.0, 20.0),
-        (-22.0, 70.0),
-        (22.0, 70.0),
-        (-24.0, 120.0),
-        (24.0, 120.0),
-    ];
-
-    let keypoints: Vec<PoseKeypoint> = kp_names
+    let keypoints: Vec<PoseKeypoint> = KP_NAMES
         .iter()
-        .zip(kp_offsets.iter())
+        .zip(KP_OFFSETS.iter())
         .enumerate()
         .map(|(i, (name, (dx, dy)))| {
             let breath_dx = if TORSO_KP.contains(&i) {
@@ -169,7 +153,7 @@ pub fn derive_single_person_pose(
                 x: final_x,
                 y: final_y,
                 z: lean_x * 0.02,
-                confidence: kp_conf.clamp(0.1, 1.0),
+                confidence: kp_conf.clamp(0.15, 1.0),
             }
         })
         .collect();
@@ -192,93 +176,23 @@ pub fn derive_single_person_pose(
             height: (max_y - min_y).max(160.0),
         },
         zone: format!("zone_{}", person_idx + 1),
-        // Field-derived fields (#1050) — defaulted here; the live `/ws/sensing`
-        // path attaches real positions via `attach_field_positions`.
         position: [0.0, 0.0, 0.0],
         motion_score: 0.0,
         pose: None,
     }
 }
 
+/// Derive all person pose detections from sensing update.
 pub fn derive_pose_from_sensing(update: &SensingUpdate) -> Vec<PersonDetection> {
     let cls = &update.classification;
     if !cls.presence {
         return vec![];
     }
+
     let person_count = update.estimated_persons.unwrap_or(1).max(1);
+
     (0..person_count)
         .map(|idx| derive_single_person_pose(update, idx, person_count))
         .collect()
 }
 
-/// Apply temporal EMA smoothing and bone-length clamping to person detections.
-pub fn apply_temporal_smoothing(persons: &mut [PersonDetection], ns: &mut NodeState) {
-    if persons.is_empty() {
-        return;
-    }
-
-    let alpha = ns.ema_alpha();
-    let person = &mut persons[0];
-
-    let current_kps: Vec<[f64; 3]> = person
-        .keypoints
-        .iter()
-        .map(|kp| [kp.x, kp.y, kp.z])
-        .collect();
-
-    let smoothed = if let Some(ref prev) = ns.prev_keypoints {
-        let mut out = Vec::with_capacity(current_kps.len());
-        for (cur, prv) in current_kps.iter().zip(prev.iter()) {
-            out.push([
-                alpha * cur[0] + (1.0 - alpha) * prv[0],
-                alpha * cur[1] + (1.0 - alpha) * prv[1],
-                alpha * cur[2] + (1.0 - alpha) * prv[2],
-            ]);
-        }
-        clamp_bone_lengths_f64(&mut out, prev);
-        out
-    } else {
-        current_kps.clone()
-    };
-
-    for (kp, s) in person.keypoints.iter_mut().zip(smoothed.iter()) {
-        kp.x = s[0];
-        kp.y = s[1];
-        kp.z = s[2];
-    }
-    ns.prev_keypoints = Some(smoothed);
-}
-
-fn clamp_bone_lengths_f64(pose: &mut [[f64; 3]], prev: &[[f64; 3]]) {
-    for &(p, c) in POSE_BONE_PAIRS {
-        if p >= pose.len() || c >= pose.len() {
-            continue;
-        }
-        let prev_len = dist_f64(&prev[p], &prev[c]);
-        if prev_len < 1e-6 {
-            continue;
-        }
-        let cur_len = dist_f64(&pose[p], &pose[c]);
-        if cur_len < 1e-6 {
-            continue;
-        }
-        let ratio = cur_len / prev_len;
-        let lo = 1.0 - MAX_BONE_CHANGE_RATIO;
-        let hi = 1.0 + MAX_BONE_CHANGE_RATIO;
-        if ratio < lo || ratio > hi {
-            let target = prev_len * ratio.clamp(lo, hi);
-            let scale = target / cur_len;
-            for dim in 0..3 {
-                let diff = pose[c][dim] - pose[p][dim];
-                pose[c][dim] = pose[p][dim] + diff * scale;
-            }
-        }
-    }
-}
-
-fn dist_f64(a: &[f64; 3], b: &[f64; 3]) -> f64 {
-    let dx = b[0] - a[0];
-    let dy = b[1] - a[1];
-    let dz = b[2] - a[2];
-    (dx * dx + dy * dy + dz * dz).sqrt()
-}

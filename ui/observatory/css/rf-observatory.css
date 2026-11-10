@@ -1,0 +1,339 @@
+/**
+ * Scientific RF Telemetry & Spatial Observatory Design System.
+ * High-contrast, tabular typography, WCAG 2.2 AA compliant, zero GPU bloat.
+ * Complies with ELMAS.md: <= 350 lines, no gratuitous gradients or decorative noise.
+ */
+
+:root {
+  --bg-base: #0a0e14;
+  --bg-surface: #111827;
+  --bg-surface-elevated: #1e293b;
+  --border-subtle: #1f2937;
+  --border-prominent: #374151;
+  --text-main: #f3f4f6;
+  --text-muted: #9ca3af;
+  --text-dim: #6b7280;
+  
+  --emerald-live: #10b981;
+  --emerald-glow: rgba(16, 185, 129, 0.2);
+  --cyan-accent: #06b6d4;
+  --amber-warn: #f59e0b;
+  --red-emergency: #ef4444;
+  
+  --font-mono: "JetBrains Mono", Consolas, "SF Mono", monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  background-color: var(--bg-base);
+  color: var(--text-main);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.4;
+  height: 100vh;
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Screen reader only utility */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+
+/* Header layout */
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 48px;
+  padding: 0 16px;
+  background-color: var(--bg-surface);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.brand-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-title {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.5px;
+  color: var(--text-main);
+}
+
+.brand-subtitle {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.header-status {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+/* Status badges */
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 2px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.badge--live {
+  background-color: rgba(16, 185, 129, 0.15);
+  color: var(--emerald-live);
+  border: 1px solid var(--emerald-live);
+}
+
+.badge--synthetic {
+  background-color: rgba(245, 158, 11, 0.15);
+  color: var(--amber-warn);
+  border: 1px solid var(--amber-warn);
+}
+
+.badge--offline {
+  background-color: rgba(239, 68, 68, 0.15);
+  color: var(--red-emergency);
+  border: 1px solid var(--red-emergency);
+}
+
+.badge--occupied {
+  background-color: rgba(6, 182, 212, 0.15);
+  color: var(--cyan-accent);
+  border: 1px solid var(--cyan-accent);
+}
+
+.badge--empty {
+  background-color: rgba(107, 114, 128, 0.15);
+  color: var(--text-muted);
+  border: 1px solid var(--border-prominent);
+}
+
+.badge--emergency {
+  background-color: var(--red-emergency);
+  color: #ffffff;
+  animation: pulse-emergency 1s infinite alternate;
+}
+
+@keyframes pulse-emergency {
+  from { opacity: 1; }
+  to { opacity: 0.6; }
+}
+
+.link-btn {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--cyan-accent);
+  text-decoration: none;
+  padding: 4px 8px;
+  border: 1px solid var(--border-prominent);
+  border-radius: 2px;
+  transition: background-color 0.15s ease;
+}
+
+.link-btn:hover, .link-btn:focus-visible {
+  background-color: rgba(6, 182, 212, 0.15);
+  outline: 2px solid var(--cyan-accent);
+}
+
+/* 2x2 Master Grid Layout */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 12px;
+  padding: 12px;
+  height: calc(100vh - 48px - 28px);
+}
+
+.telemetry-card {
+  display: flex;
+  flex-direction: column;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background-color: rgba(0, 0, 0, 0.25);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.card-title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+}
+
+.card-metrics {
+  display: flex;
+  gap: 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.metric-item {
+  color: var(--text-dim);
+}
+
+.metric-item span {
+  color: var(--text-main);
+  font-weight: 600;
+}
+
+.card-canvas-container {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+  background-color: var(--bg-base);
+}
+
+.card-canvas-container canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* Card custom layouts */
+.vitals-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  padding: 10px 12px;
+  background-color: var(--bg-surface);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.stat-box {
+  background-color: var(--bg-surface-elevated);
+  padding: 8px;
+  border-radius: 2px;
+  border-left: 2px solid var(--cyan-accent);
+}
+
+.stat-label {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+}
+
+.stat-value {
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-top: 2px;
+}
+
+.stat-unit {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+/* Event log in incident card */
+.incident-log {
+  padding: 8px 12px;
+  height: 72px;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background-color: rgba(0, 0, 0, 0.3);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.log-entry {
+  padding: 2px 0;
+  color: var(--text-muted);
+}
+
+.entry--critical {
+  color: var(--red-emergency);
+  font-weight: 600;
+}
+
+/* Bottom footer status */
+.app-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 28px;
+  padding: 0 16px;
+  background-color: var(--bg-surface);
+  border-top: 1px solid var(--border-subtle);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.footer-metrics {
+  display: flex;
+  gap: 16px;
+}
+
+.footer-metrics span {
+  color: var(--text-muted);
+}
+
+/* Control buttons */
+.btn-control {
+  background-color: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border-prominent);
+  border-radius: 2px;
+  padding: 2px 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-control:hover, .btn-control:focus-visible {
+  color: var(--text-main);
+  border-color: var(--text-muted);
+  outline: 2px solid var(--cyan-accent);
+}
+
+/* Responsive adjustment for modest displays */
+@media (max-width: 900px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto;
+    overflow-y: auto;
+    height: auto;
+  }
+  .telemetry-card {
+    height: 320px;
+  }
+}
+

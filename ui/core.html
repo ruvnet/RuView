@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="fr" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RuView Physical Telemetry | ElmasCore</title>
+  <meta name="description" content="Télémétrie RF sans caméra : Présence, Respiration, Chute et Maillage CSI en temps réel.">
+  <link rel="stylesheet" href="core.css">
+</head>
+<body>
+  <a href="#main-content" class="skip-link">Passer au contenu principal</a>
+
+  <div class="container">
+    <header class="app-header">
+      <div class="header-brand">
+        <h1>RuView <span style="font-weight: 400; color: var(--accent-blue);">Core</span></h1>
+        <span class="tagline">Perception RF Physique Sans Caméra</span>
+      </div>
+      <div class="header-controls">
+        <div id="conn-badge" class="badge badge-idle" aria-live="polite">
+          <span class="pulse-dot"></span>
+          <span id="conn-text">Déconnecté</span>
+        </div>
+        <button id="theme-toggle" class="btn-action" aria-label="Basculer le thème clair ou sombre">
+          🌓 <span id="theme-text">Thème</span>
+        </button>
+      </div>
+    </header>
+
+    <div id="alert-banner" class="alert-banner" role="alert" aria-live="assertive">
+      <div class="alert-content">
+        <span style="font-size: 1.5rem;">⚠️</span>
+        <div>
+          <div style="font-size: 1rem; font-weight: 700;">ALERTE CHUTE DÉTECTÉE</div>
+          <div id="alert-details" style="font-size: 0.85rem; font-weight: 400;">Onde de choc inertielle RF observée sur les nœuds maillés.</div>
+        </div>
+      </div>
+      <button id="dismiss-alert" class="btn-action" style="border-color: var(--status-alert); color: var(--status-alert);">
+        Acquitter l'alerte
+      </button>
+    </div>
+
+    <main id="main-content">
+      <section class="telemetry-grid" aria-label="Indicateurs vitaux et physiques principaux">
+        <article class="metric-card">
+          <div class="metric-header">
+            <span>Présence</span>
+            <span id="presence-badge" class="badge badge-idle">Inactif</span>
+          </div>
+          <div class="metric-value-row">
+            <span id="presence-val" class="metric-value">ABSENT</span>
+          </div>
+          <div id="presence-sub" class="metric-sub num">Perturbation: 0.00 σ</div>
+        </article>
+
+        <article class="metric-card">
+          <div class="metric-header">
+            <span>Respiration</span>
+            <span class="badge badge-ok">Physique</span>
+          </div>
+          <div class="metric-value-row">
+            <span id="breathing-bpm" class="metric-value num">--</span>
+            <span class="metric-unit">resp/min</span>
+          </div>
+          <div id="breathing-sub" class="metric-sub num">Fréquence: -- Hz (Conf: 0%)</div>
+        </article>
+
+        <article class="metric-card">
+          <div class="metric-header">
+            <span>Énergie Doppler</span>
+            <span id="motion-badge" class="badge badge-ok">Normal</span>
+          </div>
+          <div class="metric-value-row">
+            <span id="motion-val" class="metric-value num">0.00</span>
+            <span class="metric-unit">m/s²</span>
+          </div>
+          <div class="metric-sub num">Seuil critique: 1.80 m/s²</div>
+        </article>
+
+        <article class="metric-card">
+          <div class="metric-header">
+            <span>Réseau CSI</span>
+            <span id="nodes-badge" class="badge badge-idle">0 Nœud</span>
+          </div>
+          <div class="metric-value-row">
+            <span id="nodes-count" class="metric-value num">0</span>
+            <span class="metric-unit">actifs</span>
+          </div>
+          <div id="nodes-sub" class="metric-sub num">Débit CSI global: 0 fps</div>
+        </article>
+      </section>
+
+      <section class="panels-grid" aria-label="Visualisations spatiales et articulaires">
+        <div class="panel">
+          <div class="panel-header">
+            <h2 class="panel-title">Champ de Perturbation RF (20×20)</h2>
+            <span class="badge badge-idle" id="rf-mode">Atténuation brute</span>
+          </div>
+          <div class="canvas-container">
+            <canvas id="rf-canvas" width="280" height="280" aria-label="Matrice 20 par 20 des perturbations du signal WiFi"></canvas>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <h2 class="panel-title">Projection Articulaire 2D (17 Points COCO)</h2>
+            <span class="badge badge-idle" id="pose-mode">Estimation cinématique</span>
+          </div>
+          <div class="canvas-container">
+            <canvas id="pose-canvas" width="280" height="280" aria-label="Projection 2D des 17 articulations corporelles sans illusion 3D"></canvas>
+          </div>
+        </div>
+      </section>
+
+      <div class="panel" style="margin-bottom: 20px;">
+        <div class="panel-header">
+          <h2 class="panel-title">Forme d'Onde Physiologique (Micro-Doppler / Respiration)</h2>
+          <span class="metric-sub num" id="sparkline-stats">Fenêtre: 10s • Échantillonnage: 20 Hz</span>
+        </div>
+        <div style="padding: 16px; background: var(--bg-card);">
+          <svg id="sparkline-svg" width="100%" height="80" viewBox="0 0 800 80" preserveAspectRatio="none" style="display: block; overflow: visible;">
+            <defs>
+              <linearGradient id="spark-grad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="var(--accent-blue)" stop-opacity="0.4"/>
+                <stop offset="100%" stop-color="var(--accent-blue)" stop-opacity="0.0"/>
+              </linearGradient>
+            </defs>
+            <path id="spark-area" fill="url(#spark-grad)" d="M0,80 L800,80 Z"/>
+            <path id="spark-line" fill="none" stroke="var(--accent-blue)" stroke-width="2" stroke-linecap="round" d="M0,40 L800,40"/>
+          </svg>
+        </div>
+      </div>
+
+      <div class="table-panel">
+        <div class="panel-header">
+          <h2 class="panel-title">Télémétrie Nœuds ESP32 CSI</h2>
+          <span class="metric-sub num">Synchronisation de phase distribuée</span>
+        </div>
+        <table class="data-table" aria-label="Tableau de statut des nœuds capteurs ESP32">
+          <thead>
+            <tr>
+              <th scope="col">Identifiant</th>
+              <th scope="col">Adresse MAC / IP</th>
+              <th scope="col">RSSI</th>
+              <th scope="col">Cadence</th>
+              <th scope="col">Cohérence</th>
+              <th scope="col">Statut</th>
+            </tr>
+          </thead>
+          <tbody id="nodes-tbody">
+            <tr>
+              <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 20px;">
+                En attente de paquets CSI...
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </main>
+
+    <footer class="app-footer">
+      <div>RuView Physical Engine — Rigoureusement ancré dans la physique électromagnétique (sans artifice 3D).</div>
+      <div class="num">Conformité WCAG 2.2 AA • Charte ElmasCore</div>
+    </footer>
+  </div>
+
+  <script src="core.js" defer></script>
+</body>
+</html>
+

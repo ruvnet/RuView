@@ -13,7 +13,7 @@ use wifi_densepose_signal::ruvsense::field_model::{
     CalibrationStatus, FieldModel, FieldModelConfig,
 };
 
-use super::score_to_person_count;
+use crate::domain::score_to_person_count;
 
 /// Versioned schema for the immutable receipt emitted after field-model calibration.
 pub const CALIBRATION_MODEL_RECEIPT_SCHEMA: &str =

@@ -13,20 +13,27 @@ pub mod bootstrap_baseline;
 pub mod browser_session;
 pub mod ws_ticket;
 pub mod cli;
+pub mod config;
 pub mod dataset;
 pub mod discovery;
+pub mod domain;
+pub mod dsp;
 pub mod edge_registry;
 pub mod error_response;
+pub mod field_bridge;
+pub mod field_localize;
 pub mod host_validation;
 /// #864/ADR-296: refuse a routable HTTP bind with API auth off.
 pub mod http_bind;
 /// ADR-297: per-node vs. fused room inference, with deterministic fusion.
 pub mod inference;
+pub mod ingest;
 pub mod introspection;
 pub mod matter;
 pub mod model_format;
 pub mod mqtt;
 pub mod path_safety;
+pub mod pose;
 /// ADR-323: fail-closed pose physics integration and raw/refined view selection.
 pub mod pose_physics;
 /// #2094: server-wide `--privacy-mode` filter for REST, WebSocket and recordings.

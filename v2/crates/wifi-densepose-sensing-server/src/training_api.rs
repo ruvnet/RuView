@@ -1145,7 +1145,7 @@ async fn run_training_job(
         }
     }
 
-    let mut frames = load_recording_frames(&crate::recordings_dir(&data_dir), &dataset_ids).await;
+    let mut frames = load_recording_frames(&crate::api::recordings::recordings_dir(&data_dir), &dataset_ids).await;
     let mut data_source = "recordings";
     let mut degraded = false;
     if frames.is_empty() {
@@ -1506,7 +1506,7 @@ async fn run_training_job(
     }
 
     if completed_phase == "completed" || completed_phase == "early_stopped" {
-        let models_dir = crate::models_dir(&data_dir);
+        let models_dir = crate::api::models::models_dir(&data_dir);
         if let Err(e) = tokio::fs::create_dir_all(&models_dir).await {
             error!("Failed to create models directory: {e}");
         } else {
