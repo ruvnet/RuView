@@ -281,4 +281,6 @@ fn c5_lltf8_format_token_cannot_bypass_exact_iq_width_or_supported_frequency() {
     assert!(canonicalize_esp32_with_format(foreign,format).is_err());
     let mut foreign=c5_input(&payload,false);foreign.frequency_hz=5_200_000_000;
     assert!(canonicalize_esp32_with_format(foreign,format).is_err());
+    let mut foreign=c5_input(&payload,false);foreign.flags.ieee802154_sync_valid=true;
+    assert!(canonicalize_esp32_with_format(foreign,format).is_err());
 }

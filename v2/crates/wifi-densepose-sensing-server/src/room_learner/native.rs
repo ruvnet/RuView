@@ -113,6 +113,14 @@ pub fn grid_id_for_format(n_antennas: usize, raw_bins: usize, ppdu_type: PpduTyp
     grid_id(n_antennas, raw_bins, ppdu_type)
 }
 
+/// Context-only whitelist; actual C5 packets still require the validated wire
+/// claim. A grid name is not packet evidence or hardware qualification.
+pub fn supported_feature_grid(grid:&str,frequency_hz:u64)->bool {
+    if grid==C5_LLTF8_V1_GRID {return c5::supported_frequency_hz(frequency_hz);}
+    is_supported_frequency_hz(frequency_hz) && (0..=3).any(|ppdu|
+        grid==format!("ant1-bins{}-ppdu{ppdu}-usable-drop2-linear-v2",if ppdu==0 {64}else{256}))
+}
+
 pub fn is_supported_frequency_hz(frequency_hz: u64) -> bool {
     let mhz = frequency_hz / 1_000_000;
     frequency_hz % 1_000_000 == 0
@@ -149,6 +157,9 @@ pub fn canonicalize_esp32_with_format(input: NativePacketInput<'_>, format: Vali
     if input.flags.first_word_sanitized { valid_mask[..2].fill(false); }
     let c5 = format.id() == NativeFormatId::C5Lltf8V1;
     if c5 {
+        if input.flags.stbc || input.flags.ldpc || input.flags.ieee802154_sync_valid {
+            return Err("C5L8/v1 input contains unsupported PHY/synchronization flags".into());
+        }
         if !format.header_matches(input.node_id,input.sequence,input.frequency_hz) {
             return Err("C5L8/v1 format claim belongs to a different source/sequence/frequency header".into());
         }

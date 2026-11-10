@@ -8,6 +8,12 @@ use wifi_densepose_sensing_server::room_learner::temporal_wire::*;
 pub(crate) struct SchemaQuery {
     schema: Option<String>,
 }
+#[derive(Default, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct NativeStatusQuery {
+    schema: Option<String>,
+    include_native_diagnostics: Option<u8>,
+}
 fn schema_matches(actual: &str, expected: &str) -> Result<(), Json<serde_json::Value>> {
     if actual == expected {
         Ok(())
@@ -68,10 +74,14 @@ command!(
 
 pub(crate) async fn status_dispatch(
     State(state): State<SharedState>,
-    Query(query): Query<SchemaQuery>,
+    Query(query): Query<NativeStatusQuery>,
 ) -> Json<serde_json::Value> {
+    let include=match query.include_native_diagnostics {
+        None|Some(0)=>false,Some(1)=>true,
+        _=>return failure("learner_status_query_invalid","include_native_diagnostics must be 0 or 1"),
+    };
     let Some(schema) = query.schema else {
-        return status(State(state)).await;
+        return status_with_native_diagnostics(State(state),include).await;
     };
     if let Err(error) = schema_matches(&schema, STATUS_SCHEMA) {
         return error;
@@ -81,7 +91,7 @@ pub(crate) async fn status_dispatch(
         Err(e) => return e,
     };
     if let Err(e)=rt.temporal_default_operator_profile_v2(){return failure("learner_profile_unavailable",e);}
-    temporal_status(&state, &rt).await
+    temporal_status_with_reader_options(&state,&rt,|reader,now|reader.temporal_status_snapshot_v2(now),include).await
 }
 fn temporal_selection(
     state: &AppStateInner,
@@ -125,6 +135,12 @@ pub(super) async fn temporal_status_with_reader<F>(
 where
     F: FnOnce(Arc<RoomLearningRuntime>, u64) -> Result<serde_json::Value, String> + Send + 'static,
 {
+    temporal_status_with_reader_options(state,rt,read_snapshot,false).await
+}
+async fn temporal_status_with_reader_options<F>(
+    state:&SharedState, rt:&Arc<RoomLearningRuntime>, read_snapshot:F, include:bool,
+) -> Json<serde_json::Value>
+where F:FnOnce(Arc<RoomLearningRuntime>,u64)->Result<serde_json::Value,String>+Send+'static {
     // Concurrent polls wait as async futures, without owning an RF lock or
     // spawning another blocking worker. Explicit cancellation removes a waiter.
     let permit = match rt.acquire_temporal_status_reader().await {
@@ -191,7 +207,7 @@ where
         if status["mutation_guard"] != serde_json::to_value(&expected).map_err(|_| "learner_status_guard_invalid")? {
             return Err("learner_state_changed".into());
         }
-        status["native_source_diagnostics"] = ingress::source_rejection_diagnostics(&current, std::time::Instant::now());
+        if include {status["native_source_diagnostics"] = ingress::source_rejection_diagnostics(&current, std::time::Instant::now());}
         Ok(status)
     }) {
         Ok(status) => Json(serde_json::json!({"success":true,"status":status})),

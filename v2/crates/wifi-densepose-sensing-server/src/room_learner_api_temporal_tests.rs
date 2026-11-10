@@ -55,6 +55,61 @@ fn configure_v2(expected: MutationGuard) -> serde_json::Value {
         "new_training":true,"recovery_consent":true})
 }
 #[tokio::test]
+async fn c5_status_diagnostics_require_explicit_opt_in_without_changing_default_schema() {
+    let (_dir,state)=c5_fixture().await;
+    {
+        let mut current=state.write().await;
+        observe_wire_at(&mut current,&c5_wire(22,121,5180,false),std::time::Instant::now());
+    }
+    let app=temporal_app(state.clone());
+    for schema in [None,Some(STATUS_SCHEMA)] {
+        let path=schema.map_or_else(||"/status".to_string(),|s|format!("/status?schema={s}"));
+        let plain=decoded(app.clone(),&path,None).await;
+        let key=if schema.is_some(){&plain["status"]}else{&plain};
+        assert!(key.get("native_source_diagnostics").is_none());
+        let sep=if schema.is_some(){'&'}else{'?'};
+        let off=decoded(app.clone(),&format!("{path}{sep}include_native_diagnostics=0"),None).await;
+        let off_key=if schema.is_some(){&off["status"]}else{&off};
+        assert!(off_key.get("native_source_diagnostics").is_none());
+        let opted=decoded(app.clone(),&format!("{path}{sep}include_native_diagnostics=1"),None).await;
+        let body=if schema.is_some(){&opted["status"]}else{&opted};
+        if schema.is_some() {
+            println!("SYNTHETIC_C5_DEFAULT_STATUS={plain}");
+            println!("SYNTHETIC_C5_DIAGNOSTICS_STATUS={opted}");
+        }
+        assert_eq!(body["native_source_diagnostics"]["schema"],"ruview.native-packet-rejections.v1");
+        assert_eq!(body["native_source_diagnostics"]["sources"][0]["node_id"],22);
+        let mut keys=body.as_object().unwrap().keys().filter(|k|k.as_str()!="native_source_diagnostics").cloned().collect::<Vec<_>>();keys.sort();
+        let mut original=key.as_object().unwrap().keys().cloned().collect::<Vec<_>>();original.sort();
+        assert_eq!(keys,original);
+        assert_eq!(body["mutation_guard"],key["mutation_guard"]);
+    }
+    assert_eq!(decoded(app.clone(),"/status?include_native_diagnostics=2",None).await["error_code"],"learner_status_query_invalid");
+    assert_eq!(request_raw(app.clone(),"/status?include_native_diagnostics=true",None).await.0,StatusCode::BAD_REQUEST);
+    state.write().await.privacy_mode=true;
+    let private=decoded(app,&format!("/status?schema={STATUS_SCHEMA}&include_native_diagnostics=1"),None).await;
+    assert_eq!(private["error_code"],"learner_privacy_mode");
+    assert!(private.to_string().find("last_rejected_packet").is_none());
+}
+#[tokio::test]
+async fn c5_actual_temporal_configure_dispatch_accepts_only_versioned_three_source_context() {
+    use wifi_densepose_sensing_server::room_learner::recovery_store::RecoveryStore;
+    let (dir,state)=c5_fixture().await;let owner="a".repeat(64);let path=dir.path().join(&owner).join("SensingServer");
+    let store=RecoveryStore::new(&path,&owner,"synthetic-install",Some(&[7;32])).unwrap();
+    let rt=Arc::new(RoomLearningRuntime::new_with_recovery(&path,&owner,"synthetic-install",store).unwrap());
+    state.write().await.room_learning=Some(rt.clone());
+    let app=temporal_app(state.clone());let mut body=configure_v2(rt.mutation_guard().unwrap());
+    body["source_node_ids"]=serde_json::json!([20,21,22]);
+    let configured=decoded(app.clone(),"/configure",Some(body)).await;
+    assert_eq!(configured["success"],true,"{configured}");
+    let context=rt.context().unwrap();assert_eq!(context.sources.iter().map(|s|s.source_id).collect::<Vec<_>>(),[20,21,22]);
+    for source in context.sources {assert_eq!(source.grid_id,native::C5_LLTF8_V1_GRID);assert_eq!(source.center_frequency_hz,5_180_000_000);}
+    assert!(configured["status"].get("native_source_diagnostics").is_none(),"mutation/default ACK must preserve old status schema");
+    assert_eq!(configured["status"]["capture"]["observed_ms"],0);
+    assert_eq!(configured["status"]["capture"]["retained_windows"],0);
+    assert!(state.read().await.field_model.is_none());
+}
+#[tokio::test]
 async fn negotiated_idle_capability_preserves_default_status_and_selection() {
     let (_dir, state) = fixture();
     let app = temporal_app(state);

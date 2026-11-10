@@ -178,13 +178,7 @@ impl AcquisitionPlan {
                 || spec.link_index != 0
                 || !native::is_supported_frequency_hz(spec.center_frequency_hz)
                 || spec.bandwidth_hz != 20_000_000
-                || !(0..=3).any(|ppdu| {
-                    spec.grid_id
-                        == format!(
-                            "ant1-bins{}-ppdu{ppdu}-usable-drop2-linear-v2",
-                            if ppdu == 0 { 64 } else { 256 }
-                        )
-                })
+                || !native::supported_feature_grid(&spec.grid_id,spec.center_frequency_hz)
             {
                 return Err("acquisition_requires_existing_native56_source".into());
             }

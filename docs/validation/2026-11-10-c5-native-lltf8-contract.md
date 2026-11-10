@@ -65,7 +65,14 @@ freshness/cadence/room/model/selection gates remain authoritative.
 
 ## Read-only rejection diagnostics
 
-The existing room-learner status adds optional `native_source_diagnostics`
+Only an explicit read-only `include_native_diagnostics=1` query on the
+existing room-learner status adds `native_source_diagnostics` (with or
+without its existing temporal schema query). Default status, `=0` and mutation
+ACKs omit that key entirely, preserving older clients' exact-key schemas.
+Values other than0/1 are refused; authorization and mutation semantics are
+unchanged. A newer client may fall back once to ordinary status on an older
+helper's unsupported-query400/422, never on authentication or parse failure.
+The optional field is
 for the last rejected packet, never a source-ready or admission verdict.
 Storage is bounded by256u8nodeIDs; replies cap32fresh records, prioritize
 selected sources, expose total/truncation and expire by receiver-monotonic

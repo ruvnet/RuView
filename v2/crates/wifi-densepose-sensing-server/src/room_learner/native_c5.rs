@@ -17,6 +17,9 @@ fn supported_5ghz_primary_mhz(mhz: u32) -> bool {
     ((36..=64).contains(&channel) || (100..=144).contains(&channel)) && channel%4==0
         || (149..=177).contains(&channel) && (channel-149)%4==0
 }
+pub(super) fn supported_frequency_hz(hz:u64)->bool {
+    hz%1_000_000==0 && u32::try_from(hz/1_000_000).is_ok_and(supported_5ghz_primary_mhz)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NativeFormatId {

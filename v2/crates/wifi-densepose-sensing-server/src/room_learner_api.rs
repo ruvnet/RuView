@@ -190,10 +190,19 @@ pub(super) async fn configure(
     }
 }
 pub(super) async fn status(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    status_with_native_diagnostics(State(state),false).await
+}
+pub(super) async fn status_with_native_diagnostics(State(state): State<SharedState>, include:bool)
+    -> Json<serde_json::Value> {
     match runtime(&state).await {
         Ok(rt) => {
             let state = state.read().await;
-            Json(selection_routes::enriched_status(&state, &rt))
+            if include && (state.privacy_mode || !state.room_learning.as_ref().is_some_and(|live|Arc::ptr_eq(live,&rt))) {
+                return failure("learner_state_changed","learner_state_changed");
+            }
+            let mut value=selection_routes::enriched_status(&state, &rt);
+            if include {value["native_source_diagnostics"]=ingress::source_rejection_diagnostics(&state,std::time::Instant::now());}
+            Json(value)
         }
         Err(e) => e,
     }

@@ -432,6 +432,9 @@ fn c5_config()->serde_json::Value {
     serde_json::json!({"binding_digest":"b".repeat(64),"revision":1,
         "source_node_ids":[20,21,22],"new_training":true})
 }
+fn c5_app(state:SharedState)->Router {
+    app(state).route("/native-status",get(status_dispatch))
+}
 #[tokio::test]
 async fn c5_claimed_datagrams_bind_three_independent_sources_and_enter_actual_capture() {
     let (_dir,state)=c5_fixture().await;let router=app(state.clone());
@@ -481,10 +484,10 @@ async fn c5_unclaimed_or_contradictory_packets_cannot_borrow_other_sources_readi
             assert!(native_candidates(&inner,22,std::time::Instant::now()).is_empty());
             assert_eq!(inner.room_learning_sources.len(),2);
         }
-        let router=app(state.clone());
+        let router=c5_app(state.clone());
         let response=json_request(router.clone(),"/configure",Method::POST,c5_config()).await;
         assert_eq!(response["error_code"],"learner_source_unready","mutant{mutant}: {response}");
-        let read=json_request_status(router).await;
+        let read=json_request(router,"/native-status?include_native_diagnostics=1",Method::GET,serde_json::Value::Null).await;
         let reasons=&read["native_source_diagnostics"]["sources"];
         assert_eq!(reasons[0]["node_id"],22);assert_eq!(reasons[0]["admission_authority"],false);
         assert_eq!(reasons[0]["last_rejected_packet"]["code"],"native_format_unverified");
@@ -533,7 +536,7 @@ async fn c5_rejection_diagnostics_are_bounded_expire_and_do_not_invalidate_a_goo
         let expired=ingress::source_rejection_diagnostics(&inner,now+std::time::Duration::from_secs(6));
         assert_eq!(expired["sources"],serde_json::json!([]));
     }
-    let read=json_request_status(app(state)).await;
+    let read=json_request(c5_app(state),"/native-status?include_native_diagnostics=1",Method::GET,serde_json::Value::Null).await;
     let data=read["native_source_diagnostics"].to_string();
     for private in ["native_iq","amplitudes","timestamp_ns","owner_scope","payload"] {assert!(!data.contains(private));}
     assert_eq!(read["native_source_diagnostics"]["sources"].as_array().unwrap().len(),32);
