@@ -13525,6 +13525,7 @@ dependencies = [
  "rumqttc-v4-next",
  "ruvector-mincut",
  "ruview-auth",
+ "ruview-fann-head",
  "serde",
  "serde_json",
  "sha2 0.10.9",

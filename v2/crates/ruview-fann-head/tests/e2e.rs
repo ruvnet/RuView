@@ -254,6 +254,8 @@ fn synthetic_rows(room: &str, seed: u64) -> Vec<ReplayRow> {
                     features: x,
                     incumbent_probability: Some(ruview_fann_head::sigmoid(incumbent_logit)),
                     synthetic: true,
+                    timestamp_ms: None,
+                    label_source: Some("reference".into()),
                 });
             }
         }
@@ -333,4 +335,89 @@ fn replay_refuses_leaky_or_incomplete_input_and_keeps_abstentions_in_denominator
     }
     let report = evaluate(&rows, &context(), FitConfig::candidate()).unwrap();
     assert!(report.rooms[0].incumbent.is_none() && report.rooms[0].adjacent.is_none());
+}
+
+#[test]
+fn learning_curve_reports_unfittable_prefixes_and_where_the_gates_settle() {
+    use ruview_fann_head::curve::learning_curve;
+    let mut rows = synthetic_rows("office", 3);
+    for (i, r) in rows.iter_mut().enumerate() {
+        r.timestamp_ms = Some(1_000 * i as i64);
+    }
+    let curve = learning_curve(&rows, &context(), FitConfig::candidate()).unwrap();
+    assert!(curve.labels_are_reference);
+    let room = &curve.rooms[0];
+    assert_eq!((room.prefix_unit, room.heldout_rows), ("row_fractions", 96));
+    let sizes: Vec<usize> = room.points.iter().map(|p| p.train_rows).collect();
+    assert_eq!(sizes, [6, 12, 24, 48, 72, 96]);
+    // The first 24 rows are empty and adjacent-only: one class, nothing to fit.
+    for p in &room.points[..3] {
+        assert!(p.candidate.is_none() && p.linear_control.is_none());
+    }
+    let last = room.points.last().unwrap();
+    assert_eq!(last.train_sessions, 2);
+    assert_eq!(
+        last.candidate.as_ref().unwrap().passes_local_gates,
+        Some(true)
+    );
+    // Two sessions of 48 rows at 1 s spacing: 47 s each.
+    assert_eq!(last.train_minutes, Some(94.0 / 60.0));
+    let from = room.candidate_passes_from_rows.unwrap();
+    assert!((48..=96).contains(&from), "{from}");
+
+    // Three Train sessions switch the prefixes to session boundaries.
+    for r in rows.iter_mut().filter(|r| r.session == "office-s3") {
+        r.split = Split::Train;
+    }
+    let curve = learning_curve(&rows, &context(), FitConfig::candidate()).unwrap();
+    let room = &curve.rooms[0];
+    assert_eq!(room.prefix_unit, "sessions");
+    let sizes: Vec<usize> = room.points.iter().map(|p| p.train_rows).collect();
+    assert_eq!(sizes, [48, 96, 144]);
+}
+
+#[test]
+fn labels_that_are_not_a_reference_are_flagged() {
+    let mut rows = synthetic_rows("office", 3);
+    rows[0].label_source = Some("incumbent".into());
+    let report = evaluate(&rows, &context(), FitConfig::candidate()).unwrap();
+    assert!(!report.labels_are_reference);
+    assert_eq!(report.label_sources, ["incumbent", "reference"]);
+    rows[1].label_source = None;
+    let report = evaluate(&rows, &context(), FitConfig::candidate()).unwrap();
+    assert!(report.label_sources.contains(&"unstated".to_string()));
+}
+
+#[test]
+fn external_shadow_counts_agreement_abstention_and_failures() {
+    use ruview_fann_head::shadow::ExternalShadow;
+    // One feature, weight 4: the logit is 4x.
+    let head = FannHead::from_linear(&LinearHead::new(vec![4.0, 0.0]).unwrap(), context()).unwrap();
+    let mut shadow = ExternalShadow::new(head, &context()).unwrap();
+    assert_eq!(shadow.features(), 1);
+    shadow.score(&[1.0], true); // occupied, agrees
+    shadow.score(&[-1.0], false); // empty, agrees
+    shadow.score(&[1.0], false); // occupied against an empty incumbent
+    shadow.score(&[0.0], true); // 0.5: abstains
+    assert!(matches!(
+        shadow.score(&[f32::NAN], true),
+        CandidateOutcome::Unavailable { .. }
+    ));
+    let c = shadow.counters();
+    assert_eq!(
+        (
+            c.scored,
+            c.agree,
+            c.disagree,
+            c.candidate_abstain,
+            c.unavailable
+        ),
+        (4, 2, 1, 1, 1)
+    );
+    let other = HeadContext {
+        room_revision: "den-r1".into(),
+        ..context()
+    };
+    let head = FannHead::from_linear(&LinearHead::new(vec![4.0, 0.0]).unwrap(), context()).unwrap();
+    assert!(ExternalShadow::new(head, &other).is_err());
 }

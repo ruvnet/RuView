@@ -62,6 +62,29 @@ pub struct ReplayRow {
     pub incumbent_probability: Option<f32>,
     #[serde(default)]
     pub synthetic: bool,
+    /// When the cohort was observed; used only to report elapsed minutes.
+    #[serde(default)]
+    pub timestamp_ms: Option<i64>,
+    /// Where the condition label came from. Only [`REFERENCE_LABEL_SOURCES`]
+    /// make a report an accuracy result; `incumbent` labels measure agreement
+    /// with the incumbent, nothing more.
+    #[serde(default)]
+    pub label_source: Option<String>,
+}
+
+/// Label sources that are independent of the models being compared.
+pub const REFERENCE_LABEL_SOURCES: [&str; 2] = ["radar_gated", "reference"];
+
+/// Distinct label sources in `rows`, and whether every row has a reference label.
+pub fn label_provenance(rows: &[ReplayRow]) -> (Vec<String>, bool) {
+    let sources: BTreeSet<String> = rows
+        .iter()
+        .map(|r| r.label_source.clone().unwrap_or_else(|| "unstated".into()))
+        .collect();
+    let reference = sources
+        .iter()
+        .all(|s| REFERENCE_LABEL_SOURCES.contains(&s.as_str()));
+    (sources.into_iter().collect(), reference)
 }
 
 /// Per-condition outcome counts for one model.
@@ -121,10 +144,14 @@ pub struct ReplayReport {
     pub task: &'static str,
     pub evidence: &'static str,
     pub objective_note: &'static str,
+    pub label_sources: Vec<String>,
+    /// False when any label did not come from an independent reference: the
+    /// report then says nothing about sensing accuracy.
+    pub labels_are_reference: bool,
     pub rooms: Vec<RoomReport>,
 }
 
-fn score_model(rows: &[(&ReplayRow, PresenceDecision)]) -> ModelScore {
+pub(crate) fn score_model(rows: &[(&ReplayRow, PresenceDecision)]) -> ModelScore {
     let mut conditions: BTreeMap<Condition, ConditionScore> = BTreeMap::new();
     for (row, decision) in rows {
         let c = conditions.entry(row.condition).or_default();
@@ -245,13 +272,8 @@ fn adjacent_comparison(
     })
 }
 
-/// Fit and score every room. `context` supplies the feature schema and source
-/// contract; each room's name becomes the head's room revision.
-pub fn evaluate(
-    rows: &[ReplayRow],
-    context: &HeadContext,
-    config: FitConfig,
-) -> Result<ReplayReport, HeadError> {
+/// Shape and leakage checks shared by every replay analysis.
+pub(crate) fn check_rows(rows: &[ReplayRow]) -> Result<(), HeadError> {
     let Some(width) = rows.first().map(|r| r.features.len()) else {
         return Err(HeadError::Invalid("no replay rows"));
     };
@@ -271,6 +293,17 @@ pub fn evaluate(
             ));
         }
     }
+    Ok(())
+}
+
+/// Fit and score every room. `context` supplies the feature schema and source
+/// contract; each room's name becomes the head's room revision.
+pub fn evaluate(
+    rows: &[ReplayRow],
+    context: &HeadContext,
+    config: FitConfig,
+) -> Result<ReplayReport, HeadError> {
+    check_rows(rows)?;
 
     let room_names: BTreeSet<&str> = rows.iter().map(|r| r.room.as_str()).collect();
     let mut rooms = Vec::new();
@@ -348,7 +381,10 @@ pub fn evaluate(
             candidate_parameters: candidate.parameter_count(),
         });
     }
+    let (label_sources, labels_are_reference) = label_provenance(rows);
     Ok(ReplayReport {
+        label_sources,
+        labels_are_reference,
         task: "binary room presence, room-specific head on frozen features",
         evidence: if rows.iter().any(|r| r.synthetic) {
             "SYNTHETIC"
