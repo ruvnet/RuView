@@ -1130,7 +1130,7 @@ void csi_collector_diagnostic_tick(void)
              (unsigned)c->acquire_csi_mu, (unsigned)c->acquire_csi_dcm,
              (unsigned)c->acquire_csi_beamformed, (unsigned)c->dump_ack_en,
              (unsigned)c->val_scale_cfg, (unsigned)c->acquire_csi_he_stbc_mode);
-    ESP_LOGI(TAG, "C5_LLTF8_PHY origin=pinned-v602-binary ctrl_raw=%08lx masked=%04lx expected=3010 mode=%u force_mask=%u cfg0_control_bit3=%u coefficient=%u ack0_raw=%08lx ack1_raw=%08lx ack0_bit29=%u ack1_bit29=%u matched=%u",
+    ESP_LOGI(TAG, "C5_LLTF8_PHY origin=pinned-v602-binary pin=pp-df7d4d05-phy-dbf33c41 ctrl_raw=%08lx masked=%04lx expected=3010 mode=%u force_mask=%u cfg0_control_bit3=%u coefficient=%u ack0_raw=%08lx ack1_raw=%08lx ack0_bit29=%u ack1_bit29=%u matched=%u",
              (unsigned long)s_c5_diag.phy_ctrl,
              (unsigned long)(s_c5_diag.phy_ctrl & C5_LLTF8_PHY_CTRL_MASK),
              (unsigned)((s_c5_diag.phy_ctrl >> 12) & 1),
