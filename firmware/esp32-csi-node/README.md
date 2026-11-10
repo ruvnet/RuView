@@ -51,6 +51,29 @@ unless the board schematic is checked and `C5_STATUS_LED_GPIO` is set.
 Association is explicitly 2.4 GHz; the C5 radio's 5 GHz capability is not yet
 qualified by this profile.
 
+### Local Node 20 5 GHz/native USB experiment
+
+`sdkconfig.defaults.c5-node20-5ghz-usb` is an explicit experimental overlay
+for the Waveshare ESP32-C5-WIFI6-KIT-N16R8. It selects 5 GHz-only association
+after Wi-Fi starts, native USB Serial/JTAG as the primary interactive console,
+and initial node ID 20. Wi-Fi credentials and receiver settings must still be
+entered by the operator; none are included in the profile. The normal C5
+profile remains 2.4 GHz/UART. Build separately with ESP-IDF 6.0.2:
+
+```sh
+idf.py -B build-c5-node20 -D IDF_TARGET=esp32c5 \
+  -D SDKCONFIG=build-c5-node20/sdkconfig \
+  -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.esp32c5;sdkconfig.defaults.c5-node20-5ghz-usb" build
+```
+
+This uses the complete 4 MB image/partition layout on the 16 MB board; the
+extra 12 MB and external PSRAM are unused. Display/WASM/status LED remain
+disabled. Source compilation and host controls do not qualify actual 5 GHz
+association, CSI cadence, app provisioning or sensing accuracy. Keep this
+test artifact separate from the published 2.4 GHz C5 bundle.
+The local branch uses embedded version `0.8.18-c5n20-5g-usb` to distinguish
+the experiment from the official release; it is not a published firmware tag.
+
 C5 skips automatic mmWave probing. The legacy GPIO17/18 pair overlaps the
 C5 flash/PSRAM bus and can cause watchdog resets with `SPI flash busy`.
 An explicit sensor pin assignment must avoid GPIO16-22, the console pins,

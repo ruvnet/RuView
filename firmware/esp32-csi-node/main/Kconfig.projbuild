@@ -1,5 +1,14 @@
 menu "CSI Node Configuration"
 
+    config C5_WIFI_5GHZ_ONLY
+        bool "Experimental ESP32-C5 5 GHz-only association"
+        depends on IDF_TARGET_ESP32C5
+        default n
+        help
+            Enable only for a separately qualified 5 GHz C5 test profile.
+            The normal C5 CSI profile remains 2.4 GHz-only. This option
+            changes association band, not CSI cadence or sensing accuracy.
+
     config C5_STATUS_LED_GPIO
         int "ESP32-C5 addressable status LED GPIO (-1 disables)"
         depends on IDF_TARGET_ESP32C5

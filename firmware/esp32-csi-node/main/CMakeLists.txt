@@ -65,7 +65,7 @@ endif()
 # component. Keep the 5.4 lane working while declaring the v6 dependency.
 if(IDF_VERSION_MAJOR GREATER_EQUAL 6)
     list(APPEND REQUIRES esp_driver_tsens)
-    if(IDF_TARGET STREQUAL "esp32c6" OR IDF_TARGET STREQUAL "esp32s3")
+    if(IDF_TARGET STREQUAL "esp32c6" OR IDF_TARGET STREQUAL "esp32s3" OR IDF_TARGET STREQUAL "esp32c5")
         list(APPEND REQUIRES esp_driver_usb_serial_jtag)
     endif()
 endif()

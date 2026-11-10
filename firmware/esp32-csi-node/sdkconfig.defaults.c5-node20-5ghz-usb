@@ -1,0 +1,8 @@
+# Experimental Waveshare ESP32-C5-WIFI6-KIT-N16R8 local test profile.
+# Apply after sdkconfig.defaults and sdkconfig.defaults.esp32c5.
+# Uses the conservative 4 MB layout; extra Flash and PSRAM are unused.
+CONFIG_C5_WIFI_5GHZ_ONLY=y
+CONFIG_CSI_NODE_ID=20
+# CONFIG_ESP_CONSOLE_UART_DEFAULT is not set
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+# CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG is not set

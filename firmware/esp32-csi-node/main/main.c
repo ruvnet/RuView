@@ -119,8 +119,13 @@ static void event_handler(void *arg, esp_event_base_t event_base,
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
 #if defined(CONFIG_IDF_TARGET_ESP32C5)
         /* The band API requires started WiFi. Set it before association,
-         * using the same 2.4 GHz radio domain as existing CSI nodes. */
+         * keeping 2.4 GHz as the default unless the experimental profile
+         * explicitly selects 5 GHz. */
+#if defined(CONFIG_C5_WIFI_5GHZ_ONLY)
+        ESP_ERROR_CHECK(esp_wifi_set_band_mode(WIFI_BAND_MODE_5G_ONLY));
+#else
         ESP_ERROR_CHECK(esp_wifi_set_band_mode(WIFI_BAND_MODE_2G_ONLY));
+#endif
 #endif
         esp_wifi_connect();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
