@@ -163,6 +163,17 @@ jobs:
       working-directory: v2
       run: cargo test -p wifi-densepose-signal --no-default-features --features cir --tests
 
+    # ADR-426 D5: the ruv-FANN shadow is an optional feature, so the default
+    # workspace run never compiles it. Build and test it on its own.
+    - name: Run ADR-426 fann-shadow tests
+      working-directory: v2
+      env:
+        CARGO_PROFILE_DEV_DEBUG: "0"
+        CARGO_PROFILE_TEST_DEBUG: "0"
+      run: >-
+        cargo test -p wifi-densepose-sensing-server --features fann-shadow
+        --bin sensing-server -- adr426
+
     # ADR-134 + ADR-028 witness guard. The CIR proof runner produces a
     # bit-deterministic SHA-256 over CirEstimator output on the synthetic
     # reference signal. Any algorithmic regression — changes to ISTA

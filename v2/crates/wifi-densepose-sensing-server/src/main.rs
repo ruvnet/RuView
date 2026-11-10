@@ -35,6 +35,8 @@ mod rvf_container;
 // (including `/ws/train/progress`) into the live router below.
 mod training_api;
 mod rvf_pipeline;
+#[cfg(feature = "fann-shadow")]
+mod fann_shadow;
 mod source_fusion;
 mod tracker_bridge;
 pub mod types;
@@ -8057,6 +8059,21 @@ async fn zones_endpoint(State(state): State<SharedState>) -> Json<serde_json::Va
     Json(s.source_fusion.zones_json(now_ms))
 }
 
+/// ADR-426 D5: status of the default-off ruv-FANN shadow. Diagnostic only.
+async fn fann_shadow_status() -> Json<serde_json::Value> {
+    #[cfg(feature = "fann-shadow")]
+    {
+        fann_shadow::status_endpoint().await
+    }
+    #[cfg(not(feature = "fann-shadow"))]
+    {
+        Json(serde_json::json!({
+            "enabled": false,
+            "hint": "build the server with --features fann-shadow",
+        }))
+    }
+}
+
 /// Legacy route. It used to return four invented zones; it now returns the
 /// fused zones, or none when no source is mapped to a zone.
 async fn pose_zones_summary(state: State<SharedState>) -> Json<serde_json::Value> {
@@ -15130,6 +15147,8 @@ async fn main() {
     if plan.run_simulator {
         tokio::spawn(simulated_data_task(state.clone(), args.tick_ms));
     }
+    #[cfg(feature = "fann-shadow")]
+    fann_shadow::spawn(state.clone());
     // Floor persistence (2026-09-20, floor-bootstrap fix): only when
     // --activity-state was given. Writes every
     // mediatek_activity::ACTIVITY_STATE_PERSIST_INTERVAL so a restart's
@@ -15359,6 +15378,7 @@ async fn main() {
         // ADR-424: any-source readings in, fused per-zone presence out.
         .route("/api/v1/zones", get(zones_endpoint))
         .route("/api/v1/sources/readings", post(ingest_source_readings))
+        .route("/api/v1/shadow/fann", get(fann_shadow_status))
         .route("/api/v1/pose/activities", get(pose_activities))
         // Dashboard-compatible aliases for the field-model calibration API.
         .route("/api/v1/pose/calibrate", post(calibration_start))

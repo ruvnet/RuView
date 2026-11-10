@@ -2,11 +2,12 @@
 //!
 //! ```text
 //! ruview-fann-replay --rows replay.jsonl --feature-schema aether-skip/1 \
-//!     --sources node-a,node-b [--out report.json]
+//!     --sources node-a,node-b [--out report.json] [--learning-curve curve.json] [--balance]
 //! ```
 
 use std::process::ExitCode;
 
+use ruview_fann_head::curve::learning_curve;
 use ruview_fann_head::replay::{evaluate, parse_rows};
 use ruview_fann_head::train::FitConfig;
 use ruview_fann_head::HeadContext;
@@ -25,7 +26,7 @@ fn main() -> ExitCode {
         arg(&args, "--feature-schema"),
         arg(&args, "--sources"),
     ) else {
-        eprintln!("usage: ruview-fann-replay --rows <jsonl> --feature-schema <id> --sources <a,b> [--out <json>]");
+        eprintln!("usage: ruview-fann-replay --rows <jsonl> --feature-schema <id> --sources <a,b> [--out <json>] [--learning-curve <json>] [--balance]");
         return ExitCode::from(2);
     };
     let text = match std::fs::read_to_string(&rows_path) {
@@ -40,9 +41,43 @@ fn main() -> ExitCode {
         sources: sources.split(',').map(str::to_string).collect(),
         room_revision: "replay".to_string(),
     };
-    let report = match parse_rows(&text)
-        .and_then(|rows| evaluate(&rows, &context, FitConfig::candidate()))
-    {
+    let rows = match parse_rows(&text) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    let config = FitConfig {
+        balance: args.iter().any(|a| a == "--balance"),
+        ..FitConfig::candidate()
+    };
+    if let Some(path) = arg(&args, "--learning-curve") {
+        let curve = match learning_curve(&rows, &context, config) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("error: {e}");
+                return ExitCode::from(2);
+            }
+        };
+        let json = serde_json::to_string_pretty(&curve).expect("curve serialises");
+        if let Err(e) = std::fs::write(&path, json + "\n") {
+            eprintln!("error: cannot write {path}: {e}");
+            return ExitCode::from(2);
+        }
+        for room in &curve.rooms {
+            eprintln!(
+                "[{}] room {}: candidate passes from {:?} rows, linear control from {:?} rows ({} points by {})",
+                curve.evidence,
+                room.room,
+                room.candidate_passes_from_rows,
+                room.linear_control_passes_from_rows,
+                room.points.len(),
+                room.prefix_unit,
+            );
+        }
+    }
+    let report = match evaluate(&rows, &context, config) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("error: {e}");
@@ -58,6 +93,12 @@ fn main() -> ExitCode {
             }
         }
         None => println!("{json}"),
+    }
+    if !report.labels_are_reference {
+        eprintln!(
+            "note: labels are {:?}, not an independent reference: this is not an accuracy result",
+            report.label_sources
+        );
     }
     for room in &report.rooms {
         eprintln!(
