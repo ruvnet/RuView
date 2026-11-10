@@ -55,6 +55,7 @@ CONDITIONS = ("quiet_empty", "adjacent_only", "still_occupied", "moving_occupied
 OCCUPIED = {"still_occupied", "moving_occupied"}
 SPLITS = ("train", "validation", "heldout")
 FEATURE_SCHEMA = "ruview.node-features/1"
+FEATURE_SCHEMAS = (FEATURE_SCHEMA, "ruview.node-features/2")
 NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 
 
@@ -135,7 +136,7 @@ def build_rows(capture: Iterable[dict], *, room: str, session: str, split: str, 
     for rec in capture:
         stats["capture_rows"] += 1
         feats, ts, inc = rec.get("features"), rec.get("timestamp_ms"), rec.get("incumbent")
-        if (rec.get("feature_schema") != FEATURE_SCHEMA or not isinstance(ts, int)
+        if (rec.get("feature_schema") not in FEATURE_SCHEMAS or not isinstance(ts, int)
                 or not isinstance(inc, dict) or not isinstance(feats, list) or not feats
                 or not all(isinstance(v, (int, float)) and v == v and abs(v) != float("inf")
                            for v in feats)):

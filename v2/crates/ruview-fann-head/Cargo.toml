@@ -37,3 +37,7 @@ path = "src/bin/ruview-fann-repro.rs"
 [[bin]]
 name = "ruview-fann-fit"
 path = "src/bin/ruview-fann-fit.rs"
+
+[[bin]]
+name = "ruview-fann-window"
+path = "src/bin/ruview-fann-window.rs"

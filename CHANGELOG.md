@@ -29,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fit (`--balance`) gave the ruv-FANN candidate 2.6 % false positives at
   87.2 % sensitivity and the linear control 11.9 % at 55.3 %. One afternoon,
   seated-and-typing occupancy only; the 90 % sensitivity gate is not met.
+  A windowed schema, `ruview.node-features/2` (variability over 30 s instead
+  of levels, `ruview-fann-window` to re-encode captures), then removed the
+  drift: 0 false positives in 3,069 held-out empty observations and 91 %
+  sensitivity for both the candidate and the linear control, which no longer
+  differ.
 
 - **Any-source sensor fusion: per-zone presence from CSI plus any sensor (ADR-424).**
   `POST /api/v1/sources/readings` accepts JSON-line readings from any sensor or

@@ -93,6 +93,16 @@ stops the server. The candidate has no path to a published result.
 This shadows the server's existing per-node classifier, not the room learner's head. Shadowing the
 room learner itself remains a follow-up for when PR #2423 is on `main`.
 
+### D6. Windowed, drift-resistant features
+
+`ruview.node-features/2` replaces levels with variability. A per-node `WindowEncoder` keeps the
+last 30 seconds of base vectors and emits, for each of the eight base features, its standard
+deviation over the window and its mean absolute step between consecutive observations (16
+values). Neither depends on the level, which is what drifts. The encoder has no fitted state,
+waits for 20 observations over 15 seconds before emitting, and restarts after a 5 second gap.
+`ruview-fann-window` re-encodes a `/1` capture with the same code, so offline and live features
+are identical. Captures stay in `/1`, the lossless base.
+
 ## Results on 2026-11-10
 
 ### 1. Reproducibility: MEASURED, with a limit
@@ -237,6 +247,35 @@ MEASURED, 153 observations, one session. The drop suggests the features drift ov
 minutes (absolute RSSI and band powers are in the feature vector) and that a head fitted on one
 occupied session does not hold. The fix to try is more occupied sessions spread over time, and
 features expressed relative to a slow baseline.
+
+### 9. Windowed features remove the drift, and the linear control catches up
+
+Looking for what stays stable across the three occupied sessions and the empty block: the
+variability of RSSI over the window separates them with a single-feature AUC of 1.00 in every
+session, and a threshold chosen on the first session carries to the later ones. A body near the
+link perturbs signal strength; an empty room is steady.
+
+Same recordings as result 7, re-encoded with D6, balanced fits, Train on the first occupied
+session and the first empty half. MEASURED, same label sources:
+
+| Model | False positives, empty (3,069) | Sensitivity, HeldOut session (769) | Sensitivity, later session (153) |
+|---|---|---|---|
+| Linear control, 17 parameters | 0.0 % | 91.3 % | 100 % |
+| ruv-FANN candidate 16 → 4 → 1, 73 parameters | 0.0 % | 91.2 % | 100 % |
+
+- Both clear the 90 % sensitivity and 5 % false-positive thresholds on the two recorded
+  conditions. The gate verdict is still "not judged": adjacent-room and motionless-person
+  sessions do not exist.
+- The later session is the one on which the level-based head fell to 71.9 %.
+- **The candidate no longer beats the linear control.** With features that carry the signal
+  directly, a line is enough. The advantage in result 7 came from the candidate compensating for
+  poor features.
+- Sensitivity falls from 100 % to 91 % as more empty rows are added to Train (learning curve),
+  which suggests the balanced thinning is still not ideal.
+
+The limits listed under result 7 all still apply. One more: variability detects a person who is
+moving, even slightly. A motionless person may look like an empty room, and that session has not
+been recorded.
 
 ## Consequences
 
