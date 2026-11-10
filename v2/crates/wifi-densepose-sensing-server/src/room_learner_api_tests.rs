@@ -433,7 +433,8 @@ fn c5_config()->serde_json::Value {
         "source_node_ids":[20,21,22],"new_training":true})
 }
 fn c5_app(state:SharedState)->Router {
-    app(state).route("/native-status",get(status_dispatch))
+    let status_route=get(status_dispatch).with_state(state.clone());
+    app(state).route("/native-status",status_route)
 }
 #[tokio::test]
 async fn c5_claimed_datagrams_bind_three_independent_sources_and_enter_actual_capture() {
