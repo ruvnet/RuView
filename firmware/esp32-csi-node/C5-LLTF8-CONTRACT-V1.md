@@ -99,3 +99,32 @@ separate the public getter's unwritten fields from the raw and masked PHY
 snapshot; they emit at most three lines every five seconds. This startup
 snapshot is not a continuous hardware monitor. Physical callback shape,
 validity and packing still require a separate one-board check before capture.
+
+## Live receipt lifetime and observed link fence
+
+The initial PHY snapshot is diagnostic history, not perpetual permission.
+The experimental producer reads the same three control words again at callback
+entry and after filtering/serialization, before edge or UDP output. Both must
+match the pinned write footprint; a cached successful startup receipt cannot
+substitute for these fresh reads. No SDK API, allocation, MMIO write or lock is
+added to the callback. Six fixed register reads are added per admitted callback
+(three for a rejected entry); their physical cadence impact remains unmeasured.
+
+One lock-free32-bit atomic stores observed association state in bit0 and an
+event generation in the remaining31bits. Connected/disconnected/stop events
+advance that generation. A callback requires a connected, identical packed
+state across both receipt checks. Disconnect/reconnect ABA, a disconnected
+node or PHY drift during filtering/serialization refuses output. Duplicate
+events conservatively fence the crossing callback; subsequent callbacks need
+fresh matching state again. Other chips/default profiles are unchanged.
+
+The public SDK documentation places the CSI callback in the Wi-Fi task; the
+pinned `wdev_csi_rx_process` calls the registered callback synchronously and
+frees its temporary buffer afterward. This establishes callback execution,
+not an acquisition-time association identifier. The event epoch does **not**
+attest a packet's BSSID, original association, empty an upstream SDK queue or
+qualify transmitter provenance. These remain unverified, as in the receiver's
+existing source contract. No concurrent firmware CSI-format setter exists
+after init; undocumented internal PHY behavior remains a physical test boundary.
+The three separate control reads are not an atomic multi-register hardware
+snapshot, and the endpoint checks are not a continuous hardware monitor.

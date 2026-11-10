@@ -281,3 +281,4 @@ run_c5_phy_receipt:
 	$(CC) -std=c11 -Wall -Wextra -Werror -pedantic -I$(MAIN_DIR) test_c5_phy_receipt.c -o /tmp/ruview-c5-phy-receipt-test
 	/tmp/ruview-c5-phy-receipt-test
 	python3 test_c5_diagnostic.py
+	python3 test_c5_live_receipt.py

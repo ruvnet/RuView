@@ -7,6 +7,7 @@
 #define CSI_COLLECTOR_H
 
 #include <stdint.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include "esp_err.h"
 #include "esp_wifi_types.h"
@@ -175,6 +176,9 @@ uint8_t csi_collector_get_gate_seq_period(void);
  * Both are zero on targets without HE support. Either pointer may be NULL.
  */
 void csi_collector_get_he_validity(uint32_t *valid, uint32_t *invalid);
+
+/** Experimental C5 link fence; never reconfigures radio or CSI. */
+void csi_collector_note_link_transition(bool connected);
 
 /** Experimental C5 diagnostic receipt; no-op for all normal profiles. */
 void csi_collector_diagnostic_tick(void);

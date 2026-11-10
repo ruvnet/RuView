@@ -20,6 +20,7 @@
 #include "csi_he_gate.h"     /* ADR-423 D1: HE-LTF validity gate */
 #include "c5_lltf8_contract.h"
 #include "c5_lltf8_phy_receipt.h"
+#include "c5_lltf8_live_gate.h"
 
 #include <string.h>
 #include "esp_log.h"
@@ -28,6 +29,8 @@
 #include "sdkconfig.h"
 #if defined(CONFIG_C5_MANAGED_LLTF8_V1)
 #include "esp_idf_version.h"
+#include <stdatomic.h>
+_Static_assert(sizeof(unsigned) == 4 && ATOMIC_INT_LOCK_FREE == 2, "C5 callback epoch requires lock-free integer atomics");
 #include "soc/soc.h"
 #if !defined(CONFIG_IDF_TARGET_ESP32C5) || ESP_IDF_VERSION != ESP_IDF_VERSION_VAL(6, 0, 2)
 #error "Private C5 PHY readback is qualified only against pinned ESP-IDF 6.0.2 inputs"
@@ -145,6 +148,17 @@ static uint32_t s_he_invalid = 0;
 static bool s_c5_lltf8_readback = false;
 static unsigned s_c5_lltf8_sta_bandwidth_mhz = 0;
 static int64_t s_c5_lltf8_last_log_us = 0;
+static atomic_uint s_c5_link_state;
+/* Read the pinned SDK control words without calling into the Wi-Fi driver.
+ * Invoked at both ends of a candidate callback; no cached PHY substitution. */
+static bool c5_current_phy_matches(void)
+{
+    const uint32_t ctrl = REG_READ(C5_LLTF8_PHY_CTRL_ADDR);
+    const uint32_t ack0 = REG_READ(C5_LLTF8_ACK0_ADDR);
+    const uint32_t ack1 = REG_READ(C5_LLTF8_ACK1_ADDR);
+    return c5_lltf8_phy_receipt_matches(ctrl, ack0, ack1);
+}
+
 /* Diagnostic-only immutable startup receipt. adaptive_controller_init starts
  * its timers after csi_collector_init returns, so readers never race writes.
  * Negative one means that API was not attempted, not an SDK error code. */
@@ -330,8 +344,13 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
     (void)ctx;
 #if defined(CONFIG_C5_MANAGED_LLTF8_V1)
     if (info == NULL || info->buf == NULL) return;
+    const unsigned callback_link_state = atomic_load(&s_c5_link_state);
+    const bool current_phy_matches = c5_current_phy_matches();
+    const bool callback_readback = s_c5_lltf8_readback &&
+        c5_lltf8_live_gate_matches(callback_link_state,
+                                  atomic_load(&s_c5_link_state), current_phy_matches);
     const c5_lltf8_v1_metadata_t native_metadata = {
-        .config_readback = s_c5_lltf8_readback,
+        .config_readback = callback_readback,
         .bb_format = info->rx_ctrl.cur_bb_format,
         .secondary = info->rx_ctrl.second,
         .sta_bandwidth_mhz = s_c5_lltf8_sta_bandwidth_mhz,
@@ -343,8 +362,8 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
     const bool native_eligible = c5_lltf8_v1_encode(&native_metadata, native_claim);
     const int64_t native_log_now = esp_timer_get_time();
     if (native_log_now - s_c5_lltf8_last_log_us >= 5000000) {
-        ESP_LOGI(TAG, "C5_LLTF8_V1 readback=%u bits=8 len=%u bb=%u second=%u sta_bw_mhz=%u vld=%u first_invalid=%u channel=%u eligible=%u",
-                 s_c5_lltf8_readback, (unsigned)info->len,
+        ESP_LOGI(TAG, "C5_LLTF8_V1 startup_readback=%u fresh_phy=%u link_epoch=%u bits=8 len=%u bb=%u second=%u sta_bw_mhz=%u vld=%u first_invalid=%u channel=%u eligible=%u",
+                 s_c5_lltf8_readback, current_phy_matches, callback_link_state >> 1, (unsigned)info->len,
                  native_metadata.bb_format, native_metadata.secondary,
                  native_metadata.sta_bandwidth_mhz, native_metadata.estimate_valid,
                  native_metadata.first_word_invalid, info->rx_ctrl.channel,
@@ -462,6 +481,12 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
     size_t frame_len = raw_frame_len;
 #if defined(CONFIG_C5_MANAGED_LLTF8_V1)
     frame_len = c5_lltf8_v1_append(frame_buf, sizeof(frame_buf), raw_frame_len, native_claim);
+    /* Do not publish or feed edge DSP if association changed or the PHY
+     * footprint drifted while this callback was being filtered/serialized. */
+    const bool closing_phy_matches = c5_current_phy_matches();
+    const unsigned closing_link_state = atomic_load(&s_c5_link_state);
+    if (!c5_lltf8_live_gate_matches(callback_link_state,
+                                   closing_link_state, closing_phy_matches)) return;
 #endif
     if (he_action == CSI_HE_ACTION_TAG && frame_len > 19) {
         frame_buf[19] |= CSI_FRAME_FLAG_HE_ESTIMATE_INVALID;  /* ADR-423 D1 */
@@ -1140,5 +1165,21 @@ void csi_collector_diagnostic_tick(void)
              (unsigned long)s_c5_diag.ack0, (unsigned long)s_c5_diag.ack1,
              (unsigned)((s_c5_diag.ack0 >> 29) & 1),
              (unsigned)((s_c5_diag.ack1 >> 29) & 1), s_c5_diag.phy_matched);
+#endif
+}
+
+void csi_collector_note_link_transition(bool connected)
+{
+#if defined(CONFIG_C5_MANAGED_LLTF8_V1)
+    /* STA association/stop/disconnect events may run on a different task.
+     * Incrementing the epoch also rejects disconnect+reconnect (ABA) during
+     * one callback. Fresh PHY checks remain mandatory after reconnect. */
+    unsigned previous = atomic_load(&s_c5_link_state);
+    unsigned next;
+    do {
+        next = ((previous + 2U) & ~1U) | (connected ? 1U : 0U);
+    } while (!atomic_compare_exchange_weak(&s_c5_link_state, &previous, next));
+#else
+    (void)connected;
 #endif
 }

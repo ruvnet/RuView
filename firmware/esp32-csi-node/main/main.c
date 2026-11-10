@@ -131,7 +131,18 @@ static void event_handler(void *arg, esp_event_base_t event_base,
 #endif
 #endif
         esp_wifi_connect();
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_CONNECTED) {
+#if defined(CONFIG_C5_MANAGED_LLTF8_V1)
+        csi_collector_note_link_transition(true);
+#endif
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_STOP) {
+#if defined(CONFIG_C5_MANAGED_LLTF8_V1)
+        csi_collector_note_link_transition(false);
+#endif
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+#if defined(CONFIG_C5_MANAGED_LLTF8_V1)
+        csi_collector_note_link_transition(false);
+#endif
         wifi_event_sta_disconnected_t *disc = (wifi_event_sta_disconnected_t *)event_data;
         ESP_LOGW(TAG, "WiFi disconnected, reason=%d rssi=%d", disc->reason, disc->rssi);
         /* The 7.5 h outage was root-caused to the MAX_RETRY latch only because
