@@ -113,7 +113,7 @@ jobs:
           # The PyO3 sdist landing depends on the cargo/Rust toolchain
           # being present. cibuildwheel images carry rustup on Linux
           # but we also pin a known-good version for reproducibility.
-          CIBW_BEFORE_ALL_LINUX: "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.82"
+          CIBW_BEFORE_ALL_LINUX: "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.89"
           CIBW_ENVIRONMENT_LINUX: 'PATH="$HOME/.cargo/bin:$PATH"'
           # Smoke-test every built wheel before accepting it. Catches
           # the case where the wheel imports but the compiled symbols
