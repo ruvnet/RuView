@@ -45,7 +45,7 @@ use super::keypoint::{PyKeypoint, PyKeypointType};
 /// bb2 = BoundingBox.from_center(0.3, 0.45, 0.4, 0.5)
 /// print(bb.iou(bb2))
 /// ```
-#[pyclass(frozen, name = "BoundingBox")]
+#[pyclass(from_py_object, frozen, name = "BoundingBox")]
 #[derive(Clone)]
 pub struct PyBoundingBox {
     inner: BoundingBox,
@@ -121,7 +121,7 @@ impl PyBoundingBox {
 /// print(pose.get_keypoint(KeypointType.Nose).confidence)  # 0.95
 /// print(pose.compute_bounding_box())          # auto-derived from visible kp
 /// ```
-#[pyclass(name = "PersonPose")]
+#[pyclass(from_py_object, name = "PersonPose")]
 #[derive(Clone)]
 pub struct PyPersonPose {
     inner: PersonPose,
@@ -162,21 +162,17 @@ impl PyPersonPose {
     /// All keypoints as a dict keyed by KeypointType. Missing
     /// keypoints are omitted (NOT included with None values).
     fn keypoints<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
-        // PyO3 0.22 — PyDict::new_bound returns a Bound, the legacy
-        // PyDict::new (returning &PyDict) was removed in 0.21.
-        let dict = PyDict::new_bound(py);
+        // PyO3 0.29 — PyDict::new returns a Bound.
+        let dict = PyDict::new(py);
         for (i, kp_opt) in self.inner.keypoints.iter().enumerate() {
             if let Some(kp) = kp_opt {
                 let kpt = match KeypointType::all().get(i) {
                     Some(t) => *t,
                     None => continue,
                 };
-                // Convert through IntoPy to satisfy ToPyObject bound
-                // for dict.set_item — #[pyclass] types impl IntoPy but
-                // not ToPyObject directly in PyO3 0.22.
-                use pyo3::IntoPy;
-                let k_obj: PyObject = PyKeypointType::from_rust(kpt).into_py(py);
-                let v_obj: PyObject = PyKeypoint::from_rust(*kp).into_py(py);
+                // Wrap the #[pyclass] values as Python objects (PyO3 0.29 Bound API).
+                let k_obj = Bound::new(py, PyKeypointType::from_rust(kpt))?;
+                let v_obj = Bound::new(py, PyKeypoint::from_rust(*kp))?;
                 dict.set_item(k_obj, v_obj)?;
             }
         }
