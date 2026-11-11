@@ -68,16 +68,20 @@ impl RoomLearningRuntime {
     pub(super) fn temporal_select_profile_v2(&self,profile:Option<&str>)->Result<(),String>{
         let guard=self.mutation_guard()?;self.temporal_select_profile_guarded_v2(profile,&guard).map(|_|())
     }
-    pub fn temporal_default_operator_profile_v2(&self)->Result<(),String>{
+    pub fn temporal_default_operator_profile_v2(&self,now:u64)->Result<(),String>{
         // Discover old pending runs before choosing a fresh default. No stored
         // run is migrated or hidden behind the new profile's recovery namespace.
         {
             let state=self.inner.lock().map_err(|_|"learner state unavailable")?;
             if state.capture.is_some() || self.operator_profile_initialized.load(Ordering::Acquire) { return Ok(()); }
         }
-        let variable_pending = self.variable_recovery_store.as_ref().map(|s|s.inspect()).transpose()?.flatten().is_some();
-        let operator_pending = !variable_pending && self.operator_recovery_store.as_ref().map(|s|s.inspect()).transpose()?.flatten().is_some();
-        let legacy_pending = !variable_pending && !operator_pending && self.recovery_store.as_ref().map(|s|s.inspect()).transpose()?.flatten().is_some();
+        let pending=|store:&Option<Arc<crate::room_learner::recovery_store::RecoveryStore>>|->Result<bool,String>{
+            Ok(store.as_ref().map(|s|s.inspect_temporal_read_only(now)).transpose()?.flatten()
+                .is_some_and(|head|!head.retired()))
+        };
+        let variable_pending = pending(&self.variable_recovery_store)?;
+        let operator_pending = !variable_pending && pending(&self.operator_recovery_store)?;
+        let legacy_pending = !variable_pending && !operator_pending && pending(&self.recovery_store)?;
         let variable = variable_pending || (!operator_pending && !legacy_pending);
         let operator = variable || operator_pending;
         let mut state=self.inner.lock().map_err(|_|"learner state unavailable")?;

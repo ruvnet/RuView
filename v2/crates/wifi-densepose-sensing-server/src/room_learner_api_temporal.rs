@@ -94,7 +94,7 @@ pub(crate) async fn status_dispatch(
         Ok(rt) => rt,
         Err(e) => return e,
     };
-    if let Err(e)=rt.temporal_default_operator_profile_v2(){return failure("learner_profile_unavailable",e);}
+    if let Err(e)=rt.temporal_default_operator_profile_v2(now_ns(&rt)){return failure("learner_profile_unavailable",e);}
     temporal_status_with_reader_options(&state,&rt,|reader,now|reader.temporal_status_snapshot_v2(now),include).await
 }
 fn temporal_selection(

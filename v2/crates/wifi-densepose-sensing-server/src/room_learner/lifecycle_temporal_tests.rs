@@ -1475,14 +1475,14 @@ fn retry_cannot_reconcile_a_writer_after_terminal_owner_drain(){
 fn profile_namespace_selection_is_guarded_and_default_reads_cannot_undo_explicit_choice(){
     let directory=tempfile::tempdir().unwrap();let rt=runtime(directory.path(),START);
     let old_guard=rt.mutation_guard().unwrap();
-    rt.temporal_default_operator_profile_v2().unwrap();
+    rt.temporal_default_operator_profile_v2(START).unwrap();
     assert!(rt.operator_profile_selected.load(Ordering::Acquire));
     assert!(rt.temporal_select_profile_guarded_v2(None,&old_guard).is_err());
     assert!(rt.operator_profile_selected.load(Ordering::Acquire));
     let guard=rt.mutation_guard().unwrap();
     let after=rt.temporal_select_profile_guarded_v2(None,&guard).unwrap();
     assert!(!rt.operator_profile_selected.load(Ordering::Acquire));
-    rt.temporal_default_operator_profile_v2().unwrap();
+    rt.temporal_default_operator_profile_v2(START).unwrap();
     assert!(!rt.operator_profile_selected.load(Ordering::Acquire),"read must not race an explicit old-plan restore");
     assert_eq!(rt.mutation_guard().unwrap(),after);
 }
@@ -1530,7 +1530,7 @@ fn status_refuses_profile_and_recovery_snapshot_mixed_across_a_guarded_selection
 #[test]
 fn variable_profile_configures_and_retains_four_sources_through_durable_genesis() {
     let directory=tempfile::tempdir().unwrap();let rt=Arc::new(runtime(directory.path(),START));
-    rt.temporal_default_operator_profile_v2().unwrap();
+    rt.temporal_default_operator_profile_v2(START).unwrap();
     assert!(rt.variable_profile_selected.load(Ordering::Acquire));
     let mut c=context();let mut fourth=c.sources[2].clone();fourth.source_id=18;fourth.device_id="esp32-node-18".into();fourth.link_id="native-18".into();c.sources.push(fourth);
     rt.temporal_configure_v2(&rt.mutation_guard().unwrap(),c,"synthetic-four-source-genesis".into(),true,START).unwrap();
@@ -1543,19 +1543,64 @@ fn variable_profile_configures_and_retains_four_sources_through_durable_genesis(
     assert!(rt.temporal_select_profile_v2(Some(crate::room_learner::managed_schedule_contract::OPERATOR_EIGHT_PROFILE)).is_err());
 }
 
+fn recovery_files(root:&Path)->Vec<(std::path::PathBuf,Vec<u8>)> {
+    let mut files=Vec::new();
+    for entry in std::fs::read_dir(root).unwrap() {
+        let entry=entry.unwrap();let path=entry.path();
+        if entry.file_type().unwrap().is_dir(){files.extend(recovery_files(&path));}
+        else {files.push((path.clone(),std::fs::read(path).unwrap()));}
+    }
+    files.sort_by(|a,b|a.0.cmp(&b.0));files
+}
+fn actual_old_temporal_genesis(root:&Path,operator:bool,now:u64)->u64 {
+    let rt=Arc::new(runtime(root,now));
+    rt.temporal_select_profile_v2(if operator {Some(crate::room_learner::managed_schedule_contract::OPERATOR_EIGHT_PROFILE)}else{None}).unwrap();
+    rt.temporal_configure_v2(&rt.mutation_guard().unwrap(),context(),"synthetic-real-old-profile-genesis".into(),true,now).unwrap();
+    let settled=settle_async_boundary(&rt,now);
+    assert_eq!(snapshot(&rt,settled)["durable_windows"],0);
+    drop(rt);settled
+}
 #[test]
 fn variable_profile_default_keeps_pending_older_recovery_discoverable() {
-    for operator in [false,true] {
-        let directory=tempfile::tempdir().unwrap();let rt=runtime(directory.path(),START);
-        let now=START/1_000_000;let c=context();
-        let descriptor=crate::room_learner::recovery_store::RecoveryDescriptor {
-            schema:crate::room_learner::recovery_store::RECOVERY_SCHEMA.into(),id:"synthetic-pending-old-profile".into(),owner_scope:c.owner_scope,installation_id:c.installation_id,context_digest:"c".repeat(64),created_at_ms:now,saved_at_ms:now,expires_at_ms:now+86_400_000
-        };
+    for operator in [false,true] {for expired in [false,true] {
+        let directory=tempfile::tempdir().unwrap();let settled=actual_old_temporal_genesis(directory.path(),operator,START);
+        let rt=Arc::new(runtime(directory.path(),settled+1));
         let store=if operator {rt.operator_recovery_store.as_ref().unwrap()}else{rt.recovery_store.as_ref().unwrap()};
-        store.save(&descriptor,b"synthetic pending metadata - no capture authority",now).unwrap();
-        rt.temporal_default_operator_profile_v2().unwrap();
+        let original=store.inspect_temporal_read_only(settled+1).unwrap().unwrap().descriptor().clone();
+        let now=if expired {original.expires_at_ms*1_000_000+1}else{settled+2};
+        let before=recovery_files(directory.path());
+        assert!(before.iter().any(|(p,_)|p.file_name().unwrap()=="temporal-head.bin"));
+        assert!(!before.iter().any(|(p,_)|p.file_name().unwrap()=="capture-recovery-v1.bin"));
+        rt.temporal_default_operator_profile_v2(now).unwrap();
         assert!(!rt.variable_profile_selected.load(Ordering::Acquire));
         assert_eq!(rt.operator_profile_selected.load(Ordering::Acquire),operator);
-        assert_eq!(store.load(now+1).unwrap().unwrap().plaintext,b"synthetic pending metadata - no capture authority");
+        let status=rt.temporal_status_snapshot_v2(now).unwrap();
+        assert_eq!(status["temporal_profile"]["profile_id"],if operator {crate::room_learner::managed_schedule_contract::OPERATOR_EIGHT_PROFILE}else{"native-2s-three-source-56bin-option-a-engineering-v1"});
+        assert_eq!(status["recovery"]["state"],if expired {"expired"}else{"available"});
+        assert!(status["recovery"]["capture_generation_id"].as_str().is_some());
+        assert_eq!(status["recovery"]["original_deadline"]["expires_at_unix_ms"],original.expires_at_ms);
+        assert_eq!(store.inspect_temporal_read_only(now).unwrap().unwrap().descriptor(),&original);
+        assert_eq!(recovery_files(directory.path()),before,"default/status discovery must not repair, renew or rewrite journals");
+    }}
+}
+#[test]
+fn retired_variable_temporal_head_does_not_mask_an_active_old_profile_after_cold_runtime() {
+    for operator in [false,true] {
+        let directory=tempfile::tempdir().unwrap();let variable=Arc::new(runtime(directory.path(),START));
+        variable.temporal_select_profile_v2(Some(crate::room_learner::managed_schedule_contract::OPERATOR_VARIABLE_PROFILE)).unwrap();
+        variable.temporal_configure_v2(&variable.mutation_guard().unwrap(),context(),"synthetic-retired-variable".into(),true,START).unwrap();
+        let now=settle_async_boundary(&variable,START);
+        variable.cancel_temporal_durability(&variable.mutation_guard().unwrap()).unwrap();
+        let store=variable.variable_recovery_store.as_ref().unwrap();let loaded=store.load_temporal(now).unwrap().unwrap();
+        let intent=store.prepare_retire_temporal(&loaded.token,now+1,false).unwrap();
+        store.publish_temporal(&intent,None,now+1).unwrap();
+        assert!(store.inspect_temporal_read_only(now+1).unwrap().unwrap().retired());drop(variable);
+        let settled=actual_old_temporal_genesis(directory.path(),operator,now+2);
+        let rt=Arc::new(runtime(directory.path(),settled+1));let before=recovery_files(directory.path());
+        rt.temporal_default_operator_profile_v2(settled+2).unwrap();
+        assert!(!rt.variable_profile_selected.load(Ordering::Acquire));
+        assert_eq!(rt.operator_profile_selected.load(Ordering::Acquire),operator);
+        assert_eq!(rt.temporal_status_snapshot_v2(settled+2).unwrap()["recovery"]["state"],"available");
+        assert_eq!(recovery_files(directory.path()),before);
     }
 }

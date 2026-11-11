@@ -457,14 +457,17 @@ from host scheduling, establish source measurement time, or qualify sensing.
 An instantaneous inverse arrival interval therefore cannot establish a
 20 Hz sensor sample rate.
 
-`Arrival18To22Burst200MsV1` retains every original frame identity and receiver
-timestamp with its existing canonical feature values; the native-to-feature
+`Arrival18To22Burst200MsV1` retains every admitted retained-window frame identity
+and receiver timestamp with its existing canonical feature values; the native-to-feature
 projection is unchanged. It bounds observed window and whole-period rates
-to 18–22 packets/s,
+to 18–22 packets/s. Whole-period rate is checked only at the completed episode
+frontier/seal, summing each positive resumed part’s packet intervals and receiver
+span while excluding paused gaps; partial durable prefixes keep structural,
+sequence, gap and retained-window checks without an aggregate-rate veto. It bounds
 maximum gaps to 200 ms, and requires strictly increasing receiver timestamps.
 Native windows retain a two-second target, at most 2.2 seconds observed span,
 200 ms first-arrival/skew bounds and at most 52 rows per source. There is no
-synthetic clock, temporal resampling to hide a gap, packet dropping, or source-clock /
+synthetic clock, temporal resampling to hide a gap, dropping within admitted retained windows, or source-clock /
 phase / accuracy claim. Excess density, long gaps, missing sources, duplicates
 and changed input/context still reject. Older interval-strict profiles keep
 their exact original rules.
