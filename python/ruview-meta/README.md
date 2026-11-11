@@ -13,9 +13,12 @@ re-exports its full API under the `ruview` namespace — so you can
 write either of these and they do the same thing:
 
 ```python
-from ruview import BreathingExtractor, SensingClient
-from wifi_densepose import BreathingExtractor, SensingClient
+from ruview import BreathingExtractor, HeartRateExtractor
+from wifi_densepose import BreathingExtractor, HeartRateExtractor
 ```
+
+The WebSocket/MQTT clients live in `wifi_densepose.client` (install the
+`[client]` extra).
 
 ## Install
 
@@ -26,14 +29,19 @@ pip install "ruview[client]"       # + WebSocket/MQTT clients
 
 ## Usage
 
-```python
-from ruview import BreathingExtractor
+Runs as-is after `pip install ruview` (synthetic signal, about 15 breaths/min):
 
+```python
+import math
+
+from ruview import BreathingExtractor, CsiVitalPreprocessor
+
+pre = CsiVitalPreprocessor.esp32_default()
 br = BreathingExtractor.esp32_default()  # 56 subcarriers @ 100 Hz, 30s window
-for residuals, weights in csi_source:
-    est = br.extract(residuals=residuals, weights=weights)
-    if est is not None:
-        print(f"{est.value_bpm:.1f} BPM  (confidence={est.confidence:.2f})")
+for i in range(3000):
+    a = 10.0 + 0.5 * math.sin(2 * math.pi * 0.25 * i / 100.0)
+    est = br.extract(pre.process([a] * 56), [])
+print(est)
 ```
 
 Full API + WebSocket / MQTT / Home Assistant integration docs:

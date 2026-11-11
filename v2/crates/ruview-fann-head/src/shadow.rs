@@ -127,3 +127,74 @@ impl<'a> ShadowScorer<'a> {
         })
     }
 }
+
+/// Totals for a candidate shadowing a decision made outside this crate.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct ExternalCounters {
+    pub scored: u64,
+    pub unavailable: u64,
+    pub agree: u64,
+    pub disagree: u64,
+    /// The candidate abstained: counted as neither agreement nor disagreement.
+    pub candidate_abstain: u64,
+}
+
+/// A candidate shadowing a presence decision it does not own, e.g. the
+/// sensing server's per-node classification (ADR-426 D5). It owns its head and
+/// scratch, so a server can hold one for its lifetime. Like [`ShadowScorer`],
+/// nothing it returns can become a published result.
+#[derive(Debug)]
+pub struct ExternalShadow {
+    candidate: FannHead,
+    scorer: HeadScorer,
+    counters: ExternalCounters,
+}
+
+impl ExternalShadow {
+    /// The candidate must have been fitted for exactly `context`.
+    pub fn new(candidate: FannHead, context: &HeadContext) -> Result<Self, HeadError> {
+        candidate.require_context(context)?;
+        let scorer = candidate.scorer()?;
+        Ok(Self {
+            candidate,
+            scorer,
+            counters: ExternalCounters::default(),
+        })
+    }
+
+    pub fn counters(&self) -> ExternalCounters {
+        self.counters
+    }
+
+    pub fn digest(&self) -> &str {
+        self.candidate.digest()
+    }
+
+    pub fn features(&self) -> usize {
+        self.candidate.features()
+    }
+
+    /// Score one observation the owner already decided as `incumbent_occupied`.
+    pub fn score(&mut self, features: &[f32], incumbent_occupied: bool) -> CandidateOutcome {
+        match self.candidate.score(&mut self.scorer, features) {
+            Ok(probability) => {
+                let decision = decide(probability);
+                self.counters.scored += 1;
+                match decision {
+                    PresenceDecision::Abstain => self.counters.candidate_abstain += 1,
+                    PresenceDecision::Occupied if incumbent_occupied => self.counters.agree += 1,
+                    PresenceDecision::Empty if !incumbent_occupied => self.counters.agree += 1,
+                    _ => self.counters.disagree += 1,
+                }
+                CandidateOutcome::Scored {
+                    probability,
+                    decision,
+                }
+            }
+            Err(reason) => {
+                self.counters.unavailable += 1;
+                CandidateOutcome::Unavailable { reason }
+            }
+        }
+    }
+}

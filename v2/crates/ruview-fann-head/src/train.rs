@@ -31,6 +31,11 @@ pub struct FitConfig {
     /// Decoupled weight decay (applies to weights and biases).
     pub weight_decay: f32,
     pub seed: u64,
+    /// Thin the larger class to the size of the smaller before fitting.
+    /// The loss is unweighted, so without this a set that is mostly one class
+    /// is fitted toward that class (ADR-426: 87 % empty rows drove a head to
+    /// call nearly everything empty).
+    pub balance: bool,
 }
 
 impl FitConfig {
@@ -42,6 +47,7 @@ impl FitConfig {
             learning_rate: 0.02,
             weight_decay: 0.01,
             seed: 0x5EED,
+            balance: false,
         }
     }
 
@@ -52,6 +58,33 @@ impl FitConfig {
             ..Self::candidate()
         }
     }
+}
+
+/// Evenly spaced thinning of the larger class down to the smaller one's size.
+/// Deterministic, and it keeps rows from across the whole recording rather
+/// than only its start. Row order is preserved.
+pub fn balance_classes(features: &[f32], labels: &[bool], width: usize) -> (Vec<f32>, Vec<bool>) {
+    let occupied = labels.iter().filter(|&&l| l).count();
+    let empty = labels.len() - occupied;
+    let (major, keep) = (occupied > empty, occupied.min(empty));
+    let total = occupied.max(empty);
+    if keep == 0 || keep == total {
+        return (features.to_vec(), labels.to_vec());
+    }
+    let (mut x, mut y, mut seen) = (Vec::new(), Vec::new(), 0usize);
+    for (i, &label) in labels.iter().enumerate() {
+        if label == major {
+            // Keep row `seen` when it starts a new one of `keep` equal strides.
+            let take = (seen * keep) / total != ((seen + 1) * keep) / total;
+            seen += 1;
+            if !take {
+                continue;
+            }
+        }
+        x.extend_from_slice(&features[i * width..(i + 1) * width]);
+        y.push(label);
+    }
+    (x, y)
 }
 
 /// Outcome of a fit.
@@ -130,6 +163,14 @@ pub fn fit(
             "fitting needs both occupied and empty rows",
         ));
     }
+
+    let balanced;
+    let (features, labels, rows) = if config.balance {
+        balanced = balance_classes(features, labels, n);
+        (&balanced.0[..], &balanced.1[..], balanced.1.len())
+    } else {
+        (features, labels, rows)
+    };
 
     let mut rng = SplitMix(config.seed);
     let mut layers = Vec::with_capacity(2);

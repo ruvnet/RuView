@@ -61,6 +61,9 @@ wifi-densepose-physics = { workspace = true }
 wifi-densepose-mat = { version = "0.3.2", path = "../wifi-densepose-mat", default-features = false, features = ["std", "api"] }
 
 # Multi-BSSID WiFi scanning pipeline (ADR-022 Phase 3)
+# ADR-426 D5: default-off ruv-FANN shadow scoring. Optional, so a default
+# build has no ruv-FANN in it.
+ruview-fann-head = { version = "0.3.1", path = "../ruview-fann-head", optional = true }
 wifi-densepose-wifiscan = { version = "0.3.0", path = "../wifi-densepose-wifiscan" }
 
 # Signal processing with RuvSense pose tracker (accuracy sprint).
@@ -143,6 +146,10 @@ otel = ["dep:opentelemetry_sdk", "dep:opentelemetry-otlp", "dep:opentelemetry-ap
 # all `--mqtt-*` CLI flags still parse (cli.rs declares them unconditionally),
 # but enabling `--mqtt` at runtime logs a `WARN` and the publisher is a no-op.
 mqtt = ["dep:rumqttc"]
+# Enables ADR-426 D5 shadow scoring and feature capture (`fann_shadow`). Off by
+# default; at runtime it still does nothing until RUVIEW_FANN_SHADOW_HEAD or
+# RUVIEW_FANN_SHADOW_LOG is set.
+fann-shadow = ["dep:ruview-fann-head"]
 # ADR-115 §3.11 — Matter Bridge (HA-FABRIC). Same gating principle: flags
 # parse unconditionally; the bridge is a no-op without this feature.
 # matter-rs is added in P7; intentionally absent in P1 to keep the dep

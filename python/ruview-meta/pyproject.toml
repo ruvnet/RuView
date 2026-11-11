@@ -52,7 +52,7 @@ dependencies = [
 client = ["wifi-densepose[client]==2.0.0"]
 
 [project.urls]
-Homepage = "https://github.com/ruvnet/RuView"
+Homepage = "https://ruv.io"
 Repository = "https://github.com/ruvnet/RuView"
 Issues = "https://github.com/ruvnet/RuView/issues"
 Documentation = "https://github.com/ruvnet/RuView/tree/main/docs"
