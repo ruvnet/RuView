@@ -33,11 +33,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
-    # NB: we don't use a `services:` mosquitto container here because the
-    # eclipse-mosquitto:2.x image rejects anonymous connections by default
-    # and GH Actions `services` doesn't easily support mounting a custom
-    # config file. We start mosquitto manually in a step below with an
-    # inline `allow_anonymous true` config.
+    # Explicit vendor broker config; publish only the CI loopback port.
+    # No APT package install or production MQTT security policy is involved.
 
     env:
       RUVIEW_RUN_INTEGRATION: "1"
@@ -50,29 +47,26 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install mosquitto + clients and start with allow_anonymous
+      - name: Start pinned Mosquitto broker with CI-only anonymous listener
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y mosquitto mosquitto-clients
-          sudo systemctl stop mosquitto || true
-          # Inline config: anon listener on 11883 only — no TLS, no auth,
-          # OK for CI because we test the wire shape, not security.
-          # Production deployments enable mTLS per ADR-115 §3.9.
-          cat > /tmp/mosquitto-ci.conf <<'EOF'
-          listener 11883
+          cat > "$RUNNER_TEMP/mosquitto-ci.conf" <<'CONFIG'
+          listener 1883
           allow_anonymous true
           persistence false
           log_dest stdout
-          EOF
-          mosquitto -c /tmp/mosquitto-ci.conf -d
+          CONFIG
+          docker run --detach --user mosquitto --name ruview-mqtt-ci \
+            --publish 127.0.0.1:11883:1883 \
+            --mount "type=bind,source=$RUNNER_TEMP/mosquitto-ci.conf,target=/mosquitto/config/mosquitto.conf,readonly" \
+            eclipse-mosquitto:2.0.18@sha256:d12c8f80dfc65b768bb9acecc7ef182b976f71fb681640b66358e5e0cf94e9e9
           for i in {1..20}; do
-            if mosquitto_pub -h 127.0.0.1 -p 11883 -t healthcheck -m ok -q 0 2>/dev/null; then
-              echo "mosquitto reachable on 11883"; exit 0
+            if docker exec ruview-mqtt-ci mosquitto_pub -h 127.0.0.1 -p 1883 -t healthcheck -m ok -q 0 \
+              && python3 -c 'import socket; socket.create_connection(("127.0.0.1", 11883), timeout=3).close()'; then
+              exit 0
             fi
-            sleep 2
+            sleep 1
           done
-          echo "mosquitto never became reachable" >&2
-          tail -50 /var/log/mosquitto/*.log 2>/dev/null || true
+          docker logs ruview-mqtt-ci
           exit 1
 
       - name: Install Rust toolchain
@@ -113,5 +107,8 @@ jobs:
       - name: Dump broker logs on failure
         if: failure()
         run: |
-          docker ps -a
-          docker logs $(docker ps -aqf "ancestor=eclipse-mosquitto:2.0.18") || true
+          docker logs ruview-mqtt-ci || true
+
+      - name: Stop the owned CI broker
+        if: always()
+        run: docker rm --force ruview-mqtt-ci

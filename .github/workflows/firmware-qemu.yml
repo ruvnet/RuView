@@ -22,50 +22,32 @@ on:
       - 'scripts/swarm_presets/**'
       - '.github/workflows/firmware-qemu.yml'
 
+defaults:
+  run:
+    shell: bash
+
 env:
   IDF_VERSION: "v5.4"
-  QEMU_REPO: "https://github.com/espressif/qemu.git"
-  QEMU_BRANCH: "esp-develop"
 
 jobs:
   build-qemu:
     name: Build Espressif QEMU
-    # QEMU's bundled dtc fails with GCC 15 on Ubuntu 26.04. Keep the
-    # Ubuntu 24.04 / GCC 13 build environment until that dependency is updated.
     runs-on: ubuntu-24.04
+    # This SDK image installs Espressif's checksum-verified QEMU package and
+    # its runtime libraries. Match the image used by both consumers below.
+    # Avoid APT DNS and an unpinned floating QEMU source build on cold caches.
+    container:
+      image: espressif/idf:v5.4@sha256:f1e9f69dc052b9afc7801ca884e0ef40c17e014bb05ce73d9c09d29290bd17fb
     steps:
-      - name: Cache QEMU build
-        id: cache-qemu
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: /opt/qemu-esp32
-          # Scope native binaries to the build image; bump v1 when refreshing
-          # the floating upstream branch. Do not restore an unqualified cache.
-          key: qemu-esp32s3-ubuntu-24.04-${{ env.QEMU_BRANCH }}-v1
-
-      - name: Install QEMU build dependencies
-        if: steps.cache-qemu.outputs.cache-hit != 'true'
+      - name: Prepare SDK-provided Espressif QEMU
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            git build-essential ninja-build pkg-config \
-            libglib2.0-dev libpixman-1-dev libslirp-dev \
-            libgcrypt20-dev \
-            python3 python3-venv
-
-      - name: Clone and build Espressif QEMU
-        if: steps.cache-qemu.outputs.cache-hit != 'true'
-        run: |
-          git clone --depth 1 -b "$QEMU_BRANCH" "$QEMU_REPO" /tmp/qemu-esp
-          cd /tmp/qemu-esp
-          mkdir build && cd build
-          ../configure \
-            --target-list=xtensa-softmmu \
-            --prefix=/opt/qemu-esp32 \
-            --enable-slirp \
-            --disable-werror
-          ninja -j$(nproc)
-          ninja install
+          . "$IDF_PATH/export.sh"
+          QEMU_BIN="$(command -v qemu-system-xtensa)"
+          QEMU_ROOT="$(dirname "$(dirname "$QEMU_BIN")")"
+          "$QEMU_BIN" --version
+          "$QEMU_BIN" -machine help | grep -E '^esp32s3[[:space:]]'
+          mkdir -p /opt/qemu-esp32
+          cp -a "$QEMU_ROOT/." /opt/qemu-esp32/
 
       - name: Verify QEMU binary
         run: |
@@ -85,7 +67,7 @@ jobs:
     needs: build-qemu
     runs-on: ubuntu-latest
     container:
-      image: espressif/idf:v5.4
+      image: espressif/idf:v5.4@sha256:f1e9f69dc052b9afc7801ca884e0ef40c17e014bb05ce73d9c09d29290bd17fb
 
     strategy:
       fail-fast: false
@@ -214,32 +196,35 @@ jobs:
 
   fuzz-test:
     name: Fuzz Testing (ADR-061 Layer 6)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    env:
+      CC: clang-18
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           submodules: recursive
 
-      - name: Install clang
+      - name: Verify hosted Clang
+        # Ubuntu 24.04 hosted runners already contain Clang 18 and libFuzzer.
+        # Do not fetch the redundant distro meta-package before testing.
         run: |
-          sudo apt-get update
-          sudo apt-get install -y clang
+          "$CC" --version
 
       - name: Build fuzz targets
         working-directory: firmware/esp32-csi-node/test
-        run: make all CC=clang
+        run: make all CC="$CC"
 
       - name: Run serialize fuzzer (60s)
         working-directory: firmware/esp32-csi-node/test
-        run: make run_serialize FUZZ_DURATION=60 || echo "FUZZER_CRASH=serialize" >> "$GITHUB_ENV"
+        run: make run_serialize CC="$CC" FUZZ_DURATION=60 || echo "FUZZER_CRASH=serialize" >> "$GITHUB_ENV"
 
       - name: Run edge enqueue fuzzer (60s)
         working-directory: firmware/esp32-csi-node/test
-        run: make run_edge FUZZ_DURATION=60 || echo "FUZZER_CRASH=edge" >> "$GITHUB_ENV"
+        run: make run_edge CC="$CC" FUZZ_DURATION=60 || echo "FUZZER_CRASH=edge" >> "$GITHUB_ENV"
 
       - name: Run NVS config fuzzer (60s)
         working-directory: firmware/esp32-csi-node/test
-        run: make run_nvs FUZZ_DURATION=60 || echo "FUZZER_CRASH=nvs" >> "$GITHUB_ENV"
+        run: make run_nvs CC="$CC" FUZZ_DURATION=60 || echo "FUZZER_CRASH=nvs" >> "$GITHUB_ENV"
 
       - name: Check for crashes
         working-directory: firmware/esp32-csi-node/test
@@ -320,7 +305,7 @@ jobs:
     needs: [build-qemu]
     runs-on: ubuntu-latest
     container:
-      image: espressif/idf:v5.4
+      image: espressif/idf:v5.4@sha256:f1e9f69dc052b9afc7801ca884e0ef40c17e014bb05ce73d9c09d29290bd17fb
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262

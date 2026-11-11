@@ -79,7 +79,7 @@ jobs:
   # Rust Workspace Tests
   rust-tests:
     name: Rust Workspace Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
     - name: Checkout code
       uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -96,8 +96,7 @@ jobs:
     # standard Tauri-on-Ubuntu set.
     - name: Install Tauri / GTK / serial system dev libraries
       run: |
-        sudo apt-get update
-        sudo apt-get install -y --no-install-recommends \
+        bash scripts/ci-install-ubuntu-deps.sh \
           libglib2.0-dev \
           libgtk-3-dev \
           libsoup-3.0-dev \
