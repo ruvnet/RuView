@@ -203,6 +203,18 @@ for i,(label,sub,kind,tail) in enumerate([('Capture RF','CSI from supported hard
  if i<2:s+=path(f'M{x+344} 229H{x+384}M{x+376} 221L{x+384} 229L{x+376} 237',C,2,extra='class="flow"')
 s+=text(36,373,'CONCEPTUAL PIPELINE / HARDWARE AND ENVIRONMENT VALIDATION MATTER',11,MUTED,extra='class="mono"')
 save('overview',1200,396,'RuView sensing overview','Conceptual sequence: capture RF, extract context, act locally. Links to architecture and user documentation.',s,'docs/user-guide.md')
+# Beginner path: the four quick start stages in the order a newcomer meets
+# them. Every line is a real command from the quick start options, so the
+# diagram states where to go next instead of promising a capability.
+s=text(36,42,'QUICK START / FOUR STAGES',12,C,extra='class="mono"')+text(36,84,'From a simulated preview to a live room.',32,WHITE)
+stages=[('01','Preview','Docker, no hardware','docker pull'),('02','Sense','Flash and provision a node','provision.py'),('03','Calibrate','Record the empty room','calibration/start'),('04','Automate','Home Assistant, MQTT, agents','home-assistant.md')]
+for i,(num,label,sub,hint) in enumerate(stages):
+ x=36+i*294
+ s+=f'<rect x="{x}" y="112" width="270" height="176" rx="14" fill="#071b23" stroke="#285360"/>'
+ s+=text(x+20,146,num,12,C)+text(x+20,182,label,24,WHITE)+text(x+20,210,sub,14)+text(x+20,266,hint,12,MUTED,extra='class="mono"')
+ if i<3:s+=path(f'M{x+272} 200H{x+290}M{x+282} 192L{x+290} 200L{x+282} 208',C,2,extra='class="flow"')
+s+=text(36,318,'FOLLOW IN ORDER OR JUMP IN. EXACT COMMANDS BELVE.',10,MUTED,extra='class="mono"')
+save('quickstart',1200,340,'RuView quick start: four stages from a simulated preview to a live room','Four stage beginner path: preview with Docker, sense with an ESP32 node, calibrate the empty room, automate the result. Commands and links, not measurements.',s,'docs/user-guide.md')
 # Chapter headings act as visual landmarks, all remain links.
 headers=[('features','Explore the capabilities','SENSING / MODELS / AUTOMATION','presence','docs/user-guide.md'),('edge','Intelligence at the edge','SENSORS / FIRMWARE / MODULES','edge','firmware/esp32-csi-node/README.md'),('learning','From recordings to models','CAPTURE / TRAIN / EVALUATE','models','docs/user-guide.md'),('evidence','Evidence before accuracy claims','BENCHMARKS / REPRODUCERS / LIMITS','evidence','docs/benchmarks/pose-estimation-cog.md'),('docs','Choose your next step','GUIDES / HARDWARE / INTEGRATIONS','agents','docs/user-guide.md')]
 for k,title,sub,kind,target in headers:

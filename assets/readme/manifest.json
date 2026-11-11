@@ -102,6 +102,13 @@
       "height": 396
     },
     {
+      "file": "assets/readme/quickstart-spatial-v4.svg",
+      "title": "RuView quick start: four stages from a simulated preview to a live room",
+      "target": "docs/user-guide.md",
+      "width": 1200,
+      "height": 340
+    },
+    {
       "file": "assets/readme/header-features-spatial-v4.svg",
       "title": "Explore the capabilities",
       "target": "docs/user-guide.md",
