@@ -1,0 +1,60 @@
+name: Windows WiFi quick start validation
+
+on:
+  pull_request:
+    paths:
+      - 'docs/tutorials/windows-wifi-quickstart.md'
+      - 'docs/tutorials/evidence/windows-wifi-quickstart-2026-10-22/**'
+      - 'archive/v1/src/__init__.py'
+      - 'archive/v1/src/sensing/**'
+      - 'archive/v1/tests/unit/**'
+      - 'archive/v1/tests/integration/**'
+      - 'archive/v1/data/proof/verify.py'
+      - 'scripts/windows_wifi_quickstart_contract.py'
+      - 'scripts/verify-windows-wifi-quickstart.py'
+      - 'scripts/tests/test_windows_wifi_quickstart_contract.py'
+      - '.github/workflows/windows-wifi-quickstart-verify.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'docs/tutorials/windows-wifi-quickstart.md'
+      - 'docs/tutorials/evidence/windows-wifi-quickstart-2026-10-22/**'
+      - 'archive/v1/src/__init__.py'
+      - 'archive/v1/src/sensing/**'
+      - 'archive/v1/tests/unit/**'
+      - 'archive/v1/tests/integration/**'
+      - 'archive/v1/data/proof/verify.py'
+      - 'scripts/windows_wifi_quickstart_contract.py'
+      - 'scripts/verify-windows-wifi-quickstart.py'
+      - 'scripts/tests/test_windows_wifi_quickstart_contract.py'
+      - '.github/workflows/windows-wifi-quickstart-verify.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: The Windows WiFi quick start matches the repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - name: Install the pipeline dependencies
+        run: python -m pip install --upgrade pip pytest numpy scipy
+      - name: Test the quick start contract
+        run: python -m unittest discover -s scripts/tests -p test_windows_wifi_quickstart_contract.py
+      - name: Verify the guide against the repository and the captured evidence
+        run: python scripts/verify-windows-wifi-quickstart.py
+      - name: Run the v1 sensing unit tests
+        run: python -m pytest archive/v1/tests/unit/test_sensing.py -q -o "addopts="
+        env:
+          PYTHONPATH: archive
+      - name: Run the Windows collector gate tests
+        run: python -m pytest archive/v1/tests/unit/test_rssi_collector_gate.py -q -o "addopts="
+        env:
+          PYTHONPATH: archive
+      - name: Replay the deterministic proof
+        run: python archive/v1/data/proof/verify.py

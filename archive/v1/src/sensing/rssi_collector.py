@@ -491,6 +491,16 @@ class WindowsWifiCollector:
         Ring buffer capacity in seconds (default 120).
     """
 
+    # Windows 11 gates `netsh wlan show interfaces` behind Location
+    # services. With the gate closed the command still exits successfully but
+    # prints no interface block at all, so a reader that only looks for a
+    # "Signal" line would carry the -80 dBm default for ever and the
+    # classifier would report "absent" with nothing in the log to explain it.
+    LOCATION_GATE_MARKERS = (
+        "location permission",
+        "requires elevation",
+    )
+
     def __init__(
         self,
         interface: str = "Wi-Fi",
@@ -578,24 +588,46 @@ class WindowsWifiCollector:
             if sleep_time > 0:
                 time.sleep(sleep_time)
 
+    def _reject_gated_netsh(self, stdout: str) -> None:
+        """Refuse to sample when Windows is withholding the interface block."""
+        lowered = stdout.lower()
+        for marker in self.LOCATION_GATE_MARKERS:
+            if marker in lowered:
+                raise RuntimeError(
+                    "netsh cannot read the WLAN interfaces: Windows requires "
+                    "Location services for this query. Enable Settings > "
+                    "Privacy & security > Location, or run the shell as "
+                    "administrator."
+                )
+
     def _read_sample(self) -> WifiSample:
         result = subprocess.run(
             ["netsh", "wlan", "show", "interfaces"],
             capture_output=True, text=True, timeout=5.0,
         )
+        stdout = result.stdout or ""
+        self._reject_gated_netsh(stdout)
         rssi = -80.0
         signal_pct = 0.0
+        saw_signal = False
 
-        for line in result.stdout.splitlines():
+        for line in stdout.splitlines():
             stripped = line.strip()
             # "Rssi" line contains the raw dBm value (available on Win10+)
             if stripped.lower().startswith("rssi"):
+                saw_signal = True
                 try:
-                    rssi = float(stripped.split(":")[1].strip())
+                    # Windows builds differ: one prints "Rssi : -72", another
+                    # prints "Rssi : -39 dBm". Taking the numeric prefix
+                    # keeps the unit from throwing the value away, which
+                    # would leave the -80 dBm default in place and the
+                    # classifier reading "absent" for ever.
+                    rssi = float(stripped.split(":")[1].strip().split()[0])
                 except (IndexError, ValueError):
                     pass
             # "Signal" line contains percentage (always available)
             elif stripped.lower().startswith("signal"):
+                saw_signal = True
                 try:
                     pct_str = stripped.split(":")[1].strip().rstrip("%")
                     signal_pct = float(pct_str)
@@ -603,6 +635,16 @@ class WindowsWifiCollector:
                     # Signal% roughly maps: 100% ≈ -30 dBm, 0% ≈ -90 dBm
                 except (IndexError, ValueError):
                     pass
+
+        if not saw_signal:
+            # netsh succeeded but carried no interface block. Reporting the
+            # -80 dBm default here would make the classifier read "absent"
+            # for ever, with nothing in the log to explain it.
+            raise RuntimeError(
+                "netsh returned no signal data for interface %r. Run "
+                "'netsh wlan show interfaces' and check that it lists the "
+                "interface with a Signal line." % (self._interface,)
+            )
 
         # Normalise link quality from signal percentage
         link_quality = signal_pct / 100.0

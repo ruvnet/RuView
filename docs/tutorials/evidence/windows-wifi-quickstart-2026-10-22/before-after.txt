@@ -1,0 +1,97 @@
+# The Windows WiFi quick start, before and after the two fixes
+#
+# Captured 2026-10-22 on the guide author's Windows 11 host
+# (24H2, build 26200), Intel(R) Wi-Fi 6E AX210, Python 3.15.0.
+#
+# "before" is the upstream tree; "after" is the branch with the two
+# fixes. The host has the saved profile for its home network, and the
+# interface is associated with it.
+
+# ---------------------------------------------------------------------
+# BEFORE: the deterministic proof dies on an unrelated broken dependency
+# ---------------------------------------------------------------------
+> python archive/v1/data/proof/verify.py
+In C:\Users\danalec\scoop\apps\python\current\Lib\site-packages\__editable__.medalista-2.1.0.pth: C:\Users\danalec\Documents\src\medalista\src does not exist; skipping sys.path append
+In C:\Users\danalec\scoop\apps\python\current\Lib\site-packages\_editable_impl_bookmark_organizer.pth: C:\Users\danalec\Documents\src\umbrella\bookmark-organizer\src does not exist; skipping sys.path append
+Traceback (most recent call last):
+  File "C:\Users\danalec\Documents\src\RuView\archive\v1\data\proof\verify.py", line 56, in <module>
+    from src.hardware.csi_extractor import CSIData
+  File "C:\Users\danalec\Documents\src\RuView\archive\v1\src\__init__.py", line 49, in <module>
+    from src.app import app
+  File "C:\Users\danalec\Documents\src\RuView\archive\v1\src\app.py", line 17, in <module>
+    from src.services.orchestrator import ServiceOrchestrator
+  File "C:\Users\danalec\Documents\src\RuView\archive\v1\src\services\__init__.py", line 5, in <module>
+    from .orchestrator import ServiceOrchestrator
+  File "C:\Users\danalec\Documents\src\RuView\archive\v1\src\services\orchestrator.py", line 13, in <module>
+    from src.api.dependencies import (
+    ...<3 lines>...
+    )
+  File "C:\Users\danalec\Documents\src\RuView\archive\v1\src\api\dependencies.py", line 14, in <module>
+    from src.services.pose_service import PoseService
+  File "C:\Users\danalec\Documents\src\RuView\archive\v1\src\services\pose_service.py", line 15, in <module>
+    import torch
+  File "C:\Users\danalec\scoop\apps\python\current\Lib\site-packages\torch\__init__.py", line 285, in <module>
+    _load_dll_libraries()
+    ~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\danalec\scoop\apps\python\current\Lib\site-packages\torch\__init__.py", line 281, in _load_dll_libraries
+    raise err
+OSError: [WinError 126] The specified module could not be found. Error loading "C:\Users\danalec\scoop\apps\python\current\Lib\site-packages\torch\lib\torch_python.dll" or one of its dependencies.
+
+# ---------------------------------------------------------------------
+# BEFORE: the collector invents a signal
+# ---------------------------------------------------------------------
+> python -c "from v1.src.sensing.rssi_collector import WindowsWifiCollector; ...collect_once()"
+In C:\Users\danalec\scoop\apps\python\current\Lib\site-packages\__editable__.medalista-2.1.0.pth: C:\Users\danalec\Documents\src\medalista\src does not exist; skipping sys.path append
+In C:\Users\danalec\scoop\apps\python\current\Lib\site-packages\_editable_impl_bookmark_organizer.pth: C:\Users\danalec\Documents\src\umbrella\bookmark-organizer\src does not exist; skipping sys.path append
+RSSI: -80.0 dBm, Quality: 0%
+
+# The Windows 11 Location services gate is what makes netsh return
+# nothing; the collector has no way to tell that apart from a weak link.
+
+> netsh wlan show interfaces
+There is 1 interface on the system: 
+Network shell commands need location permission to access WLAN information. Turn on Location services on the Location page in Privacy & security settings.
+Here is the URI for the Location page in the Settings app: ms-settings:privacy-location
+To open the Location page in the Settings app, run the following command:
+start ms-settings:privacy-location
+
+Or, to open the Location page from the Run dialog box, press Windows logo key + R, and then copy and paste the URI above.
+
+Function WlanQueryInterface returns error 5:
+The requested operation requires elevation (Run as administrator).
+
+# ---------------------------------------------------------------------
+# AFTER: the proof runs and passes, with the pipeline hash unchanged
+# ---------------------------------------------------------------------
+> python archive/v1/data/proof/verify.py
+  VERDICT: PASS
+  Pipeline hash: f8e76f21a0f9852b70b6d9dd5318239f6b20cbcb4cdd995863263cecdc446f7a
+
+# ---------------------------------------------------------------------
+# AFTER: the collector refuses instead of inventing a signal
+# ---------------------------------------------------------------------
+In C:\Users\danalec\scoop\apps\python\current\Lib\site-packages\__editable__.medalista-2.1.0.pth: C:\Users\danalec\Documents\src\medalista\src does not exist; skipping sys.path append
+In C:\Users\danalec\scoop\apps\python\current\Lib\site-packages\_editable_impl_bookmark_organizer.pth: C:\Users\danalec\Documents\src\umbrella\bookmark-organizer\src does not exist; skipping sys.path append
+RuntimeError: netsh cannot read the WLAN interfaces: Windows requires Location services for this query. Enable Settings > Privacy & security > Location, or run the shell as administrator.
+
+# ---------------------------------------------------------------------
+# AFTER: the unit suites and the new gate tests
+# ---------------------------------------------------------------------
+> python -m pytest archive/v1/tests/unit/test_sensing.py -q
+In C:\Users\danalec\scoop\apps\python\current\Lib\site-packages\__editable__.medalista-2.1.0.pth: C:\Users\danalec\Documents\src\medalista\src does not exist; skipping sys.path append
+In C:\Users\danalec\scoop\apps\python\current\Lib\site-packages\_editable_impl_bookmark_organizer.pth: C:\Users\danalec\Documents\src\umbrella\bookmark-organizer\src does not exist; skipping sys.path append
+.............................................                            [100%]
+45 passed in 0.66s
+
+> python -m pytest archive/v1/tests/unit/test_rssi_collector_gate.py -q
+In C:\Users\danalec\scoop\apps\python\current\Lib\site-packages\__editable__.medalista-2.1.0.pth: C:\Users\danalec\Documents\src\medalista\src does not exist; skipping sys.path append
+In C:\Users\danalec\scoop\apps\python\current\Lib\site-packages\_editable_impl_bookmark_organizer.pth: C:\Users\danalec\Documents\src\umbrella\bookmark-organizer\src does not exist; skipping sys.path append
+.....                                                                    [100%]
+5 passed in 0.65s
+
+# The integration suite skips itself when it cannot see a connected
+# interface, which is what the Location services gate looks like.
+> python -m pytest archive/v1/tests/integration/test_windows_live_sensing.py -q -rs
+SKIPPED [1] ..\RuView-36\archive\v1\tests\integration\test_windows_live_sensing.py:52: Requires Windows with connected WiFi
+SKIPPED [1] ..\RuView-36\archive\v1\tests\integration\test_windows_live_sensing.py:64: Requires Windows with connected WiFi
+SKIPPED [1] ..\RuView-36\archive\v1\tests\integration\test_windows_live_sensing.py:82: Requires Windows with connected WiFi
