@@ -46,7 +46,7 @@ jobs:
         run: >-
           node --disable-proto=throw .github/scripts/nightly-sota/agent.mjs collect
           --out "${RUNNER_TEMP}/nightly-sota/evidence.json"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: nightly-sota-evidence-${{ github.run_id }}
           path: ${{ runner.temp }}/nightly-sota/evidence.json
@@ -87,7 +87,7 @@ jobs:
           --repo-root "${GITHUB_WORKSPACE}"
           --proposal-out "${RUNNER_TEMP}/nightly-sota/propose/proposal.json"
           --receipt-out "${RUNNER_TEMP}/nightly-sota/propose/cognitum-receipt.json"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: nightly-sota-proposal-${{ github.run_id }}
           path: ${{ runner.temp }}/nightly-sota/propose/
@@ -131,7 +131,7 @@ jobs:
           --repo-root "${GITHUB_WORKSPACE}"
           --score-out "${RUNNER_TEMP}/nightly-sota/score/score.json"
           --replay-out "${RUNNER_TEMP}/nightly-sota/score/replay.json"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: nightly-sota-score-${{ github.run_id }}
           path: ${{ runner.temp }}/nightly-sota/score/
@@ -183,7 +183,7 @@ jobs:
           --replay "${RUNNER_TEMP}/nightly-sota/score/replay.json"
           --repo-root "${GITHUB_WORKSPACE}"
           --out "${RUNNER_TEMP}/nightly-sota/issue/issue.json"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: nightly-sota-issue-${{ github.run_id }}
           path: ${{ runner.temp }}/nightly-sota/issue/
@@ -224,7 +224,7 @@ jobs:
           --repo-root "${GITHUB_WORKSPACE}"
           --bundle-out "${RUNNER_TEMP}/nightly-sota/implement/bundle.json"
           --receipt-out "${RUNNER_TEMP}/nightly-sota/implement/cognitum-receipt.json"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: nightly-sota-implementation-${{ github.run_id }}
           path: ${{ runner.temp }}/nightly-sota/implement/
@@ -277,7 +277,7 @@ jobs:
           --implementation-receipt "${RUNNER_TEMP}/nightly-sota/implement/cognitum-receipt.json"
           --repo-root "${GITHUB_WORKSPACE}"
           --out "${RUNNER_TEMP}/nightly-sota/validate/validation.json"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: nightly-sota-validation-${{ github.run_id }}
           path: ${{ runner.temp }}/nightly-sota/validate/
