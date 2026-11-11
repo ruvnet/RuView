@@ -42,6 +42,7 @@ on:
       - 'v2/Cargo.toml'
       - 'v2/Cargo.lock'
       - '.github/workflows/bench-regression.yml'
+      - 'scripts/ci-install-ubuntu-deps.sh'
   pull_request:
     paths:
       - 'v2/crates/**/benches/**'
@@ -50,6 +51,7 @@ on:
       - 'v2/Cargo.toml'
       - 'v2/Cargo.lock'
       - '.github/workflows/bench-regression.yml'
+      - 'scripts/ci-install-ubuntu-deps.sh'
   workflow_dispatch:
 
 permissions:
@@ -68,7 +70,7 @@ jobs:
   # ── HARD GATE: every bench must still compile + link ─────────────────────
   bench-compile:
     name: bench compile-verify (--no-run)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout (recursive — wifi-densepose-rufield path-deps vendor/rufield)
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -84,8 +86,7 @@ jobs:
       # the whole graph, so these are required here too.
       - name: Install Tauri / GTK / serial system dev libraries
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          bash scripts/ci-install-ubuntu-deps.sh \
             libglib2.0-dev \
             libgtk-3-dev \
             libsoup-3.0-dev \
