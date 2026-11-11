@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RF Distance Map</title>
+<!--
+  Orbitable 3D map of the mesh, laid out by RF distance rather than geometry.
+  No dependencies, so it works with the internet down — same as mark.html and
+  mesh.html.
+
+  Pipeline: RSSI -> distance (log-distance path loss) -> 3D positions
+  (gradient-descent MDS) -> projection you can orbit.
+
+  WHAT THIS IS NOT: architectural truth. Through walls and floors the signal
+  diffracts and bounces, so the path really is longer than the straight line
+  and every such link reads long. The reconstruction puffs up wherever
+  material intervenes.
+
+  WHAT IT IS: a map where distance means RF isolation. Two nodes in one room
+  sit close; two separated by a floor sit far apart *because the floor
+  attenuates*. Floors separate on their own without being told they exist,
+  and the gap between them measures what that floor costs. For sensing that
+  is the more useful quantity — RF coupling, not metres, is what decides
+  whether a link can see anything. It is also why the geometric link-line
+  model failed on this fleet: physical distance is not what matters.
+
+  The payoff is the comparison. Enter what you know to be physically true and
+  a link reading 80 ft across a 45 ft span is telling you something is in the
+  way — in feet, which is actionable, rather than dBm, which is not.
+
+  MDS by gradient descent rather than eigendecomposition: it needs no matrix
+  library, tolerates missing pairs (a link that cannot be heard is simply not
+  a constraint), and for N <= 16 converges in milliseconds.
+
+  At three nodes this is degenerate — three points always form a triangle, so
+  it fits perfectly and proves nothing. It starts testing itself at nine,
+  where 36 distances constrain 21 free parameters.
+-->
+<style>
+  :root{
+    --bg:#0d1117; --fg:#e6edf3; --dim:#8b949e; --line:#30363d; --card:#161b22;
+    --ok:#2ea043; --warn:#d29922; --bad:#f85149; --accent:#388bfd;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; background:var(--bg); color:var(--fg);
+       font:13.5px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+       display:flex; flex-direction:column; height:100vh; overflow:hidden;}
+  header{padding:12px 16px 10px; border-bottom:1px solid var(--line); flex:0 0 auto;}
+  h1{font-size:15px; margin:0 0 2px;}
+  .sub{color:var(--dim); font-size:11.5px;}
+  .wrap{flex:1 1 auto; display:flex; min-height:0;}
+  #stage{flex:1 1 auto; position:relative; min-width:0;}
+  canvas{display:block; width:100%; height:100%; cursor:grab;}
+  canvas:active{cursor:grabbing;}
+  aside{flex:0 0 288px; border-left:1px solid var(--line); padding:14px;
+        overflow-y:auto; background:var(--card);}
+  @media (max-width:760px){ .wrap{flex-direction:column;} aside{flex:0 0 auto; border-left:none; border-top:1px solid var(--line);} }
+  h2{font-size:11px; letter-spacing:.1em; text-transform:uppercase;
+     color:var(--dim); margin:0 0 8px; font-weight:600;}
+  .grp{margin-bottom:18px;}
+  label{display:block; font-size:12px; color:var(--dim); margin:9px 0 3px;}
+  input[type=range]{width:100%;}
+  input[type=number]{width:100%; background:#0d1117; color:var(--fg);
+    border:1px solid var(--line); border-radius:5px; padding:5px 7px; font:inherit;}
+  .val{color:var(--fg); font-weight:600;}
+  table{width:100%; border-collapse:collapse; font-size:11.5px;}
+  td{padding:3px 4px; border-bottom:1px solid var(--line);}
+  td.n{text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap;}
+  .hint{color:var(--dim); font-size:11px; margin-top:7px; line-height:1.45;}
+  button{font:inherit; font-size:12px; padding:6px 11px; border-radius:6px;
+    cursor:pointer; border:1px solid var(--line); background:#21262d; color:var(--fg);}
+  .err{color:var(--bad);}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>RF Distance Map</h1>
+  <div class="sub">Laid out by signal isolation, not geometry. Drag to orbit, scroll to zoom.</div>
+  <div style="margin:8px 0 4px;">
+    <button id="vTop">Top &mdash; N up</button>
+    <button id="vNorth">Look north</button>
+    <button id="vWest">Look west</button>
+    <button id="vIso">Isometric</button>
+    <span class="sub" style="margin-left:10px;">presets match the floor plan: east is right, south is down</span>
+  </div>
+</header>
+
+<div class="wrap">
+  <div id="stage"><canvas id="cv"></canvas></div>
+  <aside>
+    <div class="grp">
+      <h2>Path loss</h2>
+      <label>reference power at 1 ft <span class="val" id="p0v"></span></label>
+      <input type="range" id="p0" min="-60" max="-20" step="1" value="-40">
+      <label>exponent <span class="val" id="nv"></span> <span class="sub">(2 = open air, 3&ndash;4 = walls)</span></label>
+      <input type="range" id="n" min="15" max="45" step="1" value="30">
+      <label>AP transmits harder by <span class="val" id="apv"></span></label>
+      <input type="range" id="apg" min="0" max="16" step="1" value="8">
+      <div class="hint">Calibrate: pick two nodes whose real separation you
+      know, then move the exponent until the map agrees. Everything else
+      follows.</div>
+    </div>
+
+    <div class="grp">
+      <h2>Known distance <span class="sub">(optional)</span></h2>
+      <label>between node <input type="number" id="ka" value="0" style="width:52px;display:inline-block"> and <input type="number" id="kb" value="1" style="width:52px;display:inline-block"></label>
+      <label>actually <input type="number" id="kd" placeholder="feet" style="width:80px;display:inline-block"> ft apart</label>
+      <button id="solve">Fit exponent to this</button>
+      <div class="hint" id="fitnote"></div>
+    </div>
+
+    <div class="grp">
+      <h2>Auto-calibrate</h2>
+      <button id="auto">Fit model to surveyed nodes</button>
+      <div class="hint" id="autonote">Least-squares over every link whose true
+      distance is known, solving reference power, exponent and AP gain at once.
+      Until it is run, part of the &ldquo;excess&rdquo; column is model error
+      rather than obstruction.</div>
+    </div>
+
+    <div class="grp">
+      <h2>Links &mdash; true vs RF</h2>
+      <table id="tbl"></table>
+    </div>
+    <div class="sub" id="stamp"></div>
+  </aside>
+</div>
+
+<script>
+// ---- state ---------------------------------------------------------------
+var links = [], ids = [], pos = {}, az = 0.6, el = 0.4, zoom = 1, drag = null;
+var truth = null;      // /api/v1/config/room, when a node's position is known
+var M2F = 3.28084;
+
+// Known positions win over inference.
+//
+// MDS exists to place nodes when we do not know where they are. For nodes we
+// DO know, inferring a position from RSSI and then comparing it to the answer
+// we already had is worse than useless -- it hides the measurement behind a
+// reconstruction. So a node with a surveyed position is drawn there, and the
+// RF estimate is spent on the thing we actually want: how much longer the
+// signal path is than the straight line.
+//
+// Unknown nodes still get MDS, anchored against the known ones -- which is
+// what a newly plugged-in board looks like before it has been surveyed.
+// Room space is x=east, y=south, z=up. The projector below treats y as the
+// VERTICAL screen axis and rotates azimuth in the x-z plane, so surveyed
+// positions have to be remapped or the building is drawn lying on its side --
+// north-south pointing at the ceiling, and no amount of orbiting can align it
+// to the real house. Swapping here rather than in project() keeps MDS output
+// (which has no meaningful orientation anyway) in the same convention.
+function toView(east, south, up){ return {x: east, y: up, z: south}; }
+
+function truthPos(id){
+  if (!truth) return null;
+  if (id === 'AP') {
+    var a = truth.ap_position;
+    return a ? toView(a[0]*M2F, a[1]*M2F, a[2]*M2F) : null;
+  }
+  var n = (truth.nodes || []).filter(function(x){ return String(x.id) === String(id); })[0];
+  if (n) return toView(n.x*M2F, n.y*M2F, n.z*M2F);
+  // A trusted illuminator has a real position too, so it anchors the layout the
+  // same way a surveyed node does. An `approved` one is an estimate, but it is
+  // still a far better constraint than solving its position from RSSI alone.
+  var e = emitterById(id);
+  return e ? toView(e.position[0]*M2F, e.position[1]*M2F, e.position[2]*M2F) : null;
+}
+function trueFeet(a, b){
+  var A = truthPos(a), B = truthPos(b);
+  if (!A || !B) return null;
+  return Math.sqrt(Math.pow(A.x-B.x,2) + Math.pow(A.y-B.y,2) + Math.pow(A.z-B.z,2));
+}
+var P0 = -40, PLE = 3.0;   // dBm at 1 ft for a NODE transmitter
+var AP_GAIN = 8;           // dB the AP transmits harder than a node
+
+// Separate reference power per transmitter class.
+//
+// d = d0 * 10^((P0 - RSSI) / (10 * n)) assumes a fixed transmit power, so one
+// P0 across mixed transmitters is a real error: an AP with more output and a
+// better antenna reads stronger at the same distance, and a single P0 would
+// place it too close. The AP's stronger link is still the *better* measurement
+// — higher SNR means a steadier RSSI — but only once its extra output is
+// accounted for rather than mistaken for proximity.
+function rssiToFeet(dbm, isAp){
+  var ref = isAp ? (P0 + AP_GAIN) : P0;
+  return Math.pow(10, (ref - dbm) / (10 * PLE));
+}
+
+// ---- MDS by gradient descent --------------------------------------------
+// Positions are pushed toward satisfying every observed distance. Missing
+// pairs contribute nothing rather than being guessed at.
+function layout(pairs, idlist){
+  var p = {};
+  idlist.forEach(function(id, i){
+    // Deterministic spread, so the map does not jump on every refresh.
+    var a = i * 2.399, r = 20 + i * 3;
+    p[id] = {x: Math.cos(a) * r, y: Math.sin(a) * r, z: ((i % 3) - 1) * 12};
+  });
+  for (var it = 0; it < 600; it++){
+    var lr = 0.10 * (1 - it / 600);
+    pairs.forEach(function(pr){
+      var A = p[pr.a], B = p[pr.b];
+      var dx = B.x - A.x, dy = B.y - A.y, dz = B.z - A.z;
+      var d = Math.sqrt(dx*dx + dy*dy + dz*dz) || 1e-6;
+      var err = (d - pr.d) / d * lr * 0.5;
+      A.x += dx * err; A.y += dy * err; A.z += dz * err;
+      B.x -= dx * err; B.y -= dy * err; B.z -= dz * err;
+    });
+  }
+  // Centre it so orbiting feels natural.
+  var c = {x:0,y:0,z:0}, k = idlist.length || 1;
+  idlist.forEach(function(id){ c.x+=p[id].x; c.y+=p[id].y; c.z+=p[id].z; });
+  idlist.forEach(function(id){ p[id].x-=c.x/k; p[id].y-=c.y/k; p[id].z-=c.z/k; });
+  return p;
+}
+
+function residual(pairs, p){
+  var s = 0, n = 0;
+  pairs.forEach(function(pr){
+    var A=p[pr.a], B=p[pr.b];
+    var d = Math.sqrt(Math.pow(B.x-A.x,2)+Math.pow(B.y-A.y,2)+Math.pow(B.z-A.z,2));
+    s += Math.abs(d - pr.d) / pr.d; n++;
+  });
+  return n ? s / n : 0;
+}
+
+// ---- render --------------------------------------------------------------
+var cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+
+function project(pt, w, h){
+  var ca=Math.cos(az), sa=Math.sin(az), ce=Math.cos(el), se=Math.sin(el);
+  var x = pt.x*ca - pt.z*sa;
+  var z = pt.x*sa + pt.z*ca;
+  var y = pt.y*ce - z*se;
+  var depth = pt.y*se + z*ce;
+  var s = zoom * Math.min(w,h) / 140;
+  return {x: w/2 + x*s, y: h/2 - y*s, d: depth};
+}
+
+function draw(){
+  var w = cv.clientWidth, h = cv.clientHeight;
+  if (cv.width !== w || cv.height !== h){ cv.width = w; cv.height = h; }
+  ctx.clearRect(0,0,w,h);
+  if (!ids.length){
+    ctx.fillStyle = '#8b949e'; ctx.font = '13px ui-monospace';
+    ctx.fillText('waiting for links…', 18, 26); return;
+  }
+
+  var pairs = buildPairs();
+  // Edges first, far ones dimmer.
+  pairs.forEach(function(pr){
+    var A = project(pos[pr.a], w, h), B = project(pos[pr.b], w, h);
+    var bad;
+    if (pr.ratio !== null) {
+      // Excess over the straight line is the diagnostic: 1.0x is clear air,
+      // anything well above it is something in the way.
+      bad = pr.ratio > 1.8 ? 2 : (pr.ratio > 1.25 ? 1 : 0);
+    } else {
+      bad = pr.d > 40 ? 2 : (pr.d > 20 ? 1 : 0);
+    }
+    ctx.strokeStyle = bad === 2 ? 'rgba(248,81,73,.6)'
+                    : bad === 1 ? 'rgba(210,153,34,.6)' : 'rgba(46,160,67,.65)';
+    ctx.lineWidth = bad === 2 ? 2.4 : 1.6;
+    ctx.beginPath(); ctx.moveTo(A.x,A.y); ctx.lineTo(B.x,B.y); ctx.stroke();
+    var mx=(A.x+B.x)/2, my=(A.y+B.y)/2;
+    ctx.fillStyle = bad ? '#e6edf3' : '#8b949e'; ctx.font = '10px ui-monospace';
+    ctx.fillText(pr.truth !== null
+      ? pr.truth.toFixed(0) + ' ft → ' + pr.d.toFixed(0)
+      : pr.d.toFixed(0) + ' ft', mx + 3, my - 3);
+  });
+
+  ids.map(function(id){ return {id:id, p:project(pos[id], w, h)}; })
+     .sort(function(a,b){ return a.p.d - b.p.d; })
+     .forEach(function(o){
+       var r = Math.max(5, 9 + o.p.d * 0.02);
+       var em = emitterById(o.id);
+       var isNode = /^[0-9]+$/.test(o.id);
+       // Illuminators are squares, our boards circles, the AP a blue circle —
+       // the same shape language as world3d and the Room Builder plan, so the
+       // three views can be read against each other without a key.
+       if (em) {
+         ctx.beginPath();
+         ctx.rect(o.p.x - r, o.p.y - r, r * 2, r * 2);
+         ctx.fillStyle = '#2ea043';
+       } else {
+         ctx.beginPath();
+         ctx.arc(o.p.x, o.p.y, r, 0, Math.PI * 2);
+         ctx.fillStyle = o.id === 'AP' ? '#388bfd' : '#e6edf3';
+       }
+       ctx.fill();
+       ctx.fillStyle = '#0d1117'; ctx.font = 'bold 10px ui-monospace';
+       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+       // Inside the marker only for short identities; a named illuminator gets
+       // its label underneath, where it has room.
+       ctx.fillText(isNode ? o.id : (o.id === 'AP' ? 'AP' : ''), o.p.x, o.p.y);
+       if (em) {
+         ctx.fillStyle = '#2ea043'; ctx.font = '10px ui-monospace';
+         ctx.fillText(em.label || o.id.slice(-8), o.p.x, o.p.y + r + 9);
+       }
+       ctx.textAlign = 'start'; ctx.textBaseline = 'alphabetic';
+     });
+}
+
+/** Stable identity for a link's transmitter.
+ *
+ * `tx_node_inferred` is only populated for our own boards. Everything else —
+ * the AP, a second access point, a Powerwall gateway, nine Nest Protects —
+ * arrives as null, so keying on it merged them all into one "AP" point and
+ * averaged their RSSI together. Since the per-link grid fix admitted 30+
+ * transmitters, that stopped being a rounding error and became a fiction.
+ *
+ * The MAC is the only identity that is always right, so it is the fallback.
+ */
+function txIdentity(l){
+  if (l.tx_node_inferred !== null && l.tx_node_inferred !== undefined) {
+    return String(l.tx_node_inferred);
+  }
+  if (truth && truth.ap_mac && l.tx_mac === truth.ap_mac) return 'AP';
+  return l.tx_mac;
+}
+
+/** Human label for an identity: a node number, the AP, or an emitter's name. */
+function idLabel(id){
+  if (id === 'AP') return 'AP';
+  if (/^[0-9]+$/.test(id)) return 'n' + id;
+  var e = emitterById(id);
+  return e && e.label ? e.label : id.slice(-8);
+}
+
+/** The room-config emitter for a MAC identity, if it is one we trust. */
+function emitterById(id){
+  if (!truth || !truth.emitters) return null;
+  for (var i = 0; i < truth.emitters.length; i++) {
+    var e = truth.emitters[i];
+    if (e.mac === id && Array.isArray(e.position) &&
+        (e.status === 'approved' || e.status === 'surveyed')) return e;
+  }
+  return null;
+}
+
+function buildPairs(){
+  var best = {};
+  links.forEach(function(l){
+    var tx = txIdentity(l);
+    var rx = String(l.rx_node);
+    if (tx === rx) return;
+    var k = [rx,tx].sort().join('|');
+    // Average the two directions where both exist — propagation is reciprocal,
+    // so disagreement is noise and the mean is the better estimate.
+    if (!best[k]) best[k] = {a:k.split('|')[0], b:k.split('|')[1], v:[]};
+    best[k].v.push(l.rssi_dbm);
+  });
+  return Object.keys(best).map(function(k){
+    var e = best[k];
+    var mean = e.v.reduce(function(s,x){return s+x;},0) / e.v.length;
+    // Reference power is a property of the transmitter CLASS, not of one
+    // device: an access point, a gateway and a mains smoke detector all
+    // transmit harder than a bare ESP32, so any non-node endpoint takes the
+    // stronger reference.
+    var isAp = !/^[0-9]+$/.test(e.a) || !/^[0-9]+$/.test(e.b);
+    var rf = rssiToFeet(mean, isAp), tf = trueFeet(e.a, e.b);
+    return {a:e.a, b:e.b, d:rf, rssi:mean, ap:isAp,
+            truth:tf, excess:(tf ? rf - tf : null), ratio:(tf ? rf / tf : null)};
+  });
+}
+
+function recompute(){
+  var pairs = buildPairs();
+  var set = {};
+  pairs.forEach(function(p){ set[p.a]=1; set[p.b]=1; });
+  ids = Object.keys(set).sort();
+  // Solve only for nodes without a surveyed position; pin the rest.
+  pos = layout(pairs, ids);
+  var anchored = 0;
+  ids.forEach(function(id){
+    var t = truthPos(id);
+    if (t) { pos[id] = {x:t.x, y:t.y, z:t.z}; anchored++; }
+  });
+  if (anchored) {
+    // Re-run with anchors held fixed so unsurveyed nodes settle around them.
+    for (var it = 0; it < 400; it++){
+      var lr = 0.08 * (1 - it/400);
+      pairs.forEach(function(pr){
+        var A = pos[pr.a], B = pos[pr.b];
+        var fa = !truthPos(pr.a), fb = !truthPos(pr.b);
+        if (!fa && !fb) return;
+        var dx=B.x-A.x, dy=B.y-A.y, dz=B.z-A.z;
+        var d = Math.sqrt(dx*dx+dy*dy+dz*dz) || 1e-6;
+        var err = (d - pr.d)/d * lr * 0.5;
+        if (fa){ A.x += dx*err; A.y += dy*err; A.z += dz*err; }
+        if (fb){ B.x -= dx*err; B.y -= dy*err; B.z -= dz*err; }
+      });
+    }
+  }
+
+  // Re-centre on the whole layout.
+  //
+  // layout() centres the MDS cloud, but anchoring then overwrites nodes with
+  // RAW room coordinates, which run 0..44 ft from the north-west corner. Since
+  // project() rotates about the origin, the building ended up orbiting a point
+  // at its own corner -- outside the house -- which reads as "it picks an
+  // anchor and pivots around that". Once every node is surveyed, every node is
+  // overwritten, so the centring done inside layout() is entirely discarded.
+  var cc = {x:0, y:0, z:0}, ck = ids.length || 1;
+  ids.forEach(function(id){ cc.x += pos[id].x; cc.y += pos[id].y; cc.z += pos[id].z; });
+  ids.forEach(function(id){
+    pos[id].x -= cc.x/ck; pos[id].y -= cc.y/ck; pos[id].z -= cc.z/ck;
+  });
+
+  var rows = '<tr><td>pair</td><td class="n">true</td><td class="n">rf</td><td class="n">excess</td></tr>';
+  pairs.sort(function(a,b){
+    return (b.ratio || 0) - (a.ratio || 0);
+  }).forEach(function(p){
+    var col = p.ratio === null ? '#8b949e'
+            : p.ratio > 1.8 ? '#f85149' : p.ratio > 1.25 ? '#d29922' : '#2ea043';
+    rows += '<tr><td>' + idLabel(p.a) + ' &harr; ' + idLabel(p.b) + '</td>' +
+            '<td class="n">' + (p.truth === null ? '&mdash;' : p.truth.toFixed(0)) + '</td>' +
+            '<td class="n">' + p.d.toFixed(0) + '</td>' +
+            '<td class="n" style="color:' + col + '">' +
+            (p.excess === null ? '&mdash;'
+              : (p.excess > 0 ? '+' : '') + p.excess.toFixed(0) + ' ft') + '</td></tr>';
+  });
+  document.getElementById('tbl').innerHTML = rows;
+  document.getElementById('stamp').textContent =
+    ids.length + ' nodes · ' + pairs.length + ' links · fit residual ' +
+    (residual(pairs, pos)*100).toFixed(1) + '%' +
+    (truth ? ' · ' + ids.filter(function(i){return !!truthPos(i);}).length + ' surveyed' : '') +
+    (ids.length <= 3 ? ' — degenerate below 4 nodes' : '');
+  draw();
+}
+
+// ---- controls ------------------------------------------------------------
+function syncLabels(){
+  document.getElementById('p0v').textContent = P0 + ' dBm';
+  document.getElementById('nv').textContent = PLE.toFixed(1);
+  document.getElementById('apv').textContent = AP_GAIN + ' dB';
+}
+document.getElementById('p0').oninput = function(){
+  P0 = +this.value; syncLabels(); recompute();
+};
+document.getElementById('n').oninput = function(){
+  PLE = +this.value / 10; syncLabels(); recompute();
+};
+document.getElementById('apg').oninput = function(){
+  AP_GAIN = +this.value; syncLabels(); recompute();
+};
+document.getElementById('solve').onclick = function(){
+  var a = document.getElementById('ka').value.trim();
+  var b = document.getElementById('kb').value.trim();
+  var want = parseFloat(document.getElementById('kd').value);
+  var note = document.getElementById('fitnote');
+  if (!(want > 0)) { note.innerHTML = '<span class="err">enter a distance in feet</span>'; return; }
+  var pr = buildPairs().filter(function(p){
+    return (p.a===a&&p.b===b) || (p.a===b&&p.b===a); })[0];
+  if (!pr) { note.innerHTML = '<span class="err">no link between those two</span>'; return; }
+  // Solve n directly: want = 10^((P0 - rssi)/(10n))  ->  n = (P0-rssi)/(10*log10(want))
+  var lg = Math.log(want) / Math.LN10;
+  if (Math.abs(lg) < 1e-6) { note.innerHTML = '<span class="err">pick a pair not 1 ft apart</span>'; return; }
+  var ref = pr.ap ? (P0 + AP_GAIN) : P0;
+  var n = (ref - pr.rssi) / (10 * lg);
+  if (!(n > 1.5 && n < 4.5)) {
+    note.innerHTML = '<span class="err">that implies exponent ' + n.toFixed(2) +
+      ', outside the physical 1.5&ndash;4.5 range. Check the node numbers or the distance.</span>';
+    return;
+  }
+  PLE = n; document.getElementById('n').value = Math.round(n*10);
+  syncLabels(); recompute();
+  note.textContent = 'exponent set to ' + n.toFixed(2) +
+    ' — every other distance is now scaled against that pair.';
+};
+
+// Path loss is linear in log-distance:  RSSI = P0 + G*isAP - (10n)*log10(d)
+// so the three parameters fall out of an ordinary least-squares fit over the
+// surveyed links. Worth doing before reading the excess column: an uncalibrated
+// model contributes its own error there, which is indistinguishable by eye from
+// something physically in the way.
+document.getElementById('auto').onclick = function(){
+  var note = document.getElementById('autonote');
+  var all = buildPairs().filter(function(p){ return p.truth !== null && p.truth > 0.5; });
+  if (all.length < 4) {
+    note.innerHTML = '<span class="err">need at least 4 surveyed links, have ' +
+                     all.length + '</span>';
+    return;
+  }
+
+  function fit(set){
+    var A=[[0,0,0],[0,0,0],[0,0,0]], y=[0,0,0];
+    set.forEach(function(p){
+      var r=[1, p.ap?1:0, -Math.log(p.truth)/Math.LN10];
+      for (var i=0;i<3;i++){
+        for (var j=0;j<3;j++) A[i][j]+=r[i]*r[j];
+        y[i]+=r[i]*p.rssi;
+      }
+    });
+    var M=[[A[0][0],A[0][1],A[0][2],y[0]],
+           [A[1][0],A[1][1],A[1][2],y[1]],
+           [A[2][0],A[2][1],A[2][2],y[2]]];
+    for (var c=0;c<3;c++){
+      var piv=c;
+      for (var r2=c+1;r2<3;r2++) if (Math.abs(M[r2][c])>Math.abs(M[piv][c])) piv=r2;
+      if (Math.abs(M[piv][c])<1e-12) return null;
+      var t=M[c]; M[c]=M[piv]; M[piv]=t;
+      for (var r3=0;r3<3;r3++){
+        if (r3===c) continue;
+        var f=M[r3][c]/M[c][c];
+        for (var k=c;k<4;k++) M[r3][k]-=f*M[c][k];
+      }
+    }
+    return {p0:M[0][3]/M[0][0], g:M[1][3]/M[1][1], n:(M[2][3]/M[2][2])/10};
+  }
+
+  // Robust fit: an obstructed link is an outlier in dB, and a single blocked
+  // link can invert the slope entirely — the cage-shadowed pair here is both
+  // the closest and the weakest, which a plain least-squares reads as "closer
+  // is weaker". So fit, drop the worst offender, refit, and keep going while
+  // the model is unphysical or the residual is dominated by one point.
+  //
+  // The excluded links are not a nuisance: they are the obstructed ones, and
+  // naming them is the actual output.
+  var set = all.slice(), dropped = [], f = null;
+  while (set.length >= 4) {
+    f = fit(set);
+    if (f) {
+      var resid = set.map(function(p){
+        var pred = f.p0 + (p.ap?f.g:0) - 10*f.n*Math.log(p.truth)/Math.LN10;
+        return {p:p, e:Math.abs(pred - p.rssi)};
+      });
+      var worst = resid.reduce(function(a,b){ return a.e>b.e ? a : b; });
+      var ok = (f.n>1.2 && f.n<5 && f.g>-6 && f.g<25);
+      if (ok && worst.e < 8) break;              // physical, and no wild outlier
+      if (set.length === 4) break;
+      dropped.push({pair:worst.p, dB:worst.e});
+      set = set.filter(function(p){ return p !== worst.p; });
+      continue;
+    }
+    break;
+  }
+
+  if (!f || !(f.n>1.2 && f.n<5) || !(f.g>-6 && f.g<25)) {
+    note.innerHTML = '<span class="err">no physical fit even after excluding ' +
+      dropped.length + ' link(s). Check the surveyed positions.</span>';
+    return;
+  }
+
+  P0 = Math.round(f.p0); PLE = f.n; AP_GAIN = Math.round(f.g);
+  document.getElementById('p0').value = P0;
+  document.getElementById('n').value = Math.round(f.n*10);
+  document.getElementById('apg').value = AP_GAIN;
+  syncLabels(); recompute();
+
+  var msg = 'fitted on ' + set.length + ' clear link(s): exponent ' +
+            f.n.toFixed(2) + ', AP gain ' + AP_GAIN + ' dB.';
+  if (dropped.length) {
+    msg += '<br><b>Excluded as obstructed:</b> ' + dropped.map(function(d){
+      return idLabel(d.pair.a) + '&harr;' + idLabel(d.pair.b) + ' (' + d.dB.toFixed(0) + ' dB off)';
+    }).join(', ') + '. Those are the blocked paths &mdash; the model is now ' +
+    'calibrated on the clear ones, so the excess column reads the room.';
+  }
+  note.innerHTML = msg;
+};
+
+// Fixed viewpoints. Orbiting from an arbitrary angle to a recognisable one is
+// fiddly, and the whole point of the surveyed layout is that it CAN be matched
+// to the real building -- so give it known orientations to snap to.
+function setView(a, e2){ az = a; el = e2; zoom = 1; draw(); }
+document.getElementById('vTop').onclick   = function(){ setView(0, 1.4); };
+document.getElementById('vNorth').onclick = function(){ setView(0, 0.12); };
+document.getElementById('vWest').onclick  = function(){ setView(Math.PI/2, 0.12); };
+document.getElementById('vIso').onclick   = function(){ setView(0.6, 0.4); };
+
+cv.addEventListener('mousedown', function(e){ drag = {x:e.clientX, y:e.clientY}; });
+window.addEventListener('mouseup', function(){ drag = null; });
+window.addEventListener('mousemove', function(e){
+  if (!drag) return;
+  az += (e.clientX - drag.x) * 0.01;
+  el += (e.clientY - drag.y) * 0.01;
+  el = Math.max(-1.4, Math.min(1.4, el));
+  drag = {x:e.clientX, y:e.clientY};
+  draw();
+});
+cv.addEventListener('wheel', function(e){
+  e.preventDefault();
+  zoom *= e.deltaY > 0 ? 0.92 : 1.08;
+  zoom = Math.max(0.2, Math.min(6, zoom));
+  draw();
+}, {passive:false});
+window.addEventListener('resize', draw);
+
+function load(){
+  fetch('/api/v1/config/room', {cache:'no-store'})
+    .then(function(r){ return r.json(); })
+    .then(function(c){ if (c && c.nodes) truth = c; })
+    .catch(function(){ /* unsurveyed is a valid state — fall back to pure MDS */ })
+    .then(loadLinks);
+}
+function loadLinks(){
+  fetch('/api/v1/links', {cache:'no-store'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){ links = d.links || []; recompute(); })
+    .catch(function(){
+      document.getElementById('stamp').innerHTML = '<span class="err">server unreachable</span>';
+    });
+}
+syncLabels(); load(); setInterval(load, 5000);
+</script>
+</body>
+</html>
