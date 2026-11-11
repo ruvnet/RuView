@@ -54,6 +54,7 @@ fn plan_id(s: &str) -> Result<ExperimentalPlanId, String> {
 }
 fn band(s: &str) -> Result<ReceiverCadenceBand, String> {
     match s {
+        "Arrival18To22Burst200MsV1" => Ok(ReceiverCadenceBand::Arrival18To22Burst200MsV1),
         "Hz30To36" => Ok(ReceiverCadenceBand::Hz30To36),
         "Hz45To55" => Ok(ReceiverCadenceBand::Hz45To55),
         _ => Err("temporal_cadence_band".into()),

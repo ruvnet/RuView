@@ -26,8 +26,8 @@ impl RoomLearningRuntime {
         if !recovery_consent {
             return Err("recovery_consent_required".into());
         }
-        if context.sources.len() != 3 {
-            return Err("learner_temporal_three_sources_required".into());
+        if (if self.variable_profile_selected.load(Ordering::Acquire) { !(2..=8).contains(&context.sources.len()) } else { context.sources.len() != 3 }) {
+            return Err(if self.variable_profile_selected.load(Ordering::Acquire) { "learner_temporal_requires_two_to_eight_sources" } else { "learner_temporal_three_sources_required" }.into());
         }
         let store = self.temporal_store_arc()?.clone();
         if !store.available(){return Err("recovery_unavailable".into());}
@@ -46,16 +46,21 @@ impl RoomLearningRuntime {
         )
     }
     fn validate_profile_selection(&self,state:&Inner,profile:Option<&str>)->Result<bool,String>{
-        let operator=match profile {Some(crate::room_learner::managed_schedule_contract::OPERATOR_EIGHT_PROFILE)=>true,Some("native-2s-three-source-56bin-option-a-engineering-v1")|None=>false,_=>return Err("learner_unsupported_profile".into())};
+        let operator=match profile {Some(crate::room_learner::managed_schedule_contract::OPERATOR_VARIABLE_PROFILE)=>true,Some(crate::room_learner::managed_schedule_contract::OPERATOR_EIGHT_PROFILE)=>true,Some("native-2s-three-source-56bin-option-a-engineering-v1")|None=>false,_=>return Err("learner_unsupported_profile".into())};
         if let Some(CaptureWorkflow::Temporal(c))=state.capture.as_ref(){
-            if c.core.as_ref().is_none_or(|core|core.public_profile().profile_id.eq(crate::room_learner::managed_schedule_contract::OPERATOR_EIGHT_PROFILE)!=operator){return Err("temporal_previous_plan_loaded".into());}
+            if c.core.as_ref().is_none_or(|core|core.public_profile().profile_id != profile.unwrap_or("native-2s-three-source-56bin-option-a-engineering-v1")){return Err("temporal_previous_plan_loaded".into());}
         }
         Ok(operator)
     }
     pub fn temporal_select_profile_guarded_v2(&self,profile:Option<&str>,expected:&MutationGuard)->Result<MutationGuard,String>{
         let mut state=self.command_state(expected)?;
         let operator=self.validate_profile_selection(&state,profile)?;
+        let variable = profile == Some(crate::room_learner::managed_schedule_contract::OPERATOR_VARIABLE_PROFILE);
+        if self.operator_profile_selected.load(Ordering::Acquire) != operator || self.variable_profile_selected.load(Ordering::Acquire) != variable || !self.operator_profile_initialized.load(Ordering::Acquire) {
+            state.workflow_revision = state.workflow_revision.checked_add(1).ok_or("learner command revision exhausted")?;
+        }
         self.operator_profile_selected.store(operator,Ordering::Release);
+        self.variable_profile_selected.store(variable,Ordering::Release);
         self.operator_profile_initialized.store(true,Ordering::Release);
         Ok(self.guard_for(&state))
     }
@@ -64,10 +69,22 @@ impl RoomLearningRuntime {
         let guard=self.mutation_guard()?;self.temporal_select_profile_guarded_v2(profile,&guard).map(|_|())
     }
     pub fn temporal_default_operator_profile_v2(&self)->Result<(),String>{
+        // Discover old pending runs before choosing a fresh default. No stored
+        // run is migrated or hidden behind the new profile's recovery namespace.
+        {
+            let state=self.inner.lock().map_err(|_|"learner state unavailable")?;
+            if state.capture.is_some() || self.operator_profile_initialized.load(Ordering::Acquire) { return Ok(()); }
+        }
+        let variable_pending = self.variable_recovery_store.as_ref().map(|s|s.inspect()).transpose()?.flatten().is_some();
+        let operator_pending = !variable_pending && self.operator_recovery_store.as_ref().map(|s|s.inspect()).transpose()?.flatten().is_some();
+        let legacy_pending = !variable_pending && !operator_pending && self.recovery_store.as_ref().map(|s|s.inspect()).transpose()?.flatten().is_some();
+        let variable = variable_pending || (!operator_pending && !legacy_pending);
+        let operator = variable || operator_pending;
         let mut state=self.inner.lock().map_err(|_|"learner state unavailable")?;
         if state.capture.is_none()&&!self.operator_profile_initialized.load(Ordering::Acquire){
             state.workflow_revision=state.workflow_revision.checked_add(1).ok_or("learner command revision exhausted")?;
-            self.operator_profile_selected.store(true,Ordering::Release);
+            self.operator_profile_selected.store(operator,Ordering::Release);
+            self.variable_profile_selected.store(variable,Ordering::Release);
             self.operator_profile_initialized.store(true,Ordering::Release);
         }
         Ok(())
@@ -451,17 +468,17 @@ impl RoomLearningRuntime {
     /// Read-only recovery discovery may wait for a durable writer. Callers
     /// must not hold the shared RF ingress lock across this operation.
     pub fn temporal_status_snapshot_v2(self: &Arc<Self>, now: u64) -> Result<Value, String> {
-        let (generation,workflow_revision,operator_profile) = {
+        let (generation,workflow_revision,operator_profile,variable_profile) = {
             let state=self.inner.lock().map_err(|_| "learner state unavailable")?;
-            (state.generation,state.workflow_revision,self.operator_profile_selected.load(Ordering::Acquire))
+            (state.generation,state.workflow_revision,self.operator_profile_selected.load(Ordering::Acquire),self.variable_profile_selected.load(Ordering::Acquire))
         };
-        let recovery_store=if operator_profile{self.operator_recovery_store.as_ref()}else{self.recovery_store.as_ref()};
+        let recovery_store=if variable_profile { self.variable_recovery_store.as_ref() } else if operator_profile{self.operator_recovery_store.as_ref()}else{self.recovery_store.as_ref()};
         let recovery=recovery_store.and_then(|store|TemporalTrainCapture::recovery_discovery(store,now));
         #[cfg(test)]
         if let Some(hook)=self.temporal_status_profile_hook.lock().unwrap().take(){hook();}
         let mut response = {
             let state = self.inner.lock().map_err(|_| "learner state unavailable")?;
-            if state.generation != generation || state.workflow_revision!=workflow_revision || self.operator_profile_selected.load(Ordering::Acquire)!=operator_profile {
+            if state.generation != generation || state.workflow_revision!=workflow_revision || self.operator_profile_selected.load(Ordering::Acquire)!=operator_profile || self.variable_profile_selected.load(Ordering::Acquire)!=variable_profile {
                 return Err("learner_state_changed".into());
             }
             let capture = match state.capture.as_ref() {
@@ -469,7 +486,7 @@ impl RoomLearningRuntime {
                 _ => None,
             };
             let context = state.capture_context().cloned();
-            let mut profile = if operator_profile{TemporalProfileWire::operator_eight_step()}else{TemporalProfileWire::engineering()};
+            let mut profile = if variable_profile { TemporalProfileWire::variable_sources() } else if operator_profile{TemporalProfileWire::operator_eight_step()}else{TemporalProfileWire::engineering()};
             let mut wire_capture = None;
             let mut candidate = None;
             let mut train_proof = None;

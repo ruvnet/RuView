@@ -428,3 +428,49 @@ replaced. Existing recovery descriptor/checkpoint versions and expiry semantics 
 unchanged. This is proposed source work, not protection of a currently running
 older helper: installing it would require stopping that helper, so live volatile
 cohorts must not be sacrificed to obtain this capability.
+
+
+## November 11, 2026: proposed variable-source receiver profile
+
+Dragan requested that the room learner retain every configured source rather than
+requiring exactly three. The local candidate adds the explicitly versioned
+`native-2s-variable-source-56bin-receiver20-operator-eight-step-v2` profile. Earlier
+three-source profiles, schedule hashes, recovery data and key derivations remain
+unchanged. This amendment describes an engineering candidate, not physical
+qualification or a change to the default operating detector.
+
+The candidate supports 2–8 source-bound views of 56 canonical features (C5 keeps
+its 53 native IQ positions before the existing projection) and retains the existing
+eight operator episodes: 64 training windows and 16 reserved check windows.
+Resource preflight remains below two million numeric values and a 64 MiB
+serialized-checkpoint estimate. Every source participates in every accepted
+window; adding/removing a source changes context/model identity and requires a
+new run. No source is silently removed or padded. Recovery has a separate
+account/installation-bound encryption purpose and directory; pending older
+recovery stays discoverable under its original profile.
+
+The receiver policy is explicitly distinct from a sensor measurement clock.
+The November 10 executed metadata-only C5 read-loop sample reported means of
+20.42–20.62 packets/s, minimum observed intervals of 7.7–20.8 microseconds and
+maximum gaps of 131–137 milliseconds. It did not distinguish radio delivery
+from host scheduling, establish source measurement time, or qualify sensing.
+An instantaneous inverse arrival interval therefore cannot establish a
+20 Hz sensor sample rate.
+
+`Arrival18To22Burst200MsV1` retains every original frame identity and receiver
+timestamp with its existing canonical feature values; the native-to-feature
+projection is unchanged. It bounds observed window and whole-period rates
+to 18–22 packets/s,
+maximum gaps to 200 ms, and requires strictly increasing receiver timestamps.
+Native windows retain a two-second target, at most 2.2 seconds observed span,
+200 ms first-arrival/skew bounds and at most 52 rows per source. There is no
+synthetic clock, temporal resampling to hide a gap, packet dropping, or source-clock /
+phase / accuracy claim. Excess density, long gaps, missing sources, duplicates
+and changed input/context still reject. Older interval-strict profiles keep
+their exact original rules.
+
+Synthetic checks exercise source-count bounds, bursty four-C5 native input,
+rejected gaps/floods, whole four-source training with reserved checks excluded,
+model export/import identity, durable genesis and recovery isolation. Physical
+four-C5 capture, independent checks, qualification, explicit selection and Room
+Save remain required before describing this installation as qualified.

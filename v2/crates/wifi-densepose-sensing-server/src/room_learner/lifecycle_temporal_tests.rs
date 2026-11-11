@@ -1526,3 +1526,36 @@ fn status_refuses_profile_and_recovery_snapshot_mixed_across_a_guarded_selection
     assert_eq!(coherent["temporal_profile"]["profile_id"],crate::room_learner::managed_schedule_contract::OPERATOR_EIGHT_PROFILE);
     assert!(coherent["recovery"].is_null(),"new namespace cannot show the old plan recovery ID");
 }
+
+#[test]
+fn variable_profile_configures_and_retains_four_sources_through_durable_genesis() {
+    let directory=tempfile::tempdir().unwrap();let rt=Arc::new(runtime(directory.path(),START));
+    rt.temporal_default_operator_profile_v2().unwrap();
+    assert!(rt.variable_profile_selected.load(Ordering::Acquire));
+    let mut c=context();let mut fourth=c.sources[2].clone();fourth.source_id=18;fourth.device_id="esp32-node-18".into();fourth.link_id="native-18".into();c.sources.push(fourth);
+    rt.temporal_configure_v2(&rt.mutation_guard().unwrap(),c,"synthetic-four-source-genesis".into(),true,START).unwrap();
+    let now=settle_async_boundary(&rt,START);
+    let status=rt.temporal_status_snapshot_v2(now).unwrap();
+    assert_eq!(status["source_node_ids"],serde_json::json!([1,2,3,18]));
+    assert_eq!(status["temporal_profile"]["profile_id"],crate::room_learner::managed_schedule_contract::OPERATOR_VARIABLE_PROFILE);
+    assert_eq!(status["capture"]["stage"],"ready");
+    assert_eq!(status["capture"]["durable_windows"],0);
+    assert!(rt.temporal_select_profile_v2(Some(crate::room_learner::managed_schedule_contract::OPERATOR_EIGHT_PROFILE)).is_err());
+}
+
+#[test]
+fn variable_profile_default_keeps_pending_older_recovery_discoverable() {
+    for operator in [false,true] {
+        let directory=tempfile::tempdir().unwrap();let rt=runtime(directory.path(),START);
+        let now=START/1_000_000;let c=context();
+        let descriptor=crate::room_learner::recovery_store::RecoveryDescriptor {
+            schema:crate::room_learner::recovery_store::RECOVERY_SCHEMA.into(),id:"synthetic-pending-old-profile".into(),owner_scope:c.owner_scope,installation_id:c.installation_id,context_digest:"c".repeat(64),created_at_ms:now,saved_at_ms:now,expires_at_ms:now+86_400_000
+        };
+        let store=if operator {rt.operator_recovery_store.as_ref().unwrap()}else{rt.recovery_store.as_ref().unwrap()};
+        store.save(&descriptor,b"synthetic pending metadata - no capture authority",now).unwrap();
+        rt.temporal_default_operator_profile_v2().unwrap();
+        assert!(!rt.variable_profile_selected.load(Ordering::Acquire));
+        assert_eq!(rt.operator_profile_selected.load(Ordering::Acquire),operator);
+        assert_eq!(store.load(now+1).unwrap().unwrap().plaintext,b"synthetic pending metadata - no capture authority");
+    }
+}

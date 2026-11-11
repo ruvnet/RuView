@@ -3,6 +3,10 @@
 use super::*;
 use wifi_densepose_sensing_server::room_learner::temporal_wire::*;
 
+pub(super) fn temporal_profile_source_count_valid(profile: Option<&str>, count: usize) -> bool {
+    if profile == Some(VARIABLE_SOURCE_PROFILE_ID) { (2..=8).contains(&count) } else { count == 3 }
+}
+
 #[derive(Default, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct SchemaQuery {
@@ -280,9 +284,9 @@ pub(crate) async fn configure_dispatch(
     if !valid_binding_digest(&request.binding_digest)
         || request.revision == 0
         || !valid_source_node_ids(&request.source_node_ids)
-        || request.source_node_ids.len() != 3
+        || !temporal_profile_source_count_valid(request.profile_id.as_deref(),request.source_node_ids.len())
     {
-        return failure("learner_context_invalid", "Temporal engineering profile requires a current room revision and exactly three sorted unique sources.");
+        return failure("learner_context_invalid", "Temporal profile requires a current room revision and its bounded sorted unique source set.");
     }
     let rt = match runtime(&state).await {
         Ok(rt) => rt,

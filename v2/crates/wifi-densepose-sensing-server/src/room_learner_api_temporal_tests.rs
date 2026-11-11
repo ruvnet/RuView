@@ -834,3 +834,13 @@ async fn cancelled_status_retains_one_reader_permit_until_actual_work_finishes()
     let response = temporal_status_with_reader(&state, &rt, |reader, now| reader.temporal_status_snapshot_v2(now)).await.0;
     assert_eq!(response["success"], true, "{response}");
 }
+
+#[test]
+fn variable_source_count_contract_keeps_every_supported_node_and_legacy_three_exact() {
+    use wifi_densepose_sensing_server::room_learner::temporal_wire::VARIABLE_SOURCE_PROFILE_ID;
+    for count in 0..=9 {
+        assert_eq!(super::super::temporal_routes::temporal_profile_source_count_valid(Some(VARIABLE_SOURCE_PROFILE_ID),count),(2..=8).contains(&count));
+        assert_eq!(super::super::temporal_routes::temporal_profile_source_count_valid(None,count),count==3);
+        assert_eq!(super::super::temporal_routes::temporal_profile_source_count_valid(Some("native-2s-three-source-56bin-operator-eight-step-v1"),count),count==3);
+    }
+}
