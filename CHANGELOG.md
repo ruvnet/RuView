@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **ruv-FANN proof tooling and a default-off server shadow (ADR-426).**
+  `ruview-fann-repro` checks whether a fit is reproducible across machines;
+  `ruview-fann-fit` exports a head from Train rows; `ruview-fann-replay
+  --learning-curve` refits on growing Train prefixes; and
+  `scripts/build_replay_rows.py` turns a server feature capture into replay
+  rows with radar-gated or incumbent labels. Every report now states where its
+  labels came from and whether they are an independent reference. The sensing
+  server gains an optional `fann-shadow` cargo feature (off by default): with
+  `RUVIEW_FANN_SHADOW_LOG` it captures per-node features, with
+  `RUVIEW_FANN_SHADOW_HEAD` it scores a head beside the live classification
+  and reports disagreement at `GET /api/v1/shadow/fann`. The shadow has no
+  path to a published result. MEASURED: fits are bit-identical across three
+  Linux targets but differ on Windows (`f32::exp` differs), while one exported
+  head scores identically on all four. On a live ESP32-C6 with incumbent
+  labels, the candidate and the linear control both collapse to "always
+  occupied", because the classifier they were imitating is itself always on:
+  MEASURED against keyboard-activity and operator-declared labels on one node
+  in one room, the existing per-node classifier reported present on 99.6 % of
+  held-out empty-room observations. On the same held-out data a class-balanced
+  fit (`--balance`) gave the ruv-FANN candidate 2.6 % false positives at
+  87.2 % sensitivity and the linear control 11.9 % at 55.3 %. One afternoon,
+  seated-and-typing occupancy only; the 90 % sensitivity gate is not met.
+  A windowed schema, `ruview.node-features/2` (variability over 30 s instead
+  of levels, `ruview-fann-window` to re-encode captures), then removed the
+  drift: 0 false positives in 3,069 held-out empty observations and 91 %
+  sensitivity for both the candidate and the linear control, which no longer
+  differ.
+
 - **Any-source sensor fusion: per-zone presence from CSI plus any sensor (ADR-424).**
   `POST /api/v1/sources/readings` accepts JSON-line readings from any sensor or
   time series; `GET /api/v1/zones` returns one fused presence probability per

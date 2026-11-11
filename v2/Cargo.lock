@@ -5022,7 +5022,7 @@ dependencies = [
 
 [[package]]
 name = "homecore-plugins"
-version = "0.1.0-alpha.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -13621,6 +13621,7 @@ dependencies = [
  "rustls",
  "ruvector-mincut",
  "ruview-auth",
+ "ruview-fann-head",
  "ruview-unified",
  "serde",
  "serde_json",

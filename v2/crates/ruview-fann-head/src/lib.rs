@@ -13,6 +13,8 @@
 //! Nothing here publishes a result. A candidate's score is a diagnostic until
 //! the existing owner qualification and selection flow selects it.
 
+pub mod curve;
+pub mod features;
 pub mod replay;
 pub mod shadow;
 pub mod train;

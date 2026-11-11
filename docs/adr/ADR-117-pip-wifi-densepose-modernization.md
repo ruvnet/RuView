@@ -524,9 +524,11 @@ scaffold  core   vitals+   client   publish  deferred
 - [ ] GIL release (`py.allow_threads`) on all calls >0.5 ms (measured in bench).
 - [ ] Integration test: feed 1,000 frames from `archive/v1/data/proof/sample_csi_data.json`
   through the PyO3 vitals pipeline; assert output is deterministic across runs.
-- [ ] Re-implement `witness/verify.py` using P3 bindings; compare SHA-256 against the
+- [x] Re-implement `witness/verify.py` using P3 bindings; compare SHA-256 against the
   v1 expected hash. **Note:** the hash will differ because the Rust and Python
   processors are not identical — generate and publish a new `expected_features_v2.sha256`.
+  *Done 2026-11-10:* `python/wifi_densepose/witness.py`, hash generated in CI,
+  provenance in ADR-028 §5.3.
 
 ### P4 — WS/MQTT client layer (1 week)
 

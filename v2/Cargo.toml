@@ -243,6 +243,9 @@ pcap = "1.1"
 petgraph = "0.6"
 
 # Data loading
+# NPY-only: no consumer reads or writes .npz, so the `npz`/`compressed_npz`
+# defaults (and their zip 6.x dependency, RUSTSEC-2026-0367/0368/0369/0429)
+# are switched off.
 ndarray-npy = { version = "0.10", default-features = false, features = ["num-complex-0_4"] }
 walkdir = "2.4"
 
@@ -346,13 +349,14 @@ strip = false
 inherits = "release"
 debug = true
 
-# Narrow, checksum-verified parent manifest patches. Source/API code is
-# unchanged; both parents use the fixed zstd 0.14.3 implementation.
-# See each directory's RUVIEW-PROVENANCE.md for archive digests and scope.
+# Checksum-verified dependency patches. ZIP 7 retains its reviewed allocation
+# guard backport; the Wasmtime cache and legacy ZIP manifests select zstd
+# 0.14.3 implementation; sqlx-sqlite selects libsqlite3-sys 0.39.1, which
+# bundles SQLite 3.54.1 (RUSTSEC-2026-0459). sqlx-sqlite 0.8.6 and 0.9.0 both
+# cap libsqlite3-sys below 0.39, so no registry release can reach it yet.
+# See each directory's provenance/backport record for archive digests and scope.
 [patch.crates-io]
 zip-current = { package = "zip", path = "vendor/security/zip-7.2.0" }
 zip-legacy = { package = "zip", path = "vendor/security/zip-0.6.6" }
 wasmtime-internal-cache = { path = "vendor/security/wasmtime-internal-cache-36.0.20" }
-
-# Retain the reviewed ZIP backports; apply #2510's independent SQLite repair.
 sqlx-sqlite = { path = "vendor/security/sqlx-sqlite-0.8.6" }

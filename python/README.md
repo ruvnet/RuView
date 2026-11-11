@@ -17,21 +17,31 @@ for talking to a live RuView sensing-server over WebSocket or MQTT.
 
 ## Features
 
-- **17-keypoint pose** — full-body skeletal estimate from WiFi CSI, no camera
-- **Vital signs** — respiratory rate (6–30 BPM) and heart rate (40–120 BPM)
-  with a confidence score and clinical-grade / degraded / unreliable status
-- **Presence, person count, fall detection, motion** — fused outputs from
-  the same CSI stream
-- **10 semantic primitives** (HA-MIND) — someone-sleeping, possible-distress,
-  room-active, bathroom-occupied, fall-risk-elevated, bed-exit, … — ready
-  to wire into Home Assistant or Apple Home automations
+In the compiled wheel (runs offline, no server needed):
+
+- **Vital signs** — the Rust 3-stage pipeline: `CsiVitalPreprocessor`
+  (static-component suppression), `BreathingExtractor` (6–30 BPM) and
+  `HeartRateExtractor` (40–120 BPM), each estimate carrying a confidence
+  score and a valid / degraded / unreliable status
+- **Pose types** — `Keypoint`, `PoseEstimate`, `PersonPose`, `BoundingBox`
+  for the 17-keypoint skeletons a RuView sensing-server produces
 - **Beamforming Feedback (BFLD) support** — 802.11ac/ax/be compressed feedback
   matrices on top of the receiver-side CSI path
+- **Witness check** — `wifi_densepose.verify_witness()` re-runs the published
+  deterministic pipeline proof (ADR-117 §11.3)
 - **GIL-releasing DSP** — extract loops run with the GIL released, so a
   tokio-backed web server can call into the pipeline without stalling its
   event loop
-- **Tiny wheel** — ~240 KB compiled (one binary per OS/arch covers Python
-  3.10+ via the stable ABI)
+- **Small wheel** — under 400 KB compiled (one binary per OS/arch covers
+  Python 3.10+ via the stable ABI)
+
+With the `[client]` extra, from a live RuView sensing-server:
+
+- **Pose, presence, person count, fall detection, motion** — streamed over
+  WebSocket (`SensingClient`) or MQTT (`RuViewMqttClient`)
+- **10 semantic primitives** (HA-MIND) — someone-sleeping, possible-distress,
+  room-active, bathroom-occupied, fall-risk-elevated, bed-exit, … — ready
+  to wire into Home Assistant automations
 
 ## Install
 
@@ -65,6 +75,35 @@ pip install "wifi-densepose[sota]"         # all three
 Runnable examples: [`examples/reid_from_csi.py`](examples/reid_from_csi.py),
 [`examples/cross_room_calibrate.py`](examples/cross_room_calibrate.py),
 [`examples/mat_triage.py`](examples/mat_triage.py).
+
+## Quickstart
+
+Runs as-is after `pip install wifi-densepose`. It feeds 30 seconds of
+synthetic CSI through the Rust pipeline and prints the recovered rates
+(about 15 breaths/min and 72 beats/min):
+
+```python
+import math
+
+from wifi_densepose import BreathingExtractor, CsiVitalPreprocessor, HeartRateExtractor
+
+pre = CsiVitalPreprocessor.esp32_default()  # 56 subcarriers, EMA static suppression
+br = BreathingExtractor.esp32_default()     # 0.1-0.5 Hz band, 30 s window
+hr = HeartRateExtractor.esp32_default()     # 0.8-2.0 Hz band, 15 s window
+
+# 30 s of synthetic CSI at 100 Hz: 15 breaths/min (0.25 Hz) + 72 beats/min (1.2 Hz).
+for i in range(3000):
+    t = i / 100.0
+    a = 10.0 + 0.5 * math.sin(2 * math.pi * 0.25 * t) + 0.05 * math.sin(2 * math.pi * 1.2 * t)
+    residuals = pre.process([a] * 56)
+    breathing = br.extract(residuals, [])
+    heart = hr.extract(residuals, [])
+
+print("breathing:", breathing)
+print("heart:    ", heart)
+```
+
+The signal is synthetic; this shows the API, not accuracy on real CSI.
 
 ## Usage
 
