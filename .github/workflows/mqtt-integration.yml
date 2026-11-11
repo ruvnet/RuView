@@ -90,16 +90,15 @@ jobs:
           python -m pip install --quiet pyyaml
           python scripts/validate-ha-blueprints.py
 
-      - name: Verify unit tests still pass under --features mqtt
+      - name: Verify MQTT-feature unit tests
         working-directory: v2
-        # `cargo test` accepts a single TESTNAME filter, so we run the
-        # whole --lib suite here. That gives us the full 410-test green
-        # bar under --features mqtt (which is more reassuring than
-        # filtering anyway).
+        # Keep this broker workflow focused on the feature it changes. The full
+        # library/workspace and temporal Release suites run in ci.yml; repeating
+        # long learner training here exhausted this job before broker tests ran.
         run: >-
-          cargo test -p wifi-densepose-sensing-server
+          cargo test --locked -p wifi-densepose-sensing-server
           --features mqtt --no-default-features
-          --lib
+          --lib mqtt::
           --no-fail-fast
 
       - name: Run integration tests against mosquitto
