@@ -170,3 +170,17 @@ fn inconsistent_restored_attention_shape_still_rejects() {
     assert!(std::panic::catch_unwind(|| reference_attention(&invalid, &q, &k, &k)).is_err());
     assert!(std::panic::catch_unwind(|| invalid.forward(&q, &k, &k)).is_err());
 }
+
+#[test]
+fn missing_value_rows_still_reject_including_zero_width() {
+    for width in [0, 3] {
+        let layer = CrossAttention::new(width, 1);
+        let q = matrix(2, width, 1);
+        let k = matrix(4, width, 2);
+        for values in [0, 3] {
+            let v = matrix(values, width, 3);
+            assert!(std::panic::catch_unwind(|| reference_attention(&layer, &q, &k, &v)).is_err());
+            assert!(std::panic::catch_unwind(|| layer.forward(&q, &k, &v)).is_err());
+        }
+    }
+}

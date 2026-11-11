@@ -421,6 +421,9 @@ impl CrossAttention {
                 .forward_into(row, &mut v_proj[i * self.d_model..(i + 1) * self.d_model]);
         }
 
+        // The former row-indexed V projection rejected missing value rows even
+        // for zero-width models. Flat empty slices alone cannot enforce that.
+        assert!(value.len() >= n_kv, "missing attention value rows");
         let scale = (self.d_k as f32).sqrt();
         let mut output = vec![vec![0.0f32; self.d_model]; n_q];
 
