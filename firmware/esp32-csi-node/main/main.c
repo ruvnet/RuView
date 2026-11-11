@@ -481,6 +481,10 @@ void app_main(void)
         ESP_LOGE(TAG, "Failed to initialize UDP sender");
         return;
     }
+    if (stream_sender_configure_radar(g_nvs_config.radar_fused_port, g_nvs_config.node_id) != 0) {
+        ESP_LOGW(TAG, "Split radar destination unavailable; check explicit radar_port configuration");
+    }
+
 #endif
 
     /* Initialize CSI collection */

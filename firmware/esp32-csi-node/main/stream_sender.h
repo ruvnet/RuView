@@ -36,6 +36,16 @@ int stream_sender_init_with(const char *ip, uint16_t port);
  */
 int stream_sender_send(const uint8_t *data, size_t len);
 
+/** Opt into MR60 fused-only delivery on another port of the same target IP.
+ * Zero disables it (legacy behavior). Nonzero ports must be >=1024 and differ
+ * from the bulk target. The configured node identity is part of the filter. */
+int stream_sender_configure_radar(uint16_t port, uint8_t node_id);
+
+/** Only the fresh MR60 branch of edge_processing calls this. With a split
+ * route enabled, invalid frames and send failures are dropped, never retried
+ * through the bulk destination. With it disabled, the legacy send path applies. */
+int stream_sender_send_radar_fused(const uint8_t *data, size_t len);
+
 /**
  * Send a low-rate control packet, bypassing the ENOMEM backoff gate (#1183).
  *
