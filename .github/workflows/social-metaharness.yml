@@ -1,0 +1,82 @@
+name: Social metaharness
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'harness/social-media/**'
+      - 'docs/adr/ADR-345-*'
+      - 'docs/adr/ADR-346-*'
+      - 'docs/adr/ADR-347-*'
+      - 'docs/adr/ADR-348-*'
+      - 'docs/adr/ADR-349-*'
+      - 'docs/adr/ADR-350-*'
+      - 'docs/adr/ADR-351-*'
+      - 'docs/adr/ADR-352-*'
+      - 'docs/adr/ADR-353-*'
+      - '.github/workflows/social-metaharness.yml'
+  pull_request:
+    paths:
+      - 'harness/social-media/**'
+      - 'docs/adr/ADR-345-*'
+      - 'docs/adr/ADR-346-*'
+      - 'docs/adr/ADR-347-*'
+      - 'docs/adr/ADR-348-*'
+      - 'docs/adr/ADR-349-*'
+      - 'docs/adr/ADR-350-*'
+      - 'docs/adr/ADR-351-*'
+      - 'docs/adr/ADR-352-*'
+      - 'docs/adr/ADR-353-*'
+      - '.github/workflows/social-metaharness.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: social-metaharness-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Node ${{ matrix.node }} deterministic gates
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20', '22']
+    defaults:
+      run:
+        working-directory: harness/social-media
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: harness/social-media/package-lock.json
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run check
+      - run: npm run test:security
+      - run: npm audit --omit=optional
+      - run: npm pack --dry-run
+
+  os-network-denial:
+    name: macOS operating system network denial
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: harness/social-media
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: harness/social-media/package-lock.json
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run test:network-deny:os
