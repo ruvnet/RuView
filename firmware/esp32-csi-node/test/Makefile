@@ -263,3 +263,11 @@ clean:
 		test_thermal test_csi_sanitize test_c6_antenna test_serial_onboarding \
 		test_ota_health test_onboarding_identity test_config_rules test_edge_stbc test_edge_current_grid test_csi_he_gate test_node_mdns test_self_ping test_config_recovery
 	rm -rf corpus_serialize/ corpus_edge/ corpus_nvs/
+
+# Production parser/snapshot: stale UART and independent measurement expiry.
+.PHONY: test_mmwave_freshness run_mmwave_freshness
+test_mmwave_freshness: test_mmwave_freshness.c $(MAIN_DIR)/mmwave_sensor.c $(MAIN_DIR)/mmwave_sensor.h
+	cc -std=c99 -Wall -Wextra -Wno-unused-function -Wno-unused-parameter -Istubs -I$(MAIN_DIR) -ffunction-sections $< $(DEAD_STRIP_LDFLAGS) -lm -o $@
+run_mmwave_freshness: test_mmwave_freshness
+	./test_mmwave_freshness
+host_tests: run_mmwave_freshness
