@@ -1,0 +1,43 @@
+# This workflow uses actions that are not certified by GitHub.
+# They are provided by a third-party and are governed by
+# separate terms of service, privacy policy, and support
+# documentation.
+
+#####################################################################################################################################################################
+# Use this workflow template as a basis for integrating Debricked into your GitHub workflows.                                                                       #
+#                                                                                                                                                                   #
+# If you need additional assistance with configuration feel free to contact us via chat or email at support@debricked.com                                           #
+# To learn more about Debricked or contact our team, visit https://debricked.com/                                                                                   #
+#                                                                                                                                                                   #
+# To run this workflow, complete the following set-up steps:                                                                                                        #
+#                                                                                                                                                                   #
+# 1. If you don’t have a Debricked account, create one by visiting https://debricked.com/app/en/register                                                            #
+# 2. Generate your Debricked access token, by following the steps mentioned in https://portal.debricked.com/administration-47/how-do-i-generate-an-access-token-130 #
+# 3. In GitHub, navigate to the repository                                                                                                                          #
+# 4. Click on “Settings” (If you cannot see the “Settings” tab, select the dropdown menu, then click “Settings”)                                                    #
+# 5. In the “Security” section click on “Secrets and variables”, then click “Actions”                                                                               #
+# 6. In the “Secrets” tab, click on “New repository secret”                                                                                                         #
+# 7. In the “Name” field, type the name of the secret                                                                                                               #
+# 8. In the “Secret” field, enter the value of the secret                                                                                                           #
+# 9. Click “Add secret”                                                                                                                                             #
+# 10. You should now be ready to use the workflow!                                                                                                                  #
+#####################################################################################################################################################################
+
+name: Debricked Scan
+
+on:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  vulnerabilities-scan:
+    name: Vulnerabilities scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: debricked/actions@v4
+        env:
+          DEBRICKED_TOKEN: ${{ secrets.DEBRICKED_TOKEN }}

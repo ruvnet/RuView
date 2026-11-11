@@ -1,0 +1,60 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# RuView CodeRabbit Configuration
+
+inheritance: true
+enable_free_tier: true
+
+reviews:
+  profile: "chill"
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+
+  auto_review:
+    enabled: true
+    drafts: false
+    auto_incremental_review: true
+
+  path_filters:
+    - "!vendor/**"
+    - "!sublinear-time-solver/**"
+    - "!rufield/**"
+    - "!artifacts/**"
+    - "!v2/target/**"
+    - "!v2/crates/wifi-densepose-desktop/ui/node_modules/**"
+    - "!v2/crates/wifi-densepose-desktop/ui/dist/**"
+    - "!**/*.bin"
+    - "!**/*.db"
+    - "!**/*.onnx"
+    - "!**/*.pt"
+    - "!**/*.pth"
+    - "!**/*.wasm"
+    - "!**/*.zip"
+    - "!**/*.dmg"
+    - "!**/*.msi"
+    - "!**/*.exe"
+
+  path_instructions:
+    - path: "v2/crates/**/*.rs"
+      instructions: "Review Rust code for high performance, zero unnecessary allocations in hot paths, idiomatic error handling using Result without unwrap/expect, and clean Tauri IPC command patterns."
+    - path: "v2/crates/wifi-densepose-desktop/ui/**/*.{ts,tsx}"
+      instructions: "Review React and TypeScript code for clean component structure, correct hook dependencies, strict types, responsive layouts, and proper error boundaries."
+    - path: "firmware/**/*.{c,h,cpp}"
+      instructions: "Review ESP32 firmware code for memory bounds, FreeRTOS task safety, minimal interrupt latency, and robust CSI data packet handling."
+    - path: "python/**/*.py"
+      instructions: "Review Python algorithms for vectorized NumPy/SciPy operations, PEP 8 standards, and type safety."
+
+  tools:
+    clippy:
+      enabled: true
+    eslint:
+      enabled: true
+    ruff:
+      enabled: true
+    shellcheck:
+      enabled: true
+    gitleaks:
+      enabled: true
+
+chat:
+  auto_reply: true
