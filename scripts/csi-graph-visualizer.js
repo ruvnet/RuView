@@ -234,6 +234,9 @@ function stoerWagner(graph) {
   while (activeVertices.length > 1) {
     const key = new Float64Array(n);
     const inA = new Uint8Array(n);
+    const active = new Uint8Array(n);
+    for (const v of activeVertices) active[v] = 1;
+
     let s = -1, t = -1;
 
     for (let iter = 0; iter < activeVertices.length; iter++) {
@@ -247,7 +250,7 @@ function stoerWagner(graph) {
       s = t; t = best; inA[best] = 1;
       if (adj[best]) {
         for (const [nb, w] of adj[best]) {
-          if (activeVertices.includes(nb) && !inA[nb]) key[nb] += w;
+          if (active[nb] && !inA[nb]) key[nb] += w;
         }
       }
     }
@@ -255,7 +258,7 @@ function stoerWagner(graph) {
     let cutOfPhase = 0;
     if (adj[t]) {
       for (const [nb, w] of adj[t]) {
-        if (activeVertices.includes(nb) && nb !== t) cutOfPhase += w;
+        if (active[nb] && nb !== t) cutOfPhase += w;
       }
     }
 
