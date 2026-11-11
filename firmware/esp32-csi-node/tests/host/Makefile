@@ -29,12 +29,20 @@ FEATURE_STATE_SRCS := $(MAIN_DIR)/rv_feature_state.c
 # before including the .c. The decide() body itself has no ESP-IDF deps.
 # Simpler: just recompile decide() here via a small shim.
 
-TESTS := test_adaptive_controller test_rv_feature_state test_rv_mesh
+TESTS := test_adaptive_controller test_rv_feature_state test_rv_mesh test_edge_calibration_floor
 
 all: $(TESTS)
 
 test_adaptive_controller: test_adaptive_controller.c $(MAIN_DIR)/adaptive_controller_decide.c $(MAIN_DIR)/adaptive_controller.h $(MAIN_DIR)/rv_radio_ops.h
 	$(CC) $(CFLAGS) test_adaptive_controller.c $(MAIN_DIR)/adaptive_controller_decide.c -o $@ $(LDLIBS)
+
+# BACKLOG row 127 / PR #1821 dead-code floor guard. edge_processing.c is not
+# host-linkable (FreeRTOS/esp_log/esp_timer/nvs_config/csi_collector/
+# mmwave_sensor/wasm_runtime/stream_sender), so this test mirrors the guard
+# and calibration_update() logic against edge_processing.h's real constants.
+# See the test file's header comment for the exact source line mapping.
+test_edge_calibration_floor: test_edge_calibration_floor.c $(MAIN_DIR)/edge_processing.h
+	$(CC) $(CFLAGS) test_edge_calibration_floor.c -o $@ $(LDLIBS)
 
 test_rv_feature_state: test_rv_feature_state.c $(FEATURE_STATE_SRCS) $(MAIN_DIR)/rv_feature_state.h $(MAIN_DIR)/rv_radio_ops.h
 	$(CC) $(CFLAGS) test_rv_feature_state.c $(FEATURE_STATE_SRCS) -o $@ $(LDLIBS)
@@ -52,6 +60,8 @@ check: all
 	./test_rv_feature_state
 	@echo ""
 	./test_rv_mesh
+	@echo ""
+	./test_edge_calibration_floor
 
 clean:
 	rm -f $(TESTS) *.o
