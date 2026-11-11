@@ -1059,6 +1059,27 @@ impl NativeWindowAssembler {
         if self.failed {
             return Err("temporal_failed_fences".into());
         }
+        Ok(self.replay_fence_metadata())
+    }
+    /// Only the stopped, unfrozen FullRun Retry owner may call this. This is
+    /// denial/replay metadata, never an export of failed rows or window credit.
+    /// Ordinary checkpoint/export keeps rejecting a failed assembler above.
+    pub(super) fn stopped_retry_fence_checkpoint(
+        &self,
+        budget:&crate::room_learner::temporal_model_input::managed::execution::full_run::ReplayFenceBudget,
+    )->Result<AssemblerCheckpoint,String> {
+        let WindowIdentityMode::Managed {contract,binding_sha256,..}=&self.identity else {
+            return Err("temporal_retry_managed_fences_required".into());
+        };
+        budget.matches_native_policy(&self.policy)?;
+        let snapshot=self.replay_fence_metadata();
+        // Reuse the exact bounded source/frame/sequence validation of restore.
+        // The scratch assembler has no rows, runtime, filesystem or authority.
+        let mut verifier=Self::managed(contract.clone(),binding_sha256.clone(),self.run_id.clone())?;
+        verifier.restore_full_run_prefix_fences(snapshot.clone(),self.next,budget)?;
+        Ok(snapshot)
+    }
+    fn replay_fence_metadata(&self) -> AssemblerCheckpoint {
         let mut watermarks = self
             .watermarks
             .iter()
@@ -1071,12 +1092,12 @@ impl NativeWindowAssembler {
             .map(|(id, f)| (*id, f.to_string()))
             .collect::<Vec<_>>();
         frames.sort();
-        Ok(AssemblerCheckpoint {
+        AssemblerCheckpoint {
             next: self.next,
             last_end_ns: self.last_end_ns,
             watermarks,
             frames,
-        })
+        }
     }
     pub(crate) fn restore_prefix_fences(
         &mut self,

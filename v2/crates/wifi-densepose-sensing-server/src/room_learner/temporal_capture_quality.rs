@@ -1312,13 +1312,15 @@ impl TemporalTrainCapture {
             || !self.is_full_run()
             || self.workflow.full_run.as_ref().is_some_and(|m| m.is_frozen() || m.is_complete())
         { return Err("temporal_retry_requires_stopped_capture".into()); }
+        let budget=self.workflow.full_run.as_ref().ok_or("temporal_full_run_required")?
+            .policy.replay_fence_budget(&self.workflow.session.managed.as_ref().ok_or("managed_session_required")?.binding)?;
         let state = FailedRetryState {
             generation:self.public_generation_id.clone(), schedule:self.schedule.sha256().into(),
             created_at_ms:self.workflow.descriptor.created_at_ms, expires_at_ms:self.workflow.descriptor.expires_at_ms,
             durable_windows:self.workflow.durable_windows, seals:self.durable_seals,
             accepted_prefix_sha256:self.workflow.async_state.as_ref().and_then(|state|state.row_prefix_sha256.clone()),
             accepted_seal_digests:self.workflow.bridge.as_ref().map_or_else(Vec::new,|b|b.seals.iter().take(self.durable_seals).map(|seal|seal.sha256.clone()).collect()),
-            fences:self.workflow.session.assembler.fence_checkpoint()?, source_high:self.workflow.source_high.clone(),
+            fences:self.workflow.session.assembler.stopped_retry_fence_checkpoint(&budget)?, source_high:self.workflow.source_high.clone(),
         };
         if self.failure.is_none() { self.invalidate("temporal_retry_stopped_capture"); }
         Ok(state)

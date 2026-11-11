@@ -1604,3 +1604,90 @@ fn retired_variable_temporal_head_does_not_mask_an_active_old_profile_after_cold
         assert_eq!(recovery_files(directory.path()),before);
     }
 }
+
+/// SYNTHETIC real Runtime/durable journals, never a user-owned capture.
+#[test]
+fn variable_retry_after_actual_window_cadence_failure_keeps_sixteen_windows_and_seal() {
+    let directory=tempfile::tempdir().unwrap();let rt=Arc::new(runtime(directory.path(),START));
+    rt.temporal_select_profile_v2(Some(crate::room_learner::managed_schedule_contract::OPERATOR_VARIABLE_PROFILE)).unwrap();
+    let mut c=context();let mut extra=c.sources[2].clone();extra.source_id=4;extra.device_id="esp32-node-4".into();extra.link_id="native-4".into();c.sources.push(extra);
+    rt.temporal_configure_v2(&rt.mutation_guard().unwrap(),c.clone(),"synthetic-actual-cadence-retry".into(),true,START).unwrap();
+    let mut now=settle_async_boundary(&rt,START);let mut sequence=0u32;
+    let supervision=std::time::Instant::now();
+    loop {
+        let progress=snapshot(&rt,now);
+        match progress["stage"].as_str().unwrap() {
+            "ready"|"paused"=>{now=async_lead_end(&rt,now);rt.tick_temporal_capture(&rt.mutation_guard().unwrap(),now).unwrap();},
+            "needs_confirmation"=>{now=settle_async_boundary(&rt,now);break;},
+            "failed"=>panic!("synthetic first episode failed before retry fixture: {}",progress["failure"]),
+            _=>{}
+        }
+        sequence+=1;
+        for source in 1..=4 {match rt.ingest_native(&packet(source,sequence,now),now) {
+            Ok(())=>{},Err(e)if e=="temporal_storage_busy_pause"=>break,Err(e)=>panic!("synthetic episode ingest: {e}"),
+        }}
+        now+=50_000_000;
+        if snapshot(&rt,now)["durability_pending"]==true {std::thread::sleep(std::time::Duration::from_millis(50));}
+        assert!(supervision.elapsed()<std::time::Duration::from_secs(120));
+    }
+    let challenge=rt.temporal_confirmation_challenge(&rt.mutation_guard().unwrap()).unwrap();
+    rt.confirm_temporal_phase(&rt.mutation_guard().unwrap(),&challenge,now).unwrap();now=settle_async_boundary(&rt,now);
+    let protected=rt.temporal_status_v2(now).unwrap();
+    assert_eq!(protected["capture"]["durable_windows"],16);assert_eq!(protected["capture"]["sealed_train_episodes"],1);
+    assert_eq!(protected["capture"]["current_episode"],1);
+    fn prefix(rt:&RoomLearningRuntime,at:u64)->Value {
+        let loaded=rt.temporal_store().unwrap().load_temporal(at).unwrap().unwrap();
+        let value:Value=serde_json::from_slice(loaded.prefix.unwrap().bytes()).unwrap();
+        let p=&value["payload"];
+        let digest=|v:&Value|format!("{:x}",<sha2::Sha256 as sha2::Digest>::digest(serde_json::to_vec(v).unwrap()));
+        let first=|v:&Value,n|{let a=v.as_array().unwrap();assert!(a.len()>=n);Value::Array(a[..n].to_vec())};
+        serde_json::json!({"rows":digest(&first(&p["accepted"]["rows"],16)),"evidence":digest(&first(&p["accepted"]["evidence"],16)),"identities":digest(&first(&p["accepted"]["identities"],16)),"spans":digest(&first(&p["common"]["ledger"]["spans"],16)),"seals":digest(&first(&p["stage"]["bridge"]["seals"],1))})
+    }
+    let protected_prefix=prefix(&rt,now);
+    let start=async_lead_end(&rt,now);rt.tick_temporal_capture(&rt.mutation_guard().unwrap(),start).unwrap();
+    let mut next=[start+1000,start+2000,start+3000,start+4000];let mut seq=[sequence;4];
+    let periods=[1_000_000_000u64.div_ceil(23),50_000_000,50_000_000,50_000_000];
+    let mut failed=None;let mut failed_window_first=None;
+    for _ in 0..300 {
+        let index=(0..4).min_by_key(|i|next[*i]).unwrap();let at=next[index];seq[index]+=1;
+        if failed_window_first.is_none(){failed_window_first=Some((index as u8+1,seq[index],at));}
+        match rt.ingest_native(&packet(index as u8+1,seq[index],at),at) {
+            Ok(())=>{},Err(e)=>{assert_eq!(e,"acquisition_observed_cadence");failed=Some(at);break;},
+        }
+        next[index]+=periods[index];
+    }
+    let failed_at=failed.expect("actual four-source window must fail only its observed rate");
+    let before=rt.temporal_status_v2(failed_at).unwrap();
+    assert_eq!(before["capture"]["stage"],"failed");assert_eq!(before["capture"]["durable_windows"],16);assert_eq!(before["capture"]["sealed_train_episodes"],1);
+    let counts=|rt:&RoomLearningRuntime|{let state=rt.inner.lock().unwrap();let Some(CaptureWorkflow::Temporal(c))=&state.capture else{panic!()};c.core.as_ref().unwrap().c4b_test_custody().3};
+    let failed_fences=counts(&rt);assert!(failed_fences.3,"the REAL assembler, not only the outer capture, must be failed");
+    println!("SYNTHETIC_ACTUAL_RETRY_BOUNDARY error=acquisition_observed_cadence durable=16 seals=1");
+    let id=before["capture"]["capture_generation_id"].as_str().unwrap();let guard=rt.mutation_guard().unwrap();now=failed_at+1_000_000_000;
+    // RED on unmodified515a: temporal_failed_fences, before any restore occurs.
+    rt.retry_failed_temporal_capture(&guard,id,now).unwrap();
+    let after=rt.temporal_status_v2(now).unwrap();assert_eq!(after["capture"]["stage"],"paused");assert!(after["capture"]["failure"].is_null());
+    let restored_fences=counts(&rt);assert!(!restored_fences.3);assert_eq!(restored_fences.1,failed_fences.1,"retry must retain all admitted failed-window frame IDs");
+    for field in ["capture_generation_id","schedule_sha256","original_deadline","durable_windows","sealed_train_episodes","current_episode"] {assert_eq!(after["capture"][field],before["capture"][field],"{field}");}
+    assert_eq!(prefix(&rt,now),protected_prefix);
+    assert!(rt.retry_failed_temporal_capture(&guard,id,now+1).is_err());
+    sequence=*seq.iter().max().unwrap()+100;now+=50_000_000;
+    rt.ingest_native(&packet(1,sequence,now),now).unwrap();
+    assert_eq!(snapshot(&rt,now)["stage"],"paused");assert_eq!(snapshot(&rt,now)["durable_windows"],16,"fresh non-observing priming is not recording");
+    now=async_lead_end(&rt,now);rt.tick_temporal_capture(&rt.mutation_guard().unwrap(),now).unwrap();
+    for _ in 0..100 {
+        sequence+=1;for source in 1..=4 {match rt.ingest_native(&packet(source,sequence,now),now) {Ok(())=>{},Err(e)if e=="temporal_storage_busy_pause"=>break,Err(e)=>panic!("fresh retry window failed: {e}")}}
+        now+=50_000_000;
+        if snapshot(&rt,now)["durability_pending"]==true {std::thread::sleep(std::time::Duration::from_millis(50));}
+        if snapshot(&rt,now)["durable_windows"]==17 {break;}
+    }
+    assert_eq!(snapshot(&rt,now)["durable_windows"],17);assert_eq!(prefix(&rt,now),protected_prefix);
+    rt.cancel_temporal_durability(&rt.mutation_guard().unwrap()).unwrap();drop(rt);now+=1_000_000_000;
+    let cold=Arc::new(runtime(directory.path(),now));cold.temporal_select_profile_v2(Some(crate::room_learner::managed_schedule_contract::OPERATOR_VARIABLE_PROFILE)).unwrap();
+    cold.restore_temporal_full_run(&cold.mutation_guard().unwrap(),&c,now).unwrap();
+    let restarted=cold.temporal_status_v2(now).unwrap();assert_eq!(restarted["capture"]["stage"],"paused");assert_eq!(restarted["capture"]["durable_windows"],17);assert_eq!(restarted["capture"]["sealed_train_episodes"],1);
+    assert_eq!(restarted["capture"]["original_deadline"],protected["capture"]["original_deadline"]);assert_eq!(prefix(&cold,now),protected_prefix);
+    let (replay_source,replay_sequence,_)=failed_window_first.unwrap();now+=50_000_000;
+    let error=cold.ingest_native(&packet(replay_source,replay_sequence,now),now).unwrap_err();
+    assert_eq!(error,"temporal_priming_source_or_fence","failed-window replay must reject after checkpoint/restart");
+    assert_eq!(snapshot(&cold,now)["durable_windows"],17);
+}
