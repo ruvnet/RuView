@@ -1,0 +1,162 @@
+{
+  "status": "complete",
+  "parity": {
+    "train": {
+      "samples": 837,
+      "batch_sizes": [
+        1,
+        32
+      ],
+      "references": {
+        "buffered_reference": {
+          "max_abs_logit_error": 2.4424906541753444e-15,
+          "identical_predictions": true
+        },
+        "original": {
+          "max_abs_logit_error": 3.1086244689504383e-15,
+          "identical_predictions": true
+        }
+      }
+    },
+    "validation": {
+      "samples": 70,
+      "batch_sizes": [
+        1,
+        32
+      ],
+      "references": {
+        "buffered_reference": {
+          "max_abs_logit_error": 1.7763568394002505e-15,
+          "identical_predictions": true
+        },
+        "original": {
+          "max_abs_logit_error": 2.42861286636753e-15,
+          "identical_predictions": true
+        }
+      }
+    }
+  },
+  "rounds": [
+    {
+      "reduced": {
+        "min_ms": 0.28269,
+        "p50_ms": 0.34914500000000004,
+        "p95_ms": 0.503569,
+        "derived_calls_per_second": 2708.965457442368
+      },
+      "buffered_reference": {
+        "min_ms": 0.29914,
+        "p50_ms": 0.36314,
+        "p95_ms": 0.5273805,
+        "derived_calls_per_second": 2596.825879472279
+      },
+      "round": 1,
+      "seed": 42,
+      "gain_at_least_10percent": false
+    },
+    {
+      "reduced": {
+        "min_ms": 0.28326,
+        "p50_ms": 0.363535,
+        "p95_ms": 0.5289794999999999,
+        "derived_calls_per_second": 2597.7871508709154
+      },
+      "buffered_reference": {
+        "min_ms": 0.29552,
+        "p50_ms": 0.38744,
+        "p95_ms": 0.5531364999999999,
+        "derived_calls_per_second": 2477.1622055844723
+      },
+      "round": 2,
+      "seed": 43,
+      "gain_at_least_10percent": false
+    },
+    {
+      "reduced": {
+        "min_ms": 0.27682,
+        "p50_ms": 0.3380745,
+        "p95_ms": 0.5006879999999999,
+        "derived_calls_per_second": 2774.0855546682396
+      },
+      "buffered_reference": {
+        "min_ms": 0.29146,
+        "p50_ms": 0.36185,
+        "p95_ms": 0.520044,
+        "derived_calls_per_second": 2617.8406847919396
+      },
+      "round": 3,
+      "seed": 44,
+      "gain_at_least_10percent": false
+    }
+  ],
+  "retained_runtime": false,
+  "memory_bytes": {
+    "reduced_model_arrays": 487480,
+    "reduced_workspace": 163736,
+    "reference_model_arrays": 487480,
+    "reference_workspace": 163736
+  },
+  "receipt_sha256": "e6d80614b66a599093e1e676f3094dca39a06d4d52a22a609c596c41b29fcf9b",
+  "hashes": {
+    "manifest": "74e0fe039acbed1b287bd11ee6b779becbb8f9b66c3c249d260ed66f5583f02a",
+    "compact_artifact": "87765a4da415465e3a4c5415b199da4593ef173e8fc0a2398dbe67faa454374d",
+    "compact_metadata": "e80ceb9d6a68df18c35eb624fcadbfa9b715869998ee3f2fb39b504424df2372",
+    "compact_status": "a437f3cb1b87019ab0af9cae510de8f811bdd6b12c9d3bcdce2e3482934a051d",
+    "original_artifact": "8d3c8b144663808159159f7af9d14b09f54ee78dc1f852c643fbd001a23d2fc5",
+    "original_receipt": "f8a565cb031d3ce9b488432dfb97408a58cee8f511c0ddc89aa74edb90388b88",
+    "original_status": "a437f3cb1b87019ab0af9cae510de8f811bdd6b12c9d3bcdce2e3482934a051d"
+  },
+  "source_sha256": {
+    "espfi_motion_reduced_benchmark.py": "37eb030ec987bd1375f177f3226a07080fe869ed3cdc4193ce6b80a1e480df7e",
+    "espfi_motion_reduced.py": "60b18e2c8f284860676ec36080ff559117689884959593b5c0ded4fc9fc9c476",
+    "espfi_motion_runtime.py": "1a468974a441045a852215529d73e3eaddf40c2c81842465b5952d0322490add",
+    "espfi_motion_compact.py": "74b13890afd33fbdf40efce3e91f44ddeb505d0f6d84f2d9a0b03adcd92c6f52",
+    "espfi_motion.py": "c6a8529ccf9d9f834383a2bdf5b14626764ec7ca2ade7ad5d4c1c14797d76054",
+    "espfi_kernel.py": "ae837cb2e3fac7f052b4bd371cd496e9636e5d5dbaf3a341526a4fc5aef23478",
+    "espfi_generalize.py": "956b3a5e918f7c263a2b9183b4a6a70c8f2157604262a4ec6cee2c324a69224f",
+    "espfi_train.py": "f3692319b383c67d092776a7690b72963061efeaa3516f2d5e41b5dac1cfbd1e",
+    "espfi.py": "1ea4f72b3bbb0fe68e9903e6f32663a887bd9c8eac3a659932ff97b7e3d87124"
+  },
+  "environment": {
+    "python": "3.12.3",
+    "numpy": "2.4.4",
+    "platform": "Linux-6.12.105-fly-x86_64-with-glibc2.39",
+    "machine": "x86_64",
+    "thread_environment": {
+      "OPENBLAS_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "MKL_NUM_THREADS": null
+    }
+  },
+  "protocol": {
+    "rounds": 3,
+    "calls_per_runtime_per_round": 1000,
+    "warmups_per_runtime_per_round": 100,
+    "seed": 42,
+    "batch_size": 1,
+    "alternating_runtime_order": true,
+    "output_dtype": "float64",
+    "max_abs_logit_error": 1e-10,
+    "exact_argmax_required": true,
+    "max_p50_and_p95_ratio_every_round": 0.9,
+    "rotating_seeded_development_order": true,
+    "primary_reference": "BufferedMotionBundle retained float64",
+    "original_reference": "parity only"
+  },
+  "elapsed_seconds": 5.288693015000035,
+  "reviewed_on": "2026-10-13",
+  "evidence": "MEASURED_AGGREGATE",
+  "promotionAuthorized": false,
+  "decision": "Rejected speed candidate; preserve exact source and negative outcome. No unchanged repeat.",
+  "tests": {
+    "focused_reduction": 6,
+    "verified_exit_code": 0,
+    "source_sha256": {
+      "scripts/csi_training/espfi_motion_reduced.py": "60b18e2c8f284860676ec36080ff559117689884959593b5c0ded4fc9fc9c476",
+      "scripts/csi_training/espfi_motion_reduced_benchmark.py": "37eb030ec987bd1375f177f3226a07080fe869ed3cdc4193ce6b80a1e480df7e",
+      "scripts/tests/test_espfi_motion_reduced.py": "6070b1e703c882ff2c4f47df0ef90ca0fe8e42788102e7efee5e5a54a16ed482",
+      "scripts/tests/test_espfi_motion_reduced_benchmark.py": "7b9aa104e41f76c7fa0605ff02012ae19f4113f4ad445f6338222d210e0a38dd"
+    }
+  },
+  "scope": "Reordered float64 reductions preserve admitted classes but miss frozen10% median/p95 speed gate in every round. Same artifact and retained array bytes. Original final test was opened once in first pilot, not reopened here. Reused development evidence is not independent accuracy confirmation."
+}

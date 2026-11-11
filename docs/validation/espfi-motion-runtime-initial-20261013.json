@@ -1,0 +1,151 @@
+{
+  "status": "complete",
+  "evidence": "MEASURED",
+  "parity": {
+    "train": {
+      "samples": 837,
+      "batch_sizes": [
+        1,
+        32
+      ],
+      "references": {
+        "folded_reference": {
+          "max_abs_logit_error": 3.1086244689504383e-15,
+          "identical_predictions": true
+        },
+        "original": {
+          "max_abs_logit_error": 2.7755575615628914e-15,
+          "identical_predictions": true
+        }
+      }
+    },
+    "validation": {
+      "samples": 70,
+      "batch_sizes": [
+        1,
+        32
+      ],
+      "references": {
+        "folded_reference": {
+          "max_abs_logit_error": 2.220446049250313e-15,
+          "identical_predictions": true
+        },
+        "original": {
+          "max_abs_logit_error": 3.164135620181696e-15,
+          "identical_predictions": true
+        }
+      }
+    }
+  },
+  "rounds": [
+    {
+      "buffered": {
+        "min_ms": 0.35787,
+        "p50_ms": 0.427865,
+        "p95_ms": 0.5770485,
+        "derived_calls_per_second": 2245.0005868656035
+      },
+      "folded_reference": {
+        "min_ms": 0.36239,
+        "p50_ms": 0.43473,
+        "p95_ms": 0.5919899999999999,
+        "derived_calls_per_second": 2210.992180220343
+      },
+      "round": 1,
+      "seed": 42,
+      "gain_at_least_10percent": false
+    },
+    {
+      "buffered": {
+        "min_ms": 0.34706,
+        "p50_ms": 0.421035,
+        "p95_ms": 0.6147195,
+        "derived_calls_per_second": 2224.427217832514
+      },
+      "folded_reference": {
+        "min_ms": 0.34439,
+        "p50_ms": 0.417775,
+        "p95_ms": 0.6219714999999999,
+        "derived_calls_per_second": 2246.3855684283812
+      },
+      "round": 2,
+      "seed": 43,
+      "gain_at_least_10percent": false
+    },
+    {
+      "buffered": {
+        "min_ms": 0.35471,
+        "p50_ms": 0.43940500000000005,
+        "p95_ms": 0.6360890499999998,
+        "derived_calls_per_second": 2152.6035180950744
+      },
+      "folded_reference": {
+        "min_ms": 0.35116,
+        "p50_ms": 0.44060999999999995,
+        "p95_ms": 0.6341129999999999,
+        "derived_calls_per_second": 2155.7006022538135
+      },
+      "round": 3,
+      "seed": 44,
+      "gain_at_least_10percent": false
+    }
+  ],
+  "retained_runtime": false,
+  "memory_bytes": {
+    "buffered_model_arrays": 487480,
+    "buffered_workspace": 163736,
+    "folded_reference_arrays": 487480
+  },
+  "elapsed_seconds": 5.563556597999991,
+  "environment": {
+    "python": "3.12.3",
+    "numpy": "2.4.4",
+    "platform": "Linux-6.12.105-fly-x86_64-with-glibc2.39",
+    "machine": "x86_64",
+    "thread_environment": {
+      "OPENBLAS_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "MKL_NUM_THREADS": null
+    }
+  },
+  "full_receipt_sha256": "c97c3c28f039ef8bf88c95c03d36455df411c6ed031935b7a17f6fc963f7de58",
+  "hashes": {
+    "manifest": "74e0fe039acbed1b287bd11ee6b779becbb8f9b66c3c249d260ed66f5583f02a",
+    "compact_artifact": "87765a4da415465e3a4c5415b199da4593ef173e8fc0a2398dbe67faa454374d",
+    "compact_metadata": "e80ceb9d6a68df18c35eb624fcadbfa9b715869998ee3f2fb39b504424df2372",
+    "compact_status": "a437f3cb1b87019ab0af9cae510de8f811bdd6b12c9d3bcdce2e3482934a051d",
+    "original_artifact": "8d3c8b144663808159159f7af9d14b09f54ee78dc1f852c643fbd001a23d2fc5",
+    "original_receipt": "f8a565cb031d3ce9b488432dfb97408a58cee8f511c0ddc89aa74edb90388b88",
+    "original_status": "a437f3cb1b87019ab0af9cae510de8f811bdd6b12c9d3bcdce2e3482934a051d"
+  },
+  "source_sha256": {
+    "espfi_motion_runtime_benchmark.py": "e712e517a1b157ad14264c43e840575339287d24ef596c6e09443ef4ec44417d",
+    "espfi_motion_runtime.py": "1d5db7a40cfb933a63b5caa4833a2e8d4a4095c5996d02bb3b3a3fede343b8f9",
+    "espfi_motion_compact.py": "74b13890afd33fbdf40efce3e91f44ddeb505d0f6d84f2d9a0b03adcd92c6f52",
+    "espfi_motion.py": "c6a8529ccf9d9f834383a2bdf5b14626764ec7ca2ade7ad5d4c1c14797d76054",
+    "espfi_kernel.py": "ae837cb2e3fac7f052b4bd371cd496e9636e5d5dbaf3a341526a4fc5aef23478",
+    "espfi_generalize.py": "956b3a5e918f7c263a2b9183b4a6a70c8f2157604262a4ec6cee2c324a69224f",
+    "espfi_train.py": "f3692319b383c67d092776a7690b72963061efeaa3516f2d5e41b5dac1cfbd1e",
+    "espfi.py": "1ea4f72b3bbb0fe68e9903e6f32663a887bd9c8eac3a659932ff97b7e3d87124"
+  },
+  "protocol": {
+    "rounds": 3,
+    "calls_per_runtime_per_round": 1000,
+    "warmups_per_runtime_per_round": 100,
+    "seed": 42,
+    "batch_size": 1,
+    "alternating_runtime_order": true,
+    "rotating_seeded_development_order": true,
+    "primary_reference": "CompactMotionBundle default folded",
+    "original_reference": "parity only"
+  },
+  "schema_version": 1,
+  "promotionAuthorized": false,
+  "protocol_date": "2026-10-13",
+  "candidate": "buffered multiply then sum",
+  "validation": {
+    "focused_tests": 6,
+    "verified_exit_code": 0
+  },
+  "test_access": "Original final test opened in first pilot; not reopened. Development reused for numerical parity only."
+}

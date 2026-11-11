@@ -1,0 +1,16 @@
+[package]
+name = "ruview-field-context-probe"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.90"
+publish = false
+
+[workspace]
+
+[dependencies]
+rufield-core = { git = "https://github.com/ruvnet/rufield", rev = "b74bc035e4a3d4023665aa5479b41e938facd113" }
+rufield-provenance = { git = "https://github.com/ruvnet/rufield", rev = "b74bc035e4a3d4023665aa5479b41e938facd113" }
+rufield-fusion = { git = "https://github.com/ruvnet/rufield", rev = "b74bc035e4a3d4023665aa5479b41e938facd113" }
+wifi-densepose-worldgraph = { git = "https://github.com/ruvnet/worldgraph", rev = "9b1c79c836cdacfb7b44f058c593157bac4c1dab" }
+serde_json = "1.0"
+rufield-adapters = { git = "https://github.com/ruvnet/rufield", rev = "b74bc035e4a3d4023665aa5479b41e938facd113" }
