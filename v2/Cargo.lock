@@ -13612,6 +13612,7 @@ dependencies = [
  "opentelemetry_sdk",
  "proptest",
  "rand 0.8.5",
+ "reqwest 0.12.28",
  "ring",
  "rumqttc-v4-next",
  "ruvector-mincut",
