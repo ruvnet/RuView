@@ -1,0 +1,15 @@
+# ST7789 display build overlay — Waveshare ESP32-S3-Touch-LCD-1.69.
+# Merge AFTER sdkconfig.defaults (later file wins):
+#   SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.st7789"
+# Keeps the proven CSI-node config; only swaps the display panel HAL.
+CONFIG_DISPLAY_ENABLE=y
+CONFIG_DISPLAY_PANEL_ST7789=y
+
+# LVGL fonts for the compact 240x280 UI (LVGL is Kconfig-configured, not lv_conf.h).
+CONFIG_LV_FONT_MONTSERRAT_20=y
+CONFIG_LV_FONT_MONTSERRAT_36=y
+CONFIG_LV_USE_BAR=y
+
+# Dimmer backlight = less current draw on the marginal single-USB power path
+# (helps avoid the startup brownout boot-loop on the LCD board).
+CONFIG_DISPLAY_BRIGHTNESS=45
