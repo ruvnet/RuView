@@ -927,10 +927,16 @@ function NodeCard({ node, onClick }: { node: DiscoveredNode; onClick: () => void
   };
 
   return (
-    <div
+    <button
+      type="button"
       className="card"
       onClick={onClick}
+      aria-label={`View details for ${node.friendly_name || node.hostname || `Node ${node.node_id}`} (${node.ip})`}
       style={{
+        width: "100%",
+        textAlign: "left",
+        font: "inherit",
+        color: "inherit",
         padding: "var(--space-4)",
         cursor: "pointer",
         opacity: node.health === "online" ? 1 : 0.7,
@@ -987,7 +993,7 @@ function NodeCard({ node, onClick }: { node: DiscoveredNode; onClick: () => void
           <KV label="Uptime" value={formatUptime(node.uptime_secs)} mono />
         )}
       </div>
-    </div>
+    </button>
   );
 }
 
