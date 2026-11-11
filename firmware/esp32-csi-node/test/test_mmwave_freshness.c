@@ -35,6 +35,8 @@ int main(void) {
     test_now=1000000;
     complete(); assert(mmwave_sensor_get_state(&out));
     assert(out.person_present && out.target_count==1 && out.heart_rate_bpm==72);
+    uint8_t nonzero_presence=255; frame(MR60_TYPE_PRESENCE,&nonzero_presence,1);
+    assert(mmwave_sensor_get_state(&out) && out.person_present); /* Upstream bool conversion. */
     test_now+=MMWAVE_DATA_MAX_AGE_US; assert(mmwave_sensor_get_state(&out));
     ++test_now; assert(!mmwave_sensor_get_state(&out) && !out.detected && s_state.detected);
     presence(false); assert(mmwave_sensor_get_state(&out) && !out.person_present);
