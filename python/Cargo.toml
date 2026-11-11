@@ -1,6 +1,6 @@
 [package]
 name = "wifi-densepose-py"
-version = "2.0.0-alpha.1"
+version = "2.0.0"
 # The `python/` crate is intentionally OUTSIDE the `v2/` Cargo
 # workspace (ADR-117 §5.2) so maturin's `python-source` + `module-name`
 # config stays self-contained and `cargo test --workspace` in v2/

@@ -34,8 +34,9 @@
 # dedicated follow-up commit (drop `password:`, add the OIDC id-token
 # permission + `environment: pypi`) so there is no capability gap between.
 #
-# Production publishing fails closed until the ADR-117 §11.3 v2 witness
-# hash exists. TestPyPI remains usable to validate release artifacts.
+# Every v2 publish (PyPI or TestPyPI) fails closed unless the committed
+# ADR-117 §11.3 v2 witness hash exists and matches a fresh witness run of
+# the Linux x86_64 wheel being published.
 
 name: pip-release
 
@@ -82,10 +83,15 @@ jobs:
             arch: x86_64
           - os: ubuntu-latest
             arch: aarch64
+          # macos_target: rustc's minimum macOS deployment target. Without it
+          # cibuildwheel tags x86_64 wheels 10.9 and delocate-wheel rejects
+          # the 10.12 .so that rustc emits.
           - os: macos-15-intel    # x86_64 runner
             arch: x86_64
-          - os: macos-14          # arm64 runner
+            macos_target: "10.12"
+          - os: macos-15          # arm64 runner (the macos-14 label is no longer supported)
             arch: arm64
+            macos_target: "11.0"
           - os: windows-latest
             arch: AMD64
     runs-on: ${{ matrix.os }}
@@ -108,6 +114,7 @@ jobs:
           CIBW_ARCHS_LINUX: ${{ matrix.arch }}
           CIBW_ARCHS_MACOS: ${{ matrix.arch }}
           CIBW_ARCHS_WINDOWS: ${{ matrix.arch }}
+          MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macos_target }}
           CIBW_BUILD_FRONTEND: "build"
           CIBW_BEFORE_BUILD: "pip install maturin>=1.7"
           # The PyO3 sdist landing depends on the cargo/Rust toolchain
@@ -289,15 +296,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - name: Enforce production witness gate
-        if: |
-          startsWith(github.ref, 'refs/tags/v2.') ||
-          (github.event_name == 'workflow_dispatch' && inputs.publish_to == 'pypi')
-        run: |
-          test -s archive/v1/data/proof/expected_features_v2.sha256 || {
-            echo "::error::ADR-117 §11.3 release gate is incomplete: archive/v1/data/proof/expected_features_v2.sha256 is missing or empty"
-            exit 1
-          }
       - name: Gather all artifacts into dist/
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
@@ -307,6 +305,23 @@ jobs:
           mkdir -p dist
           find dist-staging -type f \( -name '*.whl' -o -name '*.tar.gz' \) -exec cp -v {} dist/ \;
           ls -lh dist/
+      # ADR-117 §11.3 release gate: the committed v2 witness hash must exist
+      # AND match a fresh run of the exact Linux x86_64 wheel being published
+      # (python -m wifi_densepose.witness, see python/wifi_densepose/witness.py).
+      - name: Enforce witness gate (committed hash must match the built wheel)
+        run: |
+          set -euo pipefail
+          EXPECTED="$GITHUB_WORKSPACE/archive/v1/data/proof/expected_features_v2.sha256"
+          DATA="$GITHUB_WORKSPACE/archive/v1/data/proof/sample_csi_data.json"
+          test -s "$EXPECTED" || {
+            echo "::error::ADR-117 §11.3 release gate is incomplete: archive/v1/data/proof/expected_features_v2.sha256 is missing or empty"
+            exit 1
+          }
+          whl="$(ls dist/*manylinux*x86_64.whl | head -1)"
+          python3 -m venv "$RUNNER_TEMP/wv"
+          "$RUNNER_TEMP/wv/bin/pip" install "$whl"
+          cd "$RUNNER_TEMP"  # away from the repo root's stray wifi_densepose/
+          "$RUNNER_TEMP/wv/bin/python" -I -m wifi_densepose.witness --data "$DATA" --expected "$EXPECTED"
       # API-token auth (active path). See TODO(ADR-184 P1b) in the header
       # before replacing `password:` with the OIDC id-token permission.
       - name: Publish to TestPyPI (dry-run target)
