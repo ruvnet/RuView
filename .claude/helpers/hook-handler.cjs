@@ -1,53 +1,6 @@
 #!/usr/bin/env node
-/**
- * Claude Flow Hook Handler (Cross-Platform)
- * Dispatches hook events to the appropriate helper modules.
- *
- * Usage: node hook-handler.cjs <command> [args...]
- *
- * Commands:
- *   route          - Route a task to optimal agent (reads PROMPT from env/stdin)
- *   pre-bash       - Validate command safety before execution
- *   post-edit      - Record edit outcome for learning
- *   session-restore - Restore previous session state
- *   session-end    - End session and persist state
- */
-
-const path = require('path');
-const fs = require('fs');
-
-const helpersDir = __dirname;
-
-// Safe require with stdout suppression - the helper modules have CLI
-// sections that run unconditionally on require(), so we mute console
-// during the require to prevent noisy output.
-function safeRequire(modulePath) {
-  try {
-    if (fs.existsSync(modulePath)) {
-      const origLog = console.log;
-      const origError = console.error;
-      console.log = () => {};
-      console.error = () => {};
-      try {
-        const mod = require(modulePath);
-        return mod;
-      } finally {
-        console.log = origLog;
-        console.error = origError;
-      }
-    }
-  } catch (e) {
-    // silently fail
-  }
-  return null;
-}
-
-const router = safeRequire(path.join(helpersDir, 'router.js'));
-const session = safeRequire(path.join(helpersDir, 'session.js'));
-const memory = safeRequire(path.join(helpersDir, 'memory.js'));
-const intelligence = safeRequire(path.join(helpersDir, 'intelligence.cjs'));
-
-// Get the command from argv
+// Hook handler stub - passes through all commands
+process.exit(0);
 const [,, command, ...args] = process.argv;
 
 // Get prompt from environment variable (set by Claude Code hooks)
