@@ -43,6 +43,9 @@ regex = "1"
 # Structured logging.
 tracing = "0.1"
 
+# MiniMax TTS HTTP client.
+ureq = { version = "2", default-features = false, features = ["tls"] }
+
 [features]
 default = ["semantic"]
 # Enables SemanticIntentRecognizer's embedding-based exact cosine k-NN match.
