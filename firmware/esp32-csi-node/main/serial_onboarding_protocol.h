@@ -19,6 +19,11 @@ typedef struct {
     char password[RUVIEW_ONBOARDING_PASSWORD_MAX_BYTES + 1];
 } ruview_onboarding_config_t;
 
+typedef struct {
+    ruview_onboarding_config_t config; /* target_port is the requested radar port. */
+    char device_id[17];
+} ruview_onboarding_radar_config_t;
+
 typedef enum {
     RUVIEW_ONBOARDING_OK = 0,
     RUVIEW_ONBOARDING_ERR_FORMAT,
@@ -36,6 +41,12 @@ int ruview_onboarding_parse_hello(const char *line,
 ruview_onboarding_result_t ruview_onboarding_parse_config(
     const char *line,
     ruview_onboarding_config_t *config);
+
+ruview_onboarding_result_t ruview_onboarding_parse_radar_config(
+    const char *line, ruview_onboarding_radar_config_t *request);
+bool ruview_onboarding_radar_claim_valid(const ruview_onboarding_radar_config_t *request,
+    const char *device_id, uint8_t saved_node_id, uint16_t raw_port,
+    const char *issued_nonce, int64_t issued_at_us, int64_t now_us);
 
 const char *ruview_onboarding_result_name(ruview_onboarding_result_t result);
 

@@ -4,3 +4,7 @@
 CONFIG_C6_XIAO_MR60BHA2=y
 CONFIG_C6_XIAO_ANTENNA_SELECT=y
 CONFIG_C6_XIAO_ANTENNA_EXTERNAL=y
+# Factory raw CSI destination stays separate from opt-in fused radar UDP 5005.
+# Existing NVS target_port overrides this factory default and is never rewritten
+# by the dedicated radar USB configuration command.
+CONFIG_CSI_TARGET_PORT=55063

@@ -44,6 +44,7 @@ static bool valid_ipv4(const char *value)
     while (*cursor != '\0') {
         if (octets == 4) return false;
         if (*cursor == '.') return false;
+        const char *octet_start = cursor;
         uint32_t octet = 0;
         unsigned digits = 0;
         while (*cursor != '\0' && *cursor != '.') {
@@ -54,8 +55,12 @@ static bool valid_ipv4(const char *value)
             cursor++;
         }
         if (digits == 0) return false;
+        if (digits > 1 && *octet_start == '0') return false;
         octets++;
-        if (*cursor == '.') cursor++;
+        if (*cursor == '.') {
+            cursor++;
+            if (*cursor == '\0') return false;
+        }
     }
     return octets == 4;
 }
@@ -196,6 +201,50 @@ ruview_onboarding_result_t ruview_onboarding_parse_config(
         config->password[password_length] = '\0';
     }
     return RUVIEW_ONBOARDING_OK;
+}
+
+ruview_onboarding_result_t ruview_onboarding_parse_radar_config(
+    const char *line, ruview_onboarding_radar_config_t *request)
+{
+    if (!line || !request || strlen(line) >= 384) return RUVIEW_ONBOARDING_ERR_FORMAT;
+    char copy[384];
+    memcpy(copy, line, strlen(line) + 1);
+    char *tokens[8] = {0};
+    size_t count = 0;
+    char *save = NULL;
+    for (char *token = strtok_r(copy, " ", &save); token; token = strtok_r(NULL, " ", &save)) {
+        if (count == 8) return RUVIEW_ONBOARDING_ERR_FORMAT;
+        tokens[count++] = token;
+    }
+    if (count != 8 || strcmp(tokens[0], "RUVIEW_RADAR_CONFIG_V1") != 0 || strlen(tokens[2]) != 16)
+        return RUVIEW_ONBOARDING_ERR_FORMAT;
+    for (size_t i = 0; i < 16; i++) {
+        if (!((tokens[2][i] >= '0' && tokens[2][i] <= '9') ||
+              (tokens[2][i] >= 'a' && tokens[2][i] <= 'f'))) return RUVIEW_ONBOARDING_ERR_FORMAT;
+    }
+    char generic[384];
+    const int length = snprintf(generic, sizeof(generic), "RUVIEW_CONFIG_V1 %s %s %s %s %s %s",
+        tokens[1], tokens[3], tokens[4], tokens[5], tokens[6], tokens[7]);
+    if (length < 0 || (size_t)length >= sizeof(generic)) return RUVIEW_ONBOARDING_ERR_FORMAT;
+    memset(request, 0, sizeof(*request));
+    const ruview_onboarding_result_t result = ruview_onboarding_parse_config(generic, &request->config);
+    if (result != RUVIEW_ONBOARDING_OK) return result;
+    if (request->config.target_port < 1024) return RUVIEW_ONBOARDING_ERR_TARGET_PORT;
+    memcpy(request->device_id, tokens[2], sizeof(request->device_id));
+    return RUVIEW_ONBOARDING_OK;
+}
+
+bool ruview_onboarding_radar_claim_valid(const ruview_onboarding_radar_config_t *request,
+    const char *device_id, uint8_t saved_node_id, uint16_t raw_port,
+    const char *issued_nonce, int64_t issued_at_us, int64_t now_us)
+{
+    return request && device_id && issued_nonce && valid_nonce(issued_nonce)
+        && strcmp(device_id, "0000000000000000") != 0
+        && issued_at_us >= 0 && now_us >= issued_at_us && now_us - issued_at_us <= 60000000LL
+        && strcmp(request->device_id, device_id) == 0
+        && strcmp(request->config.nonce, issued_nonce) == 0
+        && request->config.node_id == saved_node_id && raw_port >= 1024
+        && request->config.target_port >= 1024 && request->config.target_port != raw_port;
 }
 
 const char *ruview_onboarding_result_name(ruview_onboarding_result_t result)
