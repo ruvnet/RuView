@@ -147,6 +147,16 @@ static void mr60_process_frame(uint16_t type, const uint8_t *data, uint16_t len)
     case MR60_TYPE_PRESENCE:
         if (len >= 1) {
             s_state.person_present = (data[0] != 0);
+            /* MR60BHA2 exposes a single-target vital-sign presence flag rather
+             * than a reliable people-count frame. Keep the public count in
+             * lockstep with that authoritative flag so downstream clients do
+             * not report zero targets while fresh radar vitals are arriving. */
+            s_state.target_count = mmwave_mr60_target_count(s_state.person_present);
+            if (!s_state.person_present) {
+                s_state.heart_rate_bpm = 0.0f;
+                s_state.breathing_rate = 0.0f;
+                s_state.distance_cm = 0.0f;
+            }
         }
         break;
 
@@ -517,13 +527,25 @@ esp_err_t mmwave_sensor_init(int uart_tx_pin, int uart_rx_pin)
         return ESP_ERR_NOT_SUPPORTED;
     }
 #elif defined(CONFIG_IDF_TARGET_ESP32C6)
-    if (uart_tx_pin < 0) uart_tx_pin = 4;
-    if (uart_rx_pin < 0) uart_rx_pin = 5;
+    int default_tx = 4, default_rx = 5;
+    ruview_c6_mmwave_default_pins(
+#if defined(CONFIG_C6_XIAO_MR60BHA2)
+        true,
+#else
+        false,
+#endif
+        &default_tx, &default_rx);
+    if (uart_tx_pin < 0) uart_tx_pin = default_tx;
+    if (uart_rx_pin < 0) uart_rx_pin = default_rx;
 #else
     if (uart_tx_pin < 0) uart_tx_pin = 17;
     if (uart_rx_pin < 0) uart_rx_pin = 18;
 #endif
-#if defined(CONFIG_ESP_CONSOLE_UART_CUSTOM)
+#if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG) || defined(CONFIG_ESP_CONSOLE_USB_CDC)
+    /* Native USB has no GPIO console pins. This is the standard C6 profile
+     * and leaves the XIAO carrier's GPIO16/GPIO17 hardware UART available. */
+    const int console_tx = -1, console_rx = -1;
+#elif defined(CONFIG_ESP_CONSOLE_UART_CUSTOM)
     const int console_tx = CONFIG_ESP_CONSOLE_UART_TX_GPIO;
     const int console_rx = CONFIG_ESP_CONSOLE_UART_RX_GPIO;
 #elif defined(CONFIG_IDF_TARGET_ESP32C6)
@@ -542,8 +564,8 @@ esp_err_t mmwave_sensor_init(int uart_tx_pin, int uart_rx_pin)
         return ESP_ERR_INVALID_ARG;
     }
 #endif
-    if (uart_tx_pin == console_tx || uart_tx_pin == console_rx ||
-        uart_rx_pin == console_tx || uart_rx_pin == console_rx) {
+    if (ruview_mmwave_pins_overlap_console(uart_tx_pin, uart_rx_pin,
+                                           console_tx, console_rx)) {
         ESP_LOGW(TAG, "mmWave probe pins (TX=%d, RX=%d) overlap the console UART (TX=%d, RX=%d); skipping probe",
                  uart_tx_pin, uart_rx_pin, console_tx, console_rx);
         return ESP_ERR_INVALID_ARG;

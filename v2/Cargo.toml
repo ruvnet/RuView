@@ -148,6 +148,9 @@ members = [
 # excluded for the same reason. Build separately:
 #   cargo build --target wasm32-unknown-unknown --release -p homecore-plugin-example
 exclude = [
+    # ZIP registry archives omit large upstream unit fixtures; run its dedicated
+    # self-contained security regression target explicitly in CI.
+    "vendor/security/zip-7.2.0",
     "crates/wifi-densepose-wasm-edge",
     "crates/homecore-plugin-example",
     # ADR-368: napi-rs transport for ruview-kernel. Own workspace so napi never
@@ -345,13 +348,14 @@ strip = false
 inherits = "release"
 debug = true
 
-# Narrow, checksum-verified parent manifest patches. Source/API code is
-# unchanged. The Wasmtime cache and legacy ZIP parents use the fixed zstd
+# Checksum-verified dependency patches. ZIP 7 retains its reviewed allocation
+# guard backport; the Wasmtime cache and legacy ZIP manifests select zstd
 # 0.14.3 implementation; sqlx-sqlite selects libsqlite3-sys 0.39.1, which
 # bundles SQLite 3.54.1 (RUSTSEC-2026-0459). sqlx-sqlite 0.8.6 and 0.9.0 both
 # cap libsqlite3-sys below 0.39, so no registry release can reach it yet.
-# See each directory's RUVIEW-PROVENANCE.md for archive digests and scope.
+# See each directory's provenance/backport record for archive digests and scope.
 [patch.crates-io]
+zip-current = { package = "zip", path = "vendor/security/zip-7.2.0" }
 zip-legacy = { package = "zip", path = "vendor/security/zip-0.6.6" }
 wasmtime-internal-cache = { path = "vendor/security/wasmtime-internal-cache-36.0.20" }
 sqlx-sqlite = { path = "vendor/security/sqlx-sqlite-0.8.6" }
