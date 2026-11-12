@@ -23,45 +23,45 @@ jobs:
       # `git submodule update --remote --merge` used to fail here with
       # "Committer identity unknown" because the merge inside vendor/ruvector
       # needs an author when the pinned commit isn't a fast-forward of upstream.
-      - name: Configure git identity
-        run: |
-          git config --global user.name  "github-actions[bot]"
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        - name: Configure git identity
+          run: |
+            git config --global user.name  "github-actions[bot]"
+            git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       # Use a plain `--remote` checkout (detached HEAD at each submodule's
       # configured `branch` tip from .gitmodules) rather than `--merge`. We only
       # want to bump the superproject's gitlink to the latest upstream commit;
       # there's no reason to create merge commits inside the vendored repos, and
       # `--merge` breaks whenever the current pin has diverged from that branch.
-      - name: Update submodules to latest tracked branch
-        run: |
-          git submodule sync --recursive
-          git submodule update --remote --recursive
+        - name: Update submodules to latest tracked branch
+          run: |
+            git submodule sync --recursive
+            git submodule update --remote --recursive
 
-      - name: Check for changes
-        id: check
-        run: |
-          if git diff --quiet; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "--- submodule pointer changes ---"
-            git submodule status --recursive || true
-            git diff --submodule=log -- vendor/ || true
-          fi
+        - name: Check for changes
+          id: check
+          run: |
+            if git diff --quiet; then
+              echo "changed=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "changed=true" >> "$GITHUB_OUTPUT"
+              echo "--- submodule pointer changes ---"
+              git submodule status --recursive || true
+              git diff --submodule=log -- vendor/ || true
+            fi
 
-      - name: Create PR with updates
-        if: steps.check.outputs.changed == 'true'
-        run: |
-          BRANCH="chore/update-submodules-$(date +%Y%m%d-%H%M%S)"
-          git checkout -b "$BRANCH"
-          git add vendor/
-          git commit -m "chore: update vendor submodules to latest upstream"
-          git push origin "$BRANCH"
-          gh pr create \
-            --title "chore: update vendor submodules" \
-            --body "Automated submodule update to the latest upstream commit on each submodule's tracked branch (see \`.gitmodules\`). Review the pointer diff before merging." \
-            --base main \
-            --head "$BRANCH"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        - name: Create PR with updates
+          if: steps.check.outputs.changed == 'true'
+          run: |
+            BRANCH="chore/update-submodules-$(date +%Y%m%d-%H%M%S)"
+            git checkout -b "$BRANCH"
+            git add vendor/
+            git commit -m "chore: update vendor submodules to latest upstream"
+            git push origin "$BRANCH"
+            gh pr create \
+              --title "chore: update vendor submodules" \
+              --body "Automated submodule update to the latest upstream commit on each submodule's tracked branch (see \`.gitmodules\`). Review the pointer diff before merging." \
+              --base main \
+              --head "$BRANCH"
+          env:
+            GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
