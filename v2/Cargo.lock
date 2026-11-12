@@ -13380,12 +13380,14 @@ dependencies = [
  "blake3",
  "criterion",
  "ruvector-mincut",
+ "serde_json",
  "wifi-densepose-bfld",
  "wifi-densepose-core",
  "wifi-densepose-geo",
  "wifi-densepose-ruvector",
  "wifi-densepose-signal",
  "wifi-densepose-worldgraph",
+ "wifi-densepose-worldmodel",
 ]
 
 [[package]]
@@ -13758,6 +13760,18 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "wifi-densepose-geo",
+]
+
+[[package]]
+name = "wifi-densepose-worldmodel"
+version = "0.3.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.18",
+ "tokio",
+ "wifi-densepose-worldgraph",
 ]
 
 [[package]]
