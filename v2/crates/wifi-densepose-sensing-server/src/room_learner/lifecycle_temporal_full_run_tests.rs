@@ -270,6 +270,27 @@ fn packet(source: u8, sequence: u32, at: u64, label: RoomLabel) -> CanonicalPack
     })
     .unwrap()
 }
+// This functional fixture supplies a synthetic receiver timeline. Preparation
+// I/O must finish before that timeline starts producing packets; otherwise host
+// serialization latency repeatedly consumes the first Check window's buffer.
+// Real-paced and storage-backpressure acceptance helpers remain separate.
+fn wait_for_segment_commit(rt: &RoomLearningRuntime, at: u64, phase_started: Instant) {
+    loop {
+        rt.tick_temporal_capture(&rt.mutation_guard().unwrap(), at).unwrap();
+        let progress = fixture::snapshot(rt, at);
+        if progress["durability_pending"] == false {
+            assert_eq!(progress["stage"], "observing");
+            assert_eq!(progress["retained_rows"], progress["durable_windows"]);
+            assert_eq!(progress["observed_ns"], progress["durable_observed_ns"],
+                "preparation cannot credit a synthetic observation");
+            return;
+        }
+        assert!(phase_started.elapsed() < Duration::from_secs(240),
+            "segment preparation did not settle within the original phase guard: {progress}");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
 fn record_train_uncached(root: &Path) -> (Arc<RoomLearningRuntime>, u64) {
     assert!(!cfg!(debug_assertions), "complete native-persistence fixture requires Release; classify the caller");
     let (runtime, mut now) = configured(root);
@@ -1124,7 +1145,26 @@ async fn operator_eight_actual_reserved_checks_fit_complete_cold_and_evaluate(){
         loop{
             let progress=fixture::snapshot(&runtime,now);
             match progress["stage"].as_str().unwrap(){
-                "ready"|"paused"=>{now=fixture::async_lead_end(&runtime,now);runtime.tick_temporal_capture(&runtime.mutation_guard().unwrap(),now).unwrap();}
+                "ready"|"paused"=>{
+                    now=fixture::async_lead_end(&runtime,now);
+                    // Exercise preparation slower than the first Check slot's
+                    // buffer horizon. No synthetic packet may precede its ACK.
+                    let delayed = if episode.index == 7 {
+                        let writer={let state=runtime.inner.lock().unwrap();let Some(CaptureWorkflow::Temporal(c))=&state.capture else{panic!()};c.core.as_ref().unwrap().writer().unwrap()};
+                        let(entered_tx,entered_rx)=std::sync::mpsc::sync_channel(1);
+                        let(release_tx,release_rx)=std::sync::mpsc::sync_channel(1);
+                        writer.hold_next_after_publish(entered_tx,release_rx);
+                        let timer_release=release_tx.clone();
+                        let timer=std::thread::spawn(move||{
+                            entered_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+                            std::thread::sleep(Duration::from_secs(5));
+                            let _=timer_release.send(());
+                        });
+                        Some((ReleaseGate(Some(release_tx)),timer))
+                    }else{None};
+                    wait_for_segment_commit(&runtime,now,supervised);
+                    if let Some((mut gate,timer))=delayed{timer.join().unwrap();gate.release();}
+                }
                 "needs_confirmation"=>break,
                 "failed"=>panic!("operator episode{} failed: {progress}",episode.index),
                 _=>{}
@@ -1133,7 +1173,10 @@ async fn operator_eight_actual_reserved_checks_fit_complete_cold_and_evaluate(){
             for source in 1..=3{match runtime.ingest_native(&packet(source,sequence,now,episode.condition),now){Ok(())=>{},Err(e)if e=="temporal_storage_busy_pause"=>break,Err(e)=>panic!("operator ingest: {e}")}}
             now+=fixture::PERIOD;
             if fixture::snapshot(&runtime,now)["durability_pending"]==true{std::thread::sleep(Duration::from_nanos(fixture::PERIOD));}
-            assert!(supervised.elapsed()<Duration::from_secs(240));
+            assert!(supervised.elapsed()<Duration::from_secs(240), "operator phase={} progress={}",episode.index,{
+                let p=fixture::snapshot(&runtime,now);
+                serde_json::json!({"stage":p["stage"],"episode_index":p["episode_index"],"retained_rows":p["retained_rows"],"durable_windows":p["durable_windows"],"pending":p["durability_pending"],"durability_error":p["durability_error"],"observed_ns":p["observed_ns"],"durable_observed_ns":p["durable_observed_ns"],"target_ms":p["target_ms"],"failure":p["failure"],"runtime_state":p["runtime_state"],"lead_in_remaining_ms":p["lead_in_remaining_ms"]})
+            });
         }
         let guard=runtime.mutation_guard().unwrap();let challenge=runtime.temporal_confirmation_challenge(&guard).unwrap();
         runtime.confirm_temporal_phase(&guard,&challenge,now).unwrap();now=fixture::settle_async_boundary(&runtime,now);
