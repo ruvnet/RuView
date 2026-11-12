@@ -13,7 +13,7 @@ jobs:
   update:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+            - uses: actions/checkout@v5
         with:
           submodules: true
           fetch-depth: 0
