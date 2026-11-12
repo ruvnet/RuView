@@ -46,6 +46,9 @@ use wifi_densepose_worldgraph::{
     WorldId, WorldNode, ZoneBoundsEnu,
 };
 
+#[cfg(feature = "pan2-physical")]
+pub mod physical_forecast;
+
 pub mod mesh_guard;
 pub use mesh_guard::{MeshGuard, MeshPartitionReport};
 
