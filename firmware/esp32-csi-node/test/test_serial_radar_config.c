@@ -40,13 +40,15 @@ esp_err_t nvs_set_str(nvs_handle_t h,const char *key,const char *value) {
     if(!strcmp(key,"target_ip"))snprintf(saved.target_ip,sizeof(saved.target_ip),"%s",value);
     else if(!strcmp(key,"ssid"))snprintf(saved.wifi_ssid,sizeof(saved.wifi_ssid),"%s",value);
     else if(!strcmp(key,"password"))snprintf(saved.wifi_password,sizeof(saved.wifi_password),"%s",value);
-    else assert(!"unexpected NVS key");return ESP_OK;
+    else { assert(!"unexpected NVS key"); }
+    return ESP_OK;
 }
 esp_err_t nvs_set_u16(nvs_handle_t h,const char *key,uint16_t value) {
     assert(h==1);writes++;if(set_error)return ESP_FAIL;
     if(!strcmp(key,"radar_port"))saved.radar_fused_port=value;
     else if(!strcmp(key,"target_port")){raw_writes++;saved.target_port=value;}
-    else assert(!"unexpected NVS key");return ESP_OK;
+    else { assert(!"unexpected NVS key"); }
+    return ESP_OK;
 }
 esp_err_t nvs_set_u8(nvs_handle_t h,const char *key,uint8_t value) { assert(h==1&&!strcmp(key,"node_id"));node_writes++;saved.node_id=value;return ESP_OK; }
 esp_err_t nvs_commit(nvs_handle_t handle) { assert(handle==1);return commit_error?ESP_FAIL:ESP_OK; }
@@ -90,6 +92,8 @@ int main(void) {
     reset();device="0000000000000000";emit_hello(claim);assert(!strstr(output,"RADAR_CAP"));send(device,60,5005,"KEEP","KEEP");assert(writes==0);
     reset();char generic[384];snprintf(generic,sizeof(generic),"RUVIEW_CONFIG_V1 %s 60 192.168.1.9 5005 KEEP KEEP",claim);
     process_line(generic);assert(writes==0&&strstr(output,"radar_requires_dedicated_config"));
+    reset();char malformed[384];snprintf(malformed,sizeof(malformed),"RUVIEW_RADAR_CONFIG_V1 %s %s 60 10.23.45.67. 5005 KEEP KEEP",claim,device);
+    process_line(malformed);assert(writes==0&&restarts==0); /* Not a routable IPv4 literal. */
 #else
     assert(!strstr(output,"RUVIEW_RADAR_CAP_V1"));send(device,60,5005,"KEEP","KEEP");
     assert(writes==0&&restarts==0&&strstr(output,"unsupported_controller"));

@@ -55,7 +55,10 @@ static bool valid_ipv4(const char *value)
         }
         if (digits == 0) return false;
         octets++;
-        if (*cursor == '.') cursor++;
+        if (*cursor == '.') {
+            cursor++;
+            if (*cursor == '\0') return false;
+        }
     }
     return octets == 4;
 }

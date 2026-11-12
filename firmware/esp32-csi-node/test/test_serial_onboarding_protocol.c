@@ -63,6 +63,8 @@ int main(void)
     test_hello();
     test_config();
     test_rejections();
+    ruview_onboarding_config_t invalid;
+    assert(ruview_onboarding_parse_config("RUVIEW_CONFIG_V1 00112233445566778899aabbccddeeff 5 10.23.45.67. 5005 KEEP KEEP", &invalid) == RUVIEW_ONBOARDING_ERR_TARGET_IP);
     puts("serial onboarding protocol tests passed");
     return 0;
 }
