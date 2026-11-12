@@ -126,6 +126,7 @@ pub async fn start_server(
     advertiser: Arc<dyn MdnsAdvertiser>,
 ) -> Result<HapServerHandle, HapError> {
     config.validate()?;
+    bridge.freeze_accessory_ids();
     let listener = TcpListener::bind(config.bind_addr)
         .await
         .map_err(|error| HapError::Server(format!("bind {}: {error}", config.bind_addr)))?;
@@ -852,13 +853,10 @@ fn accessory_information(iid: u64, name: &str) -> Value {
 }
 
 fn indexed_accessories(bridge: &HapBridge) -> Vec<(u64, ExposedAccessory)> {
-    let mut accessories = bridge.running_accessories();
-    accessories.sort_by(|left, right| left.entity_id.as_str().cmp(right.entity_id.as_str()));
+    let mut accessories = bridge.running_accessories_with_ids();
     accessories
-        .into_iter()
-        .enumerate()
-        .map(|(index, accessory)| (index as u64 + 2, accessory))
-        .collect()
+        .sort_by(|(_, left), (_, right)| left.entity_id.as_str().cmp(right.entity_id.as_str()));
+    accessories
 }
 
 fn characteristics_response(target: &str, bridge: &HapBridge) -> Response {
@@ -1241,6 +1239,132 @@ mod tests {
         .await;
         assert!(response.starts_with(b"HTTP/1.1 470"));
         server.shutdown().await.unwrap();
+    }
+
+    #[test]
+    fn adding_an_accessory_cannot_retarget_an_advertised_aid() {
+        let bridge = HapBridge::new(HapServiceRecord::bridge(
+            "RuView Sense",
+            51826,
+            "AA:BB:CC:DD:EE:FF",
+        ));
+        let original = EntityId::parse("light.z").unwrap();
+        bridge
+            .add_accessory(
+                &original,
+                &State::new(original.clone(), "off", json!({}), Context::default()),
+            )
+            .unwrap();
+        let aid = indexed_accessories(&bridge)[0].0;
+
+        let inserted = EntityId::parse("light.a").unwrap();
+        bridge
+            .add_accessory(
+                &inserted,
+                &State::new(inserted.clone(), "on", json!({}), Context::default()),
+            )
+            .unwrap();
+
+        let result = characteristics_response(&format!("/characteristics?id={aid}.8"), &bridge);
+        let body: Value = serde_json::from_slice(&result.body).unwrap();
+        assert_eq!(body["characteristics"][0]["value"], false);
+        assert_eq!(
+            indexed_accessories(&bridge)
+                .into_iter()
+                .find(|(_, accessory)| accessory.entity_id == original)
+                .unwrap()
+                .0,
+            aid
+        );
+    }
+
+    #[test]
+    fn removing_an_accessory_does_not_reassign_or_reuse_an_aid() {
+        let bridge = HapBridge::new(HapServiceRecord::bridge(
+            "RuView Sense",
+            51826,
+            "AA:BB:CC:DD:EE:FF",
+        ));
+        let first = EntityId::parse("light.a").unwrap();
+        let retained = EntityId::parse("light.z").unwrap();
+        for entity in [&first, &retained] {
+            bridge
+                .add_accessory(
+                    entity,
+                    &State::new(entity.clone(), "off", json!({}), Context::default()),
+                )
+                .unwrap();
+        }
+        let retained_aid = indexed_accessories(&bridge)
+            .into_iter()
+            .find(|(_, accessory)| accessory.entity_id == retained)
+            .unwrap()
+            .0;
+        bridge.remove_accessory(&first).unwrap();
+        let replacement = EntityId::parse("light.b").unwrap();
+        bridge
+            .add_accessory(
+                &replacement,
+                &State::new(replacement.clone(), "on", json!({}), Context::default()),
+            )
+            .unwrap();
+
+        let accessories = indexed_accessories(&bridge);
+        assert_eq!(
+            accessories
+                .iter()
+                .find(|(_, accessory)| accessory.entity_id == retained)
+                .unwrap()
+                .0,
+            retained_aid
+        );
+        assert!(accessories
+            .iter()
+            .all(|(aid, accessory)| { accessory.entity_id != replacement || *aid > retained_aid }));
+
+        bridge.remove_accessory(&retained).unwrap();
+        bridge
+            .add_accessory(
+                &retained,
+                &State::new(retained.clone(), "off", json!({}), Context::default()),
+            )
+            .unwrap();
+        assert_eq!(
+            indexed_accessories(&bridge)
+                .into_iter()
+                .find(|(_, accessory)| accessory.entity_id == retained)
+                .unwrap()
+                .0,
+            retained_aid
+        );
+    }
+
+    #[test]
+    fn initial_aids_are_independent_of_restore_order() {
+        let inventories: Vec<Vec<(String, u64)>> = [["light.z", "light.a"], ["light.a", "light.z"]]
+            .into_iter()
+            .map(|order| {
+                let bridge = HapBridge::new(HapServiceRecord::bridge(
+                    "RuView Sense",
+                    51826,
+                    "AA:BB:CC:DD:EE:FF",
+                ));
+                for name in order {
+                    let entity = EntityId::parse(name).unwrap();
+                    bridge
+                        .add_accessory(
+                            &entity,
+                            &State::new(entity.clone(), "off", json!({}), Context::default()),
+                        )
+                        .unwrap();
+                }
+                indexed_accessories(&bridge)
+                    .into_iter()
+                    .map(|(aid, accessory)| (accessory.entity_id.to_string(), aid))
+                    .collect()
+            })
+            .collect();
+        assert_eq!(inventories[0], inventories[1]);
     }
 
     #[tokio::test]
