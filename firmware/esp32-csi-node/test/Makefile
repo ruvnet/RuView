@@ -138,11 +138,11 @@ run_serial_onboarding: test_serial_onboarding
 	./test_serial_onboarding
 
 test_serial_radar: test_serial_radar_config.c $(MAIN_DIR)/serial_onboarding.c $(MAIN_DIR)/serial_onboarding_protocol.c
-	$(CC) -std=c11 -Wall -Wextra -Werror -Wno-unused-function -Wno-unused-variable -Iserial_stubs -I$(MAIN_DIR) \
+	cc -std=c11 -Wall -Wextra -Werror -Wno-unused-function -Wno-unused-variable -Iserial_stubs -I$(MAIN_DIR) \
 		-DCONFIG_C6_XIAO_MR60BHA2=1 -DCONFIG_IDF_TARGET_ESP32C6=1 -o $@ test_serial_radar_config.c $(MAIN_DIR)/serial_onboarding_protocol.c
 
 test_serial_radar_generic: test_serial_radar_config.c $(MAIN_DIR)/serial_onboarding.c $(MAIN_DIR)/serial_onboarding_protocol.c
-	$(CC) -std=c11 -Wall -Wextra -Werror -Wno-unused-function -Wno-unused-variable -Iserial_stubs -I$(MAIN_DIR) \
+	cc -std=c11 -Wall -Wextra -Werror -Wno-unused-function -Wno-unused-variable -Iserial_stubs -I$(MAIN_DIR) \
 		-o $@ test_serial_radar_config.c $(MAIN_DIR)/serial_onboarding_protocol.c
 
 run_serial_radar: test_serial_radar test_serial_radar_generic
