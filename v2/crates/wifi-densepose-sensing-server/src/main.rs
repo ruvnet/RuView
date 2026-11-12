@@ -1175,6 +1175,13 @@ struct NodeState {
     csi_fps_ema: f64,
     /// Number of inter-frame deltas observed (need ≥5 before trusting EMA).
     csi_fps_samples: u32,
+    /// Start of the current cadence window for frames admitted to the active
+    /// feature history. This is separate from raw-arrival FPS because
+    /// grid-rejected packets must not affect DSP frequency bins.
+    accepted_csi_rate_window_started_at: Option<std::time::Instant>,
+    accepted_csi_rate_window_frames: u32,
+    accepted_csi_rate_hz: f64,
+    accepted_csi_rate_windows: u32,
     /// Latest extracted features for cross-node fusion.
     latest_features: Option<FeatureInfo>,
     // ── RuVector Phase 2: Temporal smoothing & coherence gating ──
@@ -1375,7 +1382,158 @@ mod fps_ema_tests {
     }
 }
 
+#[cfg(test)]
+mod accepted_history_cadence_tests {
+    use super::{NodeState, GRID_VOTE_FRAMES, MAX_PHYSICAL_CSI_FPS};
+    use std::time::{Duration, Instant};
+    use wifi_densepose_hardware::PpduType;
+
+    fn warm(node: &mut NodeState, start: Instant, period_ms: u64) -> Instant {
+        let count = 1000 / period_ms;
+        for i in 0..=count {
+            node.observe_accepted_csi_frame(i as u32, false, start + Duration::from_millis(i * period_ms));
+        }
+        start + Duration::from_millis(count * period_ms)
+    }
+
+    #[test]
+    fn rejected_grid_arrivals_do_not_clock_accepted_feature_history() {
+        let mut node = NodeState::new();
+        let start = Instant::now();
+        let active = (256, PpduType::HtLegacy);
+        let rejected = (64, PpduType::HtLegacy);
+        for _ in 0..GRID_VOTE_FRAMES { assert!(node.accept_grid(active)); }
+        for i in 0..=400 {
+            let now = start + Duration::from_millis(i * 25);
+            if i % 2 == 0 {
+                assert!(node.accept_grid(active));
+                node.observe_accepted_csi_frame(i as u32, true, now);
+            } else {
+                assert!(!node.accept_grid(rejected));
+                node.observe_csi_frame_arrival(now);
+            }
+        }
+        let now = start + Duration::from_secs(10);
+        assert!((node.measured_feature_sample_rate_hz(now).unwrap() - 20.0).abs() < 0.01);
+        assert!((node.measured_sample_rate_hz().unwrap() - 40.0).abs() < 2.0);
+        assert_eq!(node.latest_csi_sequence, Some(400));
+        assert!(node.latest_csi_sync_valid);
+        assert_eq!(node.last_frame_time, Some(now));
+        assert_eq!(node.latest_accepted_csi_at, Some(now));
+    }
+
+    #[test]
+    fn accepted_bursts_count_every_frame_and_keep_raw_clock() {
+        let mut node = NodeState::new();
+        let start = Instant::now();
+        for i in 0..=40 {
+            let at = start + Duration::from_millis(i * 50);
+            node.observe_accepted_csi_frame((i * 2) as u32, false, at);
+            node.observe_accepted_csi_frame((i * 2 + 1) as u32, false, at + Duration::from_micros(40));
+        }
+        let now = start + Duration::from_secs(2) + Duration::from_micros(40);
+        assert!((node.measured_feature_sample_rate_hz(now).unwrap() - 40.0).abs() < 0.01);
+        assert!((node.measured_sample_rate_hz().unwrap() - 40.0).abs() < 3.0);
+    }
+
+    #[test]
+    fn warmed_measurement_expires_then_restarts_without_stale_rate() {
+        let mut node = NodeState::new();
+        let start = Instant::now();
+        assert!(node.measured_feature_sample_rate_hz(start).is_none());
+        let end = warm(&mut node, start, 25);
+        assert_eq!(node.measured_feature_sample_rate_hz(end), Some(40.0));
+        let later = end + Duration::from_secs(4);
+        assert!(node.measured_feature_sample_rate_hz(later).is_none());
+        assert_eq!(node.feature_sample_rate_hz(later), 20.0);
+        node.observe_accepted_csi_frame(99, false, later);
+        assert!(node.measured_feature_sample_rate_hz(later).is_none());
+        assert_eq!(node.accepted_csi_rate_windows, 0);
+        let end = warm(&mut node, later + Duration::from_millis(50), 50);
+        assert_eq!(node.measured_feature_sample_rate_hz(end), Some(20.0));
+    }
+
+    #[test]
+    fn grid_switch_resets_only_accepted_clock() {
+        let mut node = NodeState::new();
+        let active = (128, PpduType::HtLegacy);
+        for _ in 0..GRID_VOTE_FRAMES { assert!(node.accept_grid(active)); }
+        let end = warm(&mut node, Instant::now(), 25);
+        let raw_before = (node.csi_fps_ema, node.csi_fps_samples, node.last_frame_time);
+        assert!(!node.accept_grid((64, PpduType::HtLegacy)));
+        assert_eq!(node.measured_feature_sample_rate_hz(end), Some(40.0));
+        for _ in 0..GRID_VOTE_FRAMES { node.accept_grid((64, PpduType::HtLegacy)); }
+        assert_eq!(node.active_grid, Some((64, PpduType::HtLegacy)));
+        assert!(node.measured_feature_sample_rate_hz(end).is_none());
+        assert_eq!(raw_before, (node.csi_fps_ema, node.csi_fps_samples, node.last_frame_time));
+    }
+
+    #[test]
+    fn per_node_measurements_and_existing_consumption_bounds_are_preserved() {
+        let mut first = NodeState::new();
+        let mut second = NodeState::new();
+        let start = Instant::now();
+        let end = warm(&mut first, start, 25);
+        warm(&mut second, start, 50);
+        assert_eq!(first.measured_feature_sample_rate_hz(end), Some(40.0));
+        assert_eq!(second.measured_feature_sample_rate_hz(end), Some(20.0));
+        first.accepted_csi_rate_hz = f64::NAN;
+        assert!(first.measured_feature_sample_rate_hz(end).is_none());
+        first.accepted_csi_rate_hz = 9000.0;
+        assert_eq!(first.measured_feature_sample_rate_hz(end), Some(MAX_PHYSICAL_CSI_FPS));
+    }
+}
+
 impl NodeState {
+    /// Track only frames admitted to this node's active-grid feature history.
+    /// One-to-three-second monotonic windows retain valid burst deliveries and
+    /// exclude rejected grids. Longer gaps restart warm-up instead of turning
+    /// a transport outage into a bogus low sample rate.
+    fn observe_accepted_feature_frame(&mut self, now: std::time::Instant) {
+        let Some(started_at) = self.accepted_csi_rate_window_started_at else {
+            self.accepted_csi_rate_window_started_at = Some(now);
+            self.accepted_csi_rate_window_frames = 1;
+            return;
+        };
+
+        let elapsed = now.saturating_duration_since(started_at);
+        if elapsed > std::time::Duration::from_secs(3) {
+            self.accepted_csi_rate_window_started_at = Some(now);
+            self.accepted_csi_rate_window_frames = 1;
+            self.accepted_csi_rate_hz = 20.0;
+            self.accepted_csi_rate_windows = 0;
+            return;
+        }
+
+        self.accepted_csi_rate_window_frames =
+            self.accepted_csi_rate_window_frames.saturating_add(1);
+        if elapsed >= std::time::Duration::from_secs(1) {
+            let intervals = self.accepted_csi_rate_window_frames.saturating_sub(1);
+            let measured = intervals as f64 / elapsed.as_secs_f64();
+            self.accepted_csi_rate_hz = measured;
+            self.accepted_csi_rate_windows = self.accepted_csi_rate_windows.saturating_add(1);
+            self.accepted_csi_rate_window_started_at = Some(now);
+            self.accepted_csi_rate_window_frames = 1;
+        }
+    }
+
+    /// Accepted-history cadence is unknown before warm-up and after a stall.
+    /// Keep this optional: the DSP fallback is not an observed measurement.
+    fn measured_feature_sample_rate_hz(&self, now: std::time::Instant) -> Option<f64> {
+        let age = now.checked_duration_since(self.latest_accepted_csi_at?)?;
+        if age > std::time::Duration::from_secs(3)
+            || self.accepted_csi_rate_windows == 0
+            || !self.accepted_csi_rate_hz.is_finite()
+        {
+            return None;
+        }
+        Some(self.accepted_csi_rate_hz.clamp(1.0, MAX_PHYSICAL_CSI_FPS))
+    }
+
+    fn feature_sample_rate_hz(&self, now: std::time::Instant) -> f64 {
+        self.measured_feature_sample_rate_hz(now).unwrap_or(20.0)
+    }
+
     /// Measured sample rate only after enough inter-frame deltas have warmed
     /// the EMA. The physical ceiling is enforced again at the consumption
     /// boundary so restored or malformed state cannot overclock DSP math.
@@ -1527,6 +1685,7 @@ impl NodeState {
         sync_valid: bool,
         now: std::time::Instant,
     ) -> bool {
+        self.observe_accepted_feature_frame(now);
         self.latest_accepted_csi_at = Some(now);
         self.latest_csi_sequence = Some(sequence);
         self.latest_csi_sync_valid = sync_valid;
@@ -1563,6 +1722,10 @@ impl NodeState {
             latest_csi_sync_valid: false,
             csi_fps_ema: 20.0,
             csi_fps_samples: 0,
+            accepted_csi_rate_window_started_at: None,
+            accepted_csi_rate_window_frames: 0,
+            accepted_csi_rate_hz: 20.0,
+            accepted_csi_rate_windows: 0,
             latest_features: None,
             prev_keypoints: None,
             motion_energy_history: VecDeque::with_capacity(COHERENCE_WINDOW),
@@ -1748,6 +1911,10 @@ impl NodeState {
             if 2 * votes(grid) > 3 * votes(active) {
                 self.active_grid = Some(grid);
                 self.frame_history.clear();
+                self.accepted_csi_rate_window_started_at = None;
+                self.accepted_csi_rate_window_frames = 0;
+                self.accepted_csi_rate_hz = 20.0;
+                self.accepted_csi_rate_windows = 0;
                 self.baseline_motion = 0.0;
                 self.baseline_frames = 0;
                 return true;
@@ -13153,7 +13320,7 @@ async fn udp_receiver_task(
                         ns.frame_history.pop_front();
                     }
 
-                    let sample_rate_hz = ns.effective_sample_rate_hz();
+                    let sample_rate_hz = ns.feature_sample_rate_hz(std::time::Instant::now());
                     let (
                         features,
                         mut classification,
