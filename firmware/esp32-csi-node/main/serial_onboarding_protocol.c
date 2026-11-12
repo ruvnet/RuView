@@ -44,6 +44,7 @@ static bool valid_ipv4(const char *value)
     while (*cursor != '\0') {
         if (octets == 4) return false;
         if (*cursor == '.') return false;
+        const char *octet_start = cursor;
         uint32_t octet = 0;
         unsigned digits = 0;
         while (*cursor != '\0' && *cursor != '.') {
@@ -54,6 +55,7 @@ static bool valid_ipv4(const char *value)
             cursor++;
         }
         if (digits == 0) return false;
+        if (digits > 1 && *octet_start == '0') return false;
         octets++;
         if (*cursor == '.') {
             cursor++;

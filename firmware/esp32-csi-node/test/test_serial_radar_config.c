@@ -94,6 +94,8 @@ int main(void) {
     process_line(generic);assert(writes==0&&strstr(output,"radar_requires_dedicated_config"));
     reset();char malformed[384];snprintf(malformed,sizeof(malformed),"RUVIEW_RADAR_CONFIG_V1 %s %s 60 10.23.45.67. 5005 KEEP KEEP",claim,device);
     process_line(malformed);assert(writes==0&&restarts==0); /* Not a routable IPv4 literal. */
+    reset();snprintf(malformed,sizeof(malformed),"RUVIEW_RADAR_CONFIG_V1 %s %s 60 010.23.45.67 5005 KEEP KEEP",claim,device);
+    process_line(malformed);assert(writes==0&&restarts==0); /* lwIP must not reinterpret decimal10 as octal8. */
 #else
     assert(!strstr(output,"RUVIEW_RADAR_CAP_V1"));send(device,60,5005,"KEEP","KEEP");
     assert(writes==0&&restarts==0&&strstr(output,"unsupported_controller"));
