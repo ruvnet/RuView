@@ -9,14 +9,15 @@
 //      (wifi-densepose train-room, wifi-densepose-train `train`), writes only
 //      under the trusted checkout, and fails closed when a toolchain is absent.
 
-import { existsSync, mkdirSync, realpathSync } from 'node:fs';
-import { isAbsolute, join, relative, resolve } from 'node:path';
+import { existsSync, lstatSync, mkdirSync, realpathSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
 export const SPLITS = Object.freeze(['chronological', 'blocked-gap', 'grouped-subject', 'grouped-session', 'random-frame']);
 const LEAKAGE_FREE = new Set(['chronological', 'blocked-gap', 'grouped-subject', 'grouped-session']);
 export const TRAIN_MODES = Object.freeze(['pose-smoke', 'pose', 'room']);
 
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
+const isScore = (v) => isNum(v) && v >= 0 && v <= 100;
 const toPct = (v) => (v <= 1 ? v * 100 : v);
 const timeMillis = (value) => isNum(value) ? value : typeof value === 'string' ? Date.parse(value) : NaN;
 
@@ -32,7 +33,9 @@ export function trainingGate(report = {}) {
   const warn = (code, message) => findings.push({ severity: 'warn', code, message });
 
   if (!isNum(report.model_score)) fail('model_score_missing', 'model_score is required.');
+  else if (!isScore(report.model_score)) fail('model_score_out_of_range', 'model_score must be between 0 and 100 (fraction or percent).');
   if (!isNum(report.baseline_score)) fail('baseline_missing', 'baseline_score (mean-pose baseline on the same split) is required before any score is quoted.');
+  else if (!isScore(report.baseline_score)) fail('baseline_out_of_range', 'baseline_score must be between 0 and 100 (fraction or percent).');
   if (!SPLITS.includes(report.split)) fail('split_missing', `split must be one of ${SPLITS.join(', ')}.`);
   else if (!LEAKAGE_FREE.has(report.split)) fail('split_leaky', `${report.split} splits leak temporally adjacent frames; use chronological, blocked-gap, or grouped splits.`);
 
@@ -53,7 +56,7 @@ export function trainingGate(report = {}) {
   if (!isNum(report.n_test) || report.n_test < 100) warn('small_test_set', 'n_test is missing or below 100 samples; confidence intervals will be wide.');
 
   let deltaPp = null;
-  if (isNum(report.model_score) && isNum(report.baseline_score)) {
+  if (isScore(report.model_score) && isScore(report.baseline_score)) {
     deltaPp = Number((toPct(report.model_score) - toPct(report.baseline_score)).toFixed(2));
     if (deltaPp <= 0) fail('no_signal', `model does not beat the mean-pose baseline (${deltaPp} pp).`);
     if (toPct(report.model_score) >= 99.5) warn('implausible_score', 'near-perfect scores historically indicated leakage (retracted 92.9%/100% results); audit the split.');
@@ -147,7 +150,27 @@ export async function runTraining(args, deps) {
     return { ok: true, dryRun: true, plan: summary, next: 'Re-run with confirm to train. Nothing was executed.', gate: 'Publish results only through ruview_train_gate.' };
   }
   if (plan.cmd === 'cargo' && !deps.which('cargo')) return { ok: false, reason: 'cargo_missing', plan: summary, remedy: 'Install Rust via https://rustup.rs' };
-  for (const dir of plan.writes) if (isAbsolute(dir) && within(repo, dir)) mkdirSync(dir, { recursive: true });
+  try {
+    if (plan.mode === 'room') {
+      for (const output of plan.writes) {
+        let ancestor = output;
+        while (!existsSync(ancestor)) {
+          if (lstatSync(ancestor, { throwIfNoEntry: false })) {
+            throw Object.assign(new Error('training output has an unresolved path'), { reason: 'invalid_path' });
+          }
+          ancestor = dirname(ancestor);
+        }
+        repoPath(repo, relative(repo, ancestor) || '.', { mustExist: true });
+      }
+    }
+    for (const output of plan.writes) {
+      // Room banks are files; pose checkpoints are directories.
+      const dir = plan.mode === 'room' ? dirname(output) : output;
+      if (isAbsolute(dir) && within(repo, dir)) mkdirSync(dir, { recursive: true });
+    }
+  } catch (error) {
+    return { ok: false, reason: error.reason || 'output_preparation_failed', detail: error.message, plan: summary };
+  }
   const r = await deps.exec(plan.cmd, plan.args, { cwd: plan.cwd, timeoutMs: plan.timeoutMs });
   const text = `${r.stdout}\n${r.stderr}`;
   const hint = r.ok ? null : /Cannot find a libtorch install/i.test(text)
