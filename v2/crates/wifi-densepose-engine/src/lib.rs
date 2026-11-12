@@ -422,6 +422,7 @@ impl StreamingEngine {
                 position: EnuPoint { east_m: pos[0], north_m: pos[1], up_m: pos[2] },
                 anchor_kind: kind,
                 confidence: 0.9,
+                asset: None,
             });
             written.push(id);
         }
