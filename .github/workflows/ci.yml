@@ -163,6 +163,20 @@ jobs:
       working-directory: v2
       run: cargo test -p wifi-densepose-signal --no-default-features --features cir --tests
 
+    # `eigenvalue` is wifi-densepose-signal's *default* feature, but every
+    # cargo invocation above passes --no-default-features, so the BLAS path —
+    # the Marcenko-Pastur occupancy estimator and the four
+    # #[cfg(feature = "eigenvalue")] test modules in ruvsense/field_model.rs —
+    # is never compiled or run. #2530 fixed its Windows OpenBLAS build for a
+    # configuration no job builds. Exercise the crate's default feature set so
+    # a regression there is attributable.
+    - name: Run eigenvalue (default feature) signal tests
+      working-directory: v2
+      env:
+        CARGO_PROFILE_DEV_DEBUG: "0"
+        CARGO_PROFILE_TEST_DEBUG: "0"
+      run: cargo test -p wifi-densepose-signal --features eigenvalue
+
     # ADR-426 D5: the ruv-FANN shadow is an optional feature, so the default
     # workspace run never compiles it. Build and test it on its own.
     - name: Run ADR-426 fann-shadow tests
