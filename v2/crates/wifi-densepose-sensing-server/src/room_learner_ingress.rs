@@ -26,9 +26,10 @@ pub(crate) struct NativeSourceKey {
     pub(super) ppdu_type: u8,
     pub(super) frequency_mhz: u16,
     pub(super) bw40: bool,
+    pub(super) format: native::NativeFormatId,
 }
 impl NativeSourceKey {
-    fn from_frame(frame: &Esp32Frame) -> Self {
+    fn from_frame(frame: &Esp32Frame, format: native::NativeFormatId) -> Self {
         Self {
             node_id: frame.node_id,
             n_antennas: frame.n_antennas,
@@ -36,8 +37,56 @@ impl NativeSourceKey {
             ppdu_type: frame.ppdu_type.to_byte(),
             frequency_mhz: frame.freq_mhz,
             bw40: frame.adr018_flags.bw40,
+            format,
         }
     }
+    pub(super) fn grid_id(&self) -> Result<String, String> {
+        native::grid_id_for_format(self.n_antennas as usize, self.raw_bins as usize,
+            wifi_densepose_hardware::PpduType::from_byte(self.ppdu_type), self.format)
+    }
+}
+
+/// Last rejected packet metadata only, never readiness or model authority.
+/// u8 node IDs bound storage to 256 entries; no raw payload/absolute timestamps.
+#[derive(Debug, Clone)]
+pub(crate) struct NativePacketRejection {
+    code: &'static str,
+    detail: &'static str,
+    raw_bins: u16,
+    ppdu_type: u8,
+    frequency_mhz: u16,
+    observed_at: std::time::Instant,
+}
+const NATIVE_REJECTION_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(5);
+const MAX_REPORTED_NATIVE_REJECTIONS: usize = 32;
+fn reject_packet(state: &mut AppStateInner, frame: &Esp32Frame, now: std::time::Instant,
+                 code: &'static str, detail: &'static str) {
+    state.room_learning_rejections.retain(|_, d|
+        now.saturating_duration_since(d.observed_at) <= NATIVE_REJECTION_MAX_AGE);
+    state.room_learning_rejections.insert(frame.node_id, NativePacketRejection {
+        code, detail, raw_bins: frame.n_subcarriers, ppdu_type: frame.ppdu_type.to_byte(),
+        frequency_mhz: frame.freq_mhz, observed_at: now,
+    });
+}
+pub(super) fn source_rejection_diagnostics(state: &AppStateInner, now: std::time::Instant)
+    -> serde_json::Value {
+    let selected=state.room_learning.as_ref().and_then(|rt|rt.context())
+        .map(|context|context.sources.into_iter().map(|source|source.source_id).collect::<Vec<_>>()).unwrap_or_default();
+    let mut ids: Vec<_> = state.room_learning_rejections.iter().filter_map(|(&id,d)|
+        (now.saturating_duration_since(d.observed_at)<=NATIVE_REJECTION_MAX_AGE).then_some(id)).collect();
+    ids.sort_unstable_by_key(|id|(!selected.contains(id),*id));
+    let total=ids.len();
+    let values: Vec<_> = ids.into_iter().take(MAX_REPORTED_NATIVE_REJECTIONS).filter_map(|node| {
+        let d = &state.room_learning_rejections[&node];
+        let age = now.saturating_duration_since(d.observed_at);
+        (age <= NATIVE_REJECTION_MAX_AGE).then(|| serde_json::json!({
+            "node_id":node,"last_rejected_packet":{"code":d.code,"detail":d.detail,
+            "raw_bins":d.raw_bins,"ppdu_type":d.ppdu_type,"frequency_mhz":d.frequency_mhz,
+            "age_ms":age.as_millis() as u64},"admission_authority":false
+        }))
+    }).collect();
+    serde_json::json!({"schema":"ruview.native-packet-rejections.v1","sources":values,
+        "total_sources":total,"truncated":total>MAX_REPORTED_NATIVE_REJECTIONS})
 }
 #[derive(Debug, Clone)]
 pub(crate) struct LiveSource {
@@ -111,12 +160,7 @@ pub(super) fn native_candidates(
         .filter(|(key, meta)| {
             key.node_id == node
                 && meta.eligible(now)
-                && native::grid_id(
-                    key.n_antennas as usize,
-                    key.raw_bins as usize,
-                    wifi_densepose_hardware::PpduType::from_byte(key.ppdu_type),
-                )
-                .is_ok()
+                && key.grid_id().is_ok()
         })
         .collect()
 }
@@ -140,11 +184,18 @@ pub(crate) fn observe_with_receiver_timing(
     };
     // Unsupported input must never consume the bounded readiness cache. Keep
     // the selected-source rejection diagnostic without admitting any evidence.
-    let Ok(id) = native::grid_id(
-        frame.n_antennas as usize,
-        frame.n_subcarriers as usize,
-        frame.ppdu_type,
-    ) else {
+    let format = match native::validate_adr018_native_format(packet,
+        frame.n_antennas as usize, frame.n_subcarriers as usize,
+        frame.ppdu_type, frame.adr018_flags) {
+        Ok(format) => format,
+        Err(detail) => {
+            reject_packet(state, frame, now, "native_format_unverified", detail);
+            return;
+        }
+    };
+    let key = NativeSourceKey::from_frame(frame, format.id());
+    let Ok(id) = key.grid_id() else {
+        reject_packet(state, frame, now, "native_grid_unsupported", "The declared native grid/PPDU is unsupported.");
         return;
     };
     let frequency_hz = u64::from(frame.freq_mhz) * 1_000_000;
@@ -156,6 +207,7 @@ pub(crate) fn observe_with_receiver_timing(
         None
     };
     if let Some(reason) = rejection {
+        reject_packet(state, frame, now, "native_phy_unsupported", reason);
         runtime.record_native_rejection(frame.node_id, &id, reason);
         return;
     }
@@ -163,7 +215,11 @@ pub(crate) fn observe_with_receiver_timing(
     let Some(iq) = packet.get(20..20 + bytes) else {
         return;
     };
-    let key = NativeSourceKey::from_frame(frame);
+    if state.room_learning_rejections.get(&frame.node_id).is_some_and(|d|
+        d.raw_bins == frame.n_subcarriers && d.ppdu_type == frame.ppdu_type.to_byte()
+            && d.frequency_mhz == frame.freq_mhz) {
+        state.room_learning_rejections.remove(&frame.node_id);
+    }
     if state.room_learning_sources.len() >= 1024 && !state.room_learning_sources.contains_key(&key)
     {
         // Reclaim only expired unrelated classes. Selected contexts keep their
@@ -180,11 +236,7 @@ pub(crate) fn observe_with_receiver_timing(
                         source.source_id == key.node_id
                             && source.center_frequency_hz == meta.frequency_hz
                             && Some(source.bandwidth_hz) == meta.bandwidth_hz
-                            && native::grid_id(
-                                key.n_antennas as usize,
-                                key.raw_bins as usize,
-                                wifi_densepose_hardware::PpduType::from_byte(key.ppdu_type),
-                            )
+                            && key.grid_id()
                             .ok()
                             .as_deref()
                                 == Some(source.grid_id.as_str())
@@ -213,7 +265,7 @@ pub(crate) fn observe_with_receiver_timing(
     let dequeue_interval_us = receiver_timing.and_then(|t| meta.diagnostic_dequeue_interval(t.dequeued_at));
     let native_stamp_at = receiver_timing.map(|_| std::time::Instant::now());
     let ns = runtime.receiver_now_ns();
-    let projected = match native::canonicalize_esp32(NativePacketInput {
+    let projected = match native::canonicalize_esp32_with_format(NativePacketInput {
         node_id: frame.node_id,
         n_antennas: frame.n_antennas as usize,
         raw_bins: frame.n_subcarriers as usize,
@@ -225,7 +277,7 @@ pub(crate) fn observe_with_receiver_timing(
         iq_bytes: iq,
         flags: frame.adr018_flags,
         provenance: CaptureProvenance::LiveReceiverObserved,
-    }) {
+    }, format) {
         Ok(p) => p,
         Err(reason) => {
             runtime.record_native_rejection(frame.node_id, &id, &reason);
@@ -249,7 +301,7 @@ mod receiver_timing_tests {
     #[test]
     fn diagnostic_cache_is_separate_from_readiness_and_exact_phy_keys_do_not_mix() {
         let t = Instant::now();
-        let ht_key = NativeSourceKey { node_id:15, n_antennas:1, raw_bins:64, ppdu_type:0, frequency_mhz:2437, bw40:false };
+        let ht_key = NativeSourceKey { node_id:15, n_antennas:1, raw_bins:64, ppdu_type:0, frequency_mhz:2437, bw40:false, format:native::NativeFormatId::LegacyV2 };
         let he_key = NativeSourceKey { raw_bins:256, ppdu_type:1, ..ht_key };
         let mut cache = std::collections::HashMap::from([(ht_key, source()), (he_key, source())]);
         let ht = cache.get_mut(&ht_key).unwrap(); ht.record(t);

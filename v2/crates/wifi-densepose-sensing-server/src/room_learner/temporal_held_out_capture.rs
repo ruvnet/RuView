@@ -285,7 +285,7 @@ impl FullCompleteRecordData {
         now: u64,
     ) -> Result<(), String> {
         let body = &self.body;
-        let operator=fit.body.operator_profile.as_deref()==Some("native-2s-three-source-56bin-operator-eight-step-v1");
+        let operator=matches!(fit.body.operator_profile.as_deref(),Some(crate::room_learner::managed_schedule_contract::OPERATOR_EIGHT_PROFILE | crate::room_learner::managed_schedule_contract::OPERATOR_VARIABLE_PROFILE));
         if fit.body.operator_profile.is_some() && !operator{return Err("temporal_full_complete_profile_changed".into());}
         let domain=if operator{OPERATOR_COMPLETE_DOMAIN}else{FULL_COMPLETE_DOMAIN};
         let hashes = [

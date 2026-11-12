@@ -2385,6 +2385,7 @@ struct AppStateInner {
     source_bank_shadow: Option<source_bank_shadow::ShadowCapture>,
     room_learning: Option<Arc<wifi_densepose_sensing_server::room_learner::lifecycle::RoomLearningRuntime>>,
     room_learning_sources: HashMap<room_learner_api::NativeSourceKey, room_learner_api::LiveSource>,
+    room_learning_rejections: HashMap<u8, room_learner_api::NativePacketRejection>,
     current_room_store: Option<Arc<companion_room::SharedRoomStore>>,
     /// Stable installation identity used only to bind local persisted state.
     installation_id: Option<String>,
@@ -3492,6 +3493,7 @@ impl AppStateInner {
             source_bank_shadow: None,
             room_learning: None,
             room_learning_sources: HashMap::new(),
+            room_learning_rejections: HashMap::new(),
             current_room_store: None,
             installation_id: None,
             bootstrap_baseline: None,
@@ -16412,6 +16414,7 @@ async fn main() {
         source_bank_shadow: None,
         room_learning,
         room_learning_sources: HashMap::new(),
+        room_learning_rejections: HashMap::new(),
         current_room_store: None,
         installation_id: args.installation_id.clone(),
         bootstrap_baseline: bootstrap_metadata.clone(),

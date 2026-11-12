@@ -47,15 +47,17 @@ impl ContinuationPolicy {
         let schedule = binding.contract()?;
         let c = schedule.counts();
         let context = schedule.context();
-        if context.sources.len() != 3
+        let variable = schedule.is_variable_sources();
+        let source_count = context.sources.len();
+        if (if variable { !(2..=8).contains(&source_count) } else { source_count != 3 })
             || context.sources.iter().any(|s| s.feature_count != 56)
             || binding.native.target_span_ms() != 2000
-            || binding.native.source_policies().len() != 3
+            || binding.native.source_policies().len() != source_count
             || binding
                 .native
                 .source_policies()
                 .iter()
-                .any(|s| s.receiver_cadence != ReceiverCadenceBand::Hz30To36 || s.max_rows != 77)
+                .any(|s| s.receiver_cadence != if variable { ReceiverCadenceBand::Arrival18To22Burst200MsV1 } else { ReceiverCadenceBand::Hz30To36 } || s.max_rows != if variable { 52 } else { 77 })
             || (
                 c.train_episodes,
                 c.held_out_episodes,
@@ -63,7 +65,7 @@ impl ContinuationPolicy {
                 c.held_out_windows,
                 c.total_windows,
             ) != if schedule.is_operator_eight_step(){(4,4,64,16,80)}else{(7,8,64,64,128)}
-            || schedule.resources().max_numeric_values != if schedule.is_operator_eight_step(){1_034_880}else{1_655_808}
+            || schedule.resources().max_numeric_values != if variable { source_count * 52 * 56 * 80 } else if schedule.is_operator_eight_step(){1_034_880}else{1_655_808}
             || schedule.resources().max_numeric_values > 2_000_000
         {
             return Err("temporal_full_run_engineering_profile_unsupported".into());
@@ -335,7 +337,7 @@ impl VerifiedFitRecordData {
             || b.owner_scope != c.owner_scope
             || b.installation_id != c.installation_id
             || b.context_digest != c.digest()
-            || b.operator_profile.as_deref() != binding.contract()?.is_operator_eight_step().then_some("native-2s-three-source-56bin-operator-eight-step-v1")
+            || b.operator_profile != { let schedule = binding.contract()?; schedule.is_operator_eight_step().then(||schedule.profile_id().to_owned()) }
             || b.run.is_empty()
             || b.run.len() > 256
             || !b.run.is_ascii()
@@ -1117,7 +1119,9 @@ impl ContinuationPolicy {
         let attempts=self.body.max_total_windows.checked_add(self.body.max_global_gaps).ok_or("temporal_full2_fence_capacity")?;
         let per_attempt=binding.native.source_policies().iter().try_fold(0usize,|n,s|n.checked_add(s.max_rows)).ok_or("temporal_full2_fence_capacity")?;
         let max_frames=attempts.checked_mul(per_attempt).ok_or("temporal_full2_fence_capacity")?;
-        if attempts!=256||per_attempt!=231||max_frames!=59_136{return Err("temporal_full2_fence_capacity".into());}
+        let variable = binding.contract()?.is_variable_sources();
+        let expected_rows = if variable { binding.native.context().sources.len() * 52 } else { 231 };
+        if attempts!=256||per_attempt!=expected_rows||max_frames!=256 * expected_rows{return Err("temporal_full2_fence_capacity".into());}
         Ok(ReplayFenceBudget{max_frames,native_policy_sha256:hash(&binding.native)?})
     }
 }
@@ -1129,4 +1133,26 @@ pub(crate) use evaluation_projection::{PendingTemporalEvidenceSource, TemporalEv
 impl FullRunState {
     pub(super) fn public_verified_fit(&self)->Option<&VerifiedFitRecordData>{let verified=self.verified.as_ref()?;let data=self.frozen.as_ref()?;if self.owner.is_none()||data!=&verified.record{return None}Some(data)}
     pub(super) fn public_complete(&self,current:Option<&TemporalToken>)->Option<&held_out::FullCompleteRecordData>{let fact=self.completed.as_ref()?;let data=self.complete.as_ref()?;if current!=Some(&fact.token)||data.sha256!=fact.record_sha256{return None}Some(data)}
+}
+
+#[cfg(test)]
+mod variable_source_tests {
+    use super::*;
+    #[test]
+    fn variable_profile_continuation_and_replay_budget_bind_all_sources() {
+        use crate::room_learner::managed_schedule_contract::{LeadInPolicy,ManagedScheduleContract};
+        for count in 2..=8u8 {
+            let mut context = crate::room_learner::temporal_model_input::managed::tests::context();
+            let template = context.sources[0].clone();
+            context.sources = (1..=count).map(|source_id| crate::room_learner::observation::SourceSpec {
+                source_id,device_id:format!("esp32-node-{source_id}"),link_id:format!("native-{source_id}"),..template.clone()
+            }).collect();
+            let schedule = ManagedScheduleContract::build(context,LeadInPolicy::OperatorVariableSourcesV2).unwrap();
+            let binding = ManagedBinding::build(&schedule,FitConfig::for_source_count(usize::from(count))).unwrap();
+            let policy = ContinuationPolicy::build(&binding).unwrap();
+            policy.validate(&binding).unwrap();
+            assert_eq!(policy.replay_fence_budget(&binding).unwrap().max_frames(),256*52*usize::from(count));
+            assert_eq!(policy.body.native_profile.context().sources.len(),usize::from(count));
+        }
+    }
 }

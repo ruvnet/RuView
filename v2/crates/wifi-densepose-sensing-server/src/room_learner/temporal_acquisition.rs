@@ -46,10 +46,13 @@ impl ExperimentalPlanId {
         }
     }
 }
-/// A frozen receiver-cadence study band, NOT a source measurement clock or
-/// scientific adequacy claim. Actual packet intervals/rate must also fit it.
+/// Frozen receiver-observation policies, never a source measurement clock or
+/// scientific adequacy claim. Hz variants constrain each arrival interval;
+/// Arrival18To22Burst200MsV1 bounds gaps and observed window/period rates while
+/// retaining every original arrival, including delivery/scheduling bursts.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ReceiverCadenceBand {
+    Arrival18To22Burst200MsV1,
     Hz30To36,
     Hz45To55,
 }
@@ -61,6 +64,7 @@ impl ReceiverCadenceBand {
     }
     fn range(self) -> (u64, u64, u64) {
         match self {
+            Self::Arrival18To22Burst200MsV1 => (18_000, 22_000, 200),
             Self::Hz30To36 => (30_000, 36_000, 50),
             Self::Hz45To55 => (45_000, 55_000, 35),
         }
@@ -160,7 +164,11 @@ impl AcquisitionPlan {
             return Err("acquisition_cadence_source_binding".into());
         }
         let (target_ms, slots) = id.dimensions();
-        let max_ms = if target_ms == 3900 {
+        let arrival_profile = cadences.iter().any(|(_,band)|*band==ReceiverCadenceBand::Arrival18To22Burst200MsV1);
+        if arrival_profile && (target_ms != 2000 || cadences.iter().any(|(_,band)|*band!=ReceiverCadenceBand::Arrival18To22Burst200MsV1)) {
+            return Err("acquisition_receiver_arrival_profile_requires_uniform_native2s_policy".into());
+        }
+        let max_ms = if arrival_profile { 2200 } else if target_ms == 3900 {
             4000
         } else {
             target_ms + 50
@@ -178,13 +186,7 @@ impl AcquisitionPlan {
                 || spec.link_index != 0
                 || !native::is_supported_frequency_hz(spec.center_frequency_hz)
                 || spec.bandwidth_hz != 20_000_000
-                || !(0..=3).any(|ppdu| {
-                    spec.grid_id
-                        == format!(
-                            "ant1-bins{}-ppdu{ppdu}-usable-drop2-linear-v2",
-                            if ppdu == 0 { 64 } else { 256 }
-                        )
-                })
+                || !native::supported_feature_grid(&spec.grid_id,spec.center_frequency_hz)
             {
                 return Err("acquisition_requires_existing_native56_source".into());
             }
@@ -214,7 +216,7 @@ impl AcquisitionPlan {
                 receiver_cadence: *band,
                 min_rows,
                 max_rows,
-                min_packet_interval_ns: NS_PER_MILLI_HZ / hi,
+                min_packet_interval_ns: if arrival_profile { 1 } else { NS_PER_MILLI_HZ / hi },
                 max_gap_ns: gap_ms * NS_PER_MS,
             });
         }
@@ -309,8 +311,8 @@ impl AcquisitionPlan {
             target_span_ms: target_ms,
             min_observed_span_ms: target_ms,
             max_observed_span_ms: max_ms,
-            max_pairwise_receiver_skew_ms: 50,
-            max_first_packet_delay_ms: 100,
+            max_pairwise_receiver_skew_ms: if arrival_profile { 200 } else { 50 },
+            max_first_packet_delay_ms: if arrival_profile { 200 } else { 100 },
             slots_per_trial: slots,
             schedule,
             sources,
@@ -431,8 +433,11 @@ impl WindowInputPolicy {
     ) -> Result<(&SourceSpec, &SourceWindowPolicy), String> {
         let (spec, policy) = self.validate_packet_source_identity(p)?;
         let (lo, hi, _) = policy.receiver_cadence.range();
-        if p.receiver_sample_rate_hz < lo as f64 / 1000.
-            || p.receiver_sample_rate_hz > hi as f64 / 1000.
+        // Instantaneous arrival spacing is a diagnostic, not a source clock.
+        // The explicit burst-aware profile checks observed window/whole-period
+        // rates, every original arrival, gap bounds and row capacity instead.
+        if policy.receiver_cadence != ReceiverCadenceBand::Arrival18To22Burst200MsV1 && (p.receiver_sample_rate_hz < lo as f64 / 1000.
+            || p.receiver_sample_rate_hz > hi as f64 / 1000.)
         {
             return Err("acquisition_cadence_changed".into());
         }
@@ -677,12 +682,12 @@ impl NativeWindowAssembler {
     ) -> Result<Self, String> {
         let seed = AcquisitionPlan::build(
             contract.context().clone(),
-            ExperimentalPlanId::Native2000msSlots8,
+            if contract.is_variable_sources() { ExperimentalPlanId::Native2000msSlots4 } else { ExperimentalPlanId::Native2000msSlots8 },
             &contract
-                .context()
-                .sources
+                .native_window_policy()
+                .source_policies()
                 .iter()
-                .map(|s| (s.source_id, ReceiverCadenceBand::Hz30To36))
+                .map(|s| (s.source_id, s.receiver_cadence))
                 .collect::<Vec<_>>(),
         )?;
         let mut result = Self::new(seed, run_id)?;
@@ -708,7 +713,7 @@ impl NativeWindowAssembler {
             .collect::<Vec<_>>();
         let seed = AcquisitionPlan::build(
             policy.context.clone(),
-            ExperimentalPlanId::Native2000msSlots8,
+            if policy.sources.iter().all(|s|s.receiver_cadence==ReceiverCadenceBand::Arrival18To22Burst200MsV1) { ExperimentalPlanId::Native2000msSlots4 } else { ExperimentalPlanId::Native2000msSlots8 },
             &bands,
         )?;
         let mut result = Self::new(seed, run_id)?;
@@ -1054,6 +1059,27 @@ impl NativeWindowAssembler {
         if self.failed {
             return Err("temporal_failed_fences".into());
         }
+        Ok(self.replay_fence_metadata())
+    }
+    /// Only the stopped, unfrozen FullRun Retry owner may call this. This is
+    /// denial/replay metadata, never an export of failed rows or window credit.
+    /// Ordinary checkpoint/export keeps rejecting a failed assembler above.
+    pub(super) fn stopped_retry_fence_checkpoint(
+        &self,
+        budget:&crate::room_learner::temporal_model_input::managed::execution::full_run::ReplayFenceBudget,
+    )->Result<AssemblerCheckpoint,String> {
+        let WindowIdentityMode::Managed {contract,binding_sha256,..}=&self.identity else {
+            return Err("temporal_retry_managed_fences_required".into());
+        };
+        budget.matches_native_policy(&self.policy)?;
+        let snapshot=self.replay_fence_metadata();
+        // Reuse the exact bounded source/frame/sequence validation of restore.
+        // The scratch assembler has no rows, runtime, filesystem or authority.
+        let mut verifier=Self::managed(contract.clone(),binding_sha256.clone(),self.run_id.clone())?;
+        verifier.restore_full_run_prefix_fences(snapshot.clone(),self.next,budget)?;
+        Ok(snapshot)
+    }
+    fn replay_fence_metadata(&self) -> AssemblerCheckpoint {
         let mut watermarks = self
             .watermarks
             .iter()
@@ -1066,12 +1092,12 @@ impl NativeWindowAssembler {
             .map(|(id, f)| (*id, f.to_string()))
             .collect::<Vec<_>>();
         frames.sort();
-        Ok(AssemblerCheckpoint {
+        AssemblerCheckpoint {
             next: self.next,
             last_end_ns: self.last_end_ns,
             watermarks,
             frames,
-        })
+        }
     }
     pub(crate) fn restore_prefix_fences(
         &mut self,

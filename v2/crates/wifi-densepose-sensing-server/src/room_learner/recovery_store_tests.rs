@@ -379,3 +379,24 @@ fn operator_profile_scope_preserves_old_bytes_and_uses_a_separate_key_without_re
     fs::write(new.directory.join(FILE),valid_new).unwrap();
     assert!(new.operator_eight_scope().is_err());
 }
+
+#[test]
+fn variable_profile_recovery_preserves_both_old_namespaces_and_rejects_cross_profile_ciphertext() {
+    let (_t,old)=fixture(Some(&[7;32]));
+    let operator=old.operator_eight_scope().unwrap();
+    old.save(&descriptor(),b"synthetic legacy",NOW).unwrap();
+    operator.save(&descriptor(),b"synthetic three-source operator",NOW).unwrap();
+    let old_bytes=fs::read(old.directory.join(FILE)).unwrap();
+    let operator_bytes=fs::read(operator.directory.join(FILE)).unwrap();
+    let variable=old.variable_sources_scope().unwrap();
+    assert!(variable.inspect().unwrap().is_none());
+    variable.save(&descriptor(),b"synthetic variable-source operator",NOW).unwrap();
+    assert_eq!(variable.load(NOW+1).unwrap().unwrap().plaintext,b"synthetic variable-source operator");
+    for bytes in [&old_bytes,&operator_bytes] {
+        fs::write(variable.directory.join(FILE),bytes).unwrap();
+        assert!(variable.load(NOW+1).is_err());
+    }
+    assert_eq!(fs::read(old.directory.join(FILE)).unwrap(),old_bytes);
+    assert_eq!(fs::read(operator.directory.join(FILE)).unwrap(),operator_bytes);
+    assert!(variable.variable_sources_scope().is_err());
+}

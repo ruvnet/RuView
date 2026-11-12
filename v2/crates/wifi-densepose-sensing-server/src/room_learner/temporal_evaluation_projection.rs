@@ -366,9 +366,7 @@ impl PendingTemporalEvidenceSource {
                 .sources
                 .iter()
                 .map(|s| s.source_id)
-                .collect::<Vec<_>>()
-                .try_into()
-                .map_err(|_| "temporal_evaluation_three_sources_required")?,
+                .collect::<Vec<_>>(),
         };
         let seals = &w
             .bridge
@@ -401,9 +399,7 @@ impl PendingTemporalEvidenceSource {
                         sequence: *seq,
                         receiver_ns: ns.to_string(),
                     })
-                    .collect::<Vec<_>>()
-                    .try_into()
-                    .map_err(|_| "temporal_evaluation_three_sources_required")?,
+                    .collect::<Vec<_>>(),
                 claims: data::DiagnosticClaimsData::diagnostic_only(),
             })?;
         let held = if self.held_out {
@@ -466,9 +462,7 @@ impl PendingTemporalEvidenceSource {
                                 | u128::from(*seq))
                             .to_string(),
                         })
-                        .collect::<Vec<_>>()
-                        .try_into()
-                        .map_err(|_| "temporal_evaluation_three_sources_required")?,
+                        .collect::<Vec<_>>(),
                     held_out_windows: if operator { 16 } else { 64 },
                     windows_per_condition: if operator { [4; 4] } else { [16; 4] },
                     declared_episodes_per_condition: if operator { [1; 4] } else { [2; 4] },

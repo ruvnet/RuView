@@ -41,6 +41,7 @@ pub struct RecoveryStore {
     installation: String,
     key: Option<std::sync::Arc<aead::LessSafeKey>>,
     operator_key: Option<std::sync::Arc<aead::LessSafeKey>>,
+    variable_key: Option<std::sync::Arc<aead::LessSafeKey>>,
     serial: Mutex<()>,
 }
 fn id(value: &str) -> bool {
@@ -123,7 +124,14 @@ impl RecoveryStore {
         if self.directory!=self.owner_directory.join("room-learner-recovery"){return Err("recovery_profile_scope_invalid".into());}
         let directory = self.directory.join("operator-eight-step-v1");
         private_directory(&directory)?;
-        Ok(Self { directory, owner_directory:self.owner_directory.clone(), owner:self.owner.clone(), installation:self.installation.clone(), key:self.operator_key.clone(), operator_key:None, serial:Mutex::new(()) })
+        Ok(Self { directory, owner_directory:self.owner_directory.clone(), owner:self.owner.clone(), installation:self.installation.clone(), key:self.operator_key.clone(), operator_key:None, variable_key:None, serial:Mutex::new(()) })
+    }
+    pub(crate) fn variable_sources_scope(&self) -> Result<Self, String> {
+        let mut scoped = self.operator_eight_scope()?;
+        scoped.directory = self.directory.join("operator-variable-sources-v2");
+        scoped.key = self.variable_key.clone();
+        private_directory(&scoped.directory)?;
+        Ok(scoped)
     }
     pub fn new(
         data_dir: &Path,
@@ -197,6 +205,18 @@ impl RecoveryStore {
             let result = aead::UnboundKey::new(&aead::AES_256_GCM, &material).map(aead::LessSafeKey::new).map(std::sync::Arc::new).map_err(|_| "recovery_key_unavailable");
             material.fill(0); result
         }).transpose()?;
+        let variable_key = seed.map(|seed| {
+            let mut info = Vec::new();
+            for item in [b"ruview.capture-recovery.operator-variable-sources.aes256gcm.v2".as_slice(), owner.as_bytes(), installation.as_bytes()] {
+                info.extend_from_slice(&(item.len() as u32).to_be_bytes()); info.extend_from_slice(item);
+            }
+            let salt = hkdf::Salt::new(hkdf::HKDF_SHA256, b"ruview.capture-recovery.hkdf.v1");
+            let prk = salt.extract(seed); let infos = [info.as_slice()];
+            let okm = prk.expand(&infos, &aead::AES_256_GCM).map_err(|_| "recovery_key_unavailable")?;
+            let mut material = [0u8; 32]; okm.fill(&mut material).map_err(|_| "recovery_key_unavailable")?;
+            let result = aead::UnboundKey::new(&aead::AES_256_GCM, &material).map(aead::LessSafeKey::new).map(std::sync::Arc::new).map_err(|_| "recovery_key_unavailable");
+            material.fill(0); result
+        }).transpose()?;
         Ok(Self {
             directory,
             owner_directory:owned,
@@ -204,6 +224,7 @@ impl RecoveryStore {
             installation: installation.into(),
             key,
             operator_key,
+            variable_key,
             serial: Mutex::new(()),
         })
     }
@@ -255,7 +276,7 @@ impl RecoveryStore {
             return Err("recovery_owner_mismatch".into());
         }
         private_directory(&owned.join("room-learner-recovery"))?;
-        if self.directory!=owned.join("room-learner-recovery")&&self.directory!=owned.join("room-learner-recovery/operator-eight-step-v1"){return Err("recovery_profile_scope_invalid".into());}
+        if self.directory!=owned.join("room-learner-recovery")&&self.directory!=owned.join("room-learner-recovery/operator-eight-step-v1")&&self.directory!=owned.join("room-learner-recovery/operator-variable-sources-v2"){return Err("recovery_profile_scope_invalid".into());}
         private_directory(&self.directory)
     }
     /// Non-repairing owner validation for read-scoped status discovery.

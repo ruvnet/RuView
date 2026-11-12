@@ -12,6 +12,7 @@ use sha2::{Digest, Sha256};
 const SCHEMA: &str = "ruview.room-learner.trial-schedule.v2";
 const PROFILE: &str = "native-2s-three-source-56bin-option-a-engineering-v1";
 pub(crate) const OPERATOR_EIGHT_PROFILE: &str = "native-2s-three-source-56bin-operator-eight-step-v1";
+pub(crate) const OPERATOR_VARIABLE_PROFILE: &str = "native-2s-variable-source-56bin-receiver20-operator-eight-step-v2";
 const MAX_BYTES: usize = 65_536;
 const MAX_PROFILE_ROWS: usize = 77;
 const MAX_TRAIN_WINDOWS: usize = 64;
@@ -22,10 +23,12 @@ const MAX_TRAIN_WINDOWS: usize = 64;
 pub enum LeadInPolicy {
     Train5HeldOut15EngineeringV1,
     OperatorEightStepV1,
+    OperatorVariableSourcesV2,
 }
 impl LeadInPolicy {
+    pub(crate) fn is_operator(self) -> bool { matches!(self, Self::OperatorEightStepV1 | Self::OperatorVariableSourcesV2) }
     fn milliseconds(self, role: DataRole, condition: RoomLabel) -> u64 {
-        if self == Self::OperatorEightStepV1 {
+        if self.is_operator() {
             return if matches!(condition, RoomLabel::Empty | RoomLabel::AdjacentOnly) { 15_000 } else { 5_000 };
         }
         match role {
@@ -231,27 +234,28 @@ impl ManagedScheduleContract {
         context.validate()?;
         // Reuse the existing actual-native 2s validators/capacity calculation,
         // but NEVER its different schedule, serialized plan or plan hash.
+        let variable = lead_in_policy == LeadInPolicy::OperatorVariableSourcesV2;
         let bands = context
             .sources
             .iter()
-            .map(|source| (source.source_id, ReceiverCadenceBand::Hz30To36))
+            .map(|source| (source.source_id, if variable { ReceiverCadenceBand::Arrival18To22Burst200MsV1 } else { ReceiverCadenceBand::Hz30To36 }))
             .collect::<Vec<_>>();
         let native = AcquisitionPlan::build(
             context.clone(),
-            ExperimentalPlanId::Native2000msSlots8,
+            if variable { ExperimentalPlanId::Native2000msSlots4 } else { ExperimentalPlanId::Native2000msSlots8 },
             &bands,
         )?;
-        if context.sources.len() != 3
+        if (if variable { !(2..=8).contains(&context.sources.len()) } else { context.sources.len() != 3 })
             || context
                 .sources
                 .iter()
                 .any(|source| source.feature_count != 56)
         {
-            return Err("managed_schedule_profile_supports_three_native56_sources".into());
+            return Err(if variable { "managed_schedule_profile_source_count_or_format" } else { "managed_schedule_profile_supports_three_native56_sources" }.into());
         }
         let reserved = native.max_observed_span_ms() + native.max_first_packet_delay_ms();
         let mut episodes = Vec::new();
-        if lead_in_policy == LeadInPolicy::OperatorEightStepV1 {
+        if lead_in_policy.is_operator() {
             for condition in [RoomLabel::Empty, RoomLabel::OccupiedStatic, RoomLabel::OccupiedMoving, RoomLabel::AdjacentOnly] {
                 for role in [DataRole::Train, DataRole::Validation] {
                     let duration = if role == DataRole::Validation { 15_000 } else if condition == RoomLabel::Empty { 600_000 } else { 60_000 };
@@ -325,15 +329,18 @@ impl ManagedScheduleContract {
                 .sum::<u64>()
         };
         let train = role_windows(DataRole::Train);
-        let check_role = if lead_in_policy == LeadInPolicy::OperatorEightStepV1 { DataRole::Validation } else { DataRole::HeldOut };
+        let check_role = if lead_in_policy.is_operator() { DataRole::Validation } else { DataRole::HeldOut };
         let held = role_windows(check_role);
         let total = add(train, held)?;
         let (rows, values) = capacity(&context, native.source_policies(), train, total)?;
-        let resources = if lead_in_policy == LeadInPolicy::OperatorEightStepV1 {
+        let resources = if lead_in_policy.is_operator() {
             let views = mul(total, context.sources.len())?;
             let serialized = add(add(add(mul(values, 25)?, mul(rows, 86)?)?, mul(views, 4096)?)?, add(mul(total, 4096)?, 8 * 1024 * 1024)?)?;
             ResourcePreflight { cohorts: total, source_views: views, max_retained_rows: rows, max_numeric_values: values, serialized_upper_bound_bytes: serialized }
         } else { native.resources().clone() };
+        if variable && resources.serialized_upper_bound_bytes > 64 * 1024 * 1024 {
+            return Err("managed_schedule_serialized_capacity".into());
+        }
         if resources.cohorts != total
             || resources.max_retained_rows != rows
             || resources.max_numeric_values != values
@@ -362,11 +369,11 @@ impl ManagedScheduleContract {
             verified_independent_trial_count: None,
         };
         let body = Body {
-            profile_id: if lead_in_policy == LeadInPolicy::OperatorEightStepV1 { OPERATOR_EIGHT_PROFILE } else { PROFILE },
+            profile_id: if variable { OPERATOR_VARIABLE_PROFILE } else if lead_in_policy.is_operator() { OPERATOR_EIGHT_PROFILE } else { PROFILE },
             context,
             lead_in_policy,
             native_input: NativeInputPolicy {
-                id: "existing-native-2s-56bin-receiver-30to36-v2",
+                id: if variable { "native-2s-56bin-receiver-arrival18to22-burst200-v1" } else { "existing-native-2s-56bin-receiver-30to36-v2" },
                 original_frame_identity: "existing-esp32-receiver-ns-node-u32-sequence-v1",
                 projection: "native-esp32-drop2-linear56-ordered-magnitude-v2-experimental",
                 target_span_ms: native.target_span_ms(),
@@ -384,7 +391,7 @@ impl ManagedScheduleContract {
                 full_episode_quality_monitoring_implemented: false,
                 independence_verified: false,
                 scientific_adequacy_claimed: false,
-                user_facing_default: lead_in_policy == LeadInPolicy::OperatorEightStepV1,
+                user_facing_default: lead_in_policy.is_operator(),
             },
         };
         let result = Self {
@@ -412,7 +419,7 @@ impl ManagedScheduleContract {
         }
         let value: Import =
             serde_json::from_slice(bytes).map_err(|_| "managed_schedule_invalid_schema")?;
-        if value.schema != SCHEMA || (value.body["profile_id"] != PROFILE && value.body["profile_id"] != OPERATOR_EIGHT_PROFILE) {
+        if value.schema != SCHEMA || (value.body["profile_id"] != PROFILE && value.body["profile_id"] != OPERATOR_EIGHT_PROFILE && value.body["profile_id"] != OPERATOR_VARIABLE_PROFILE) {
             return Err("managed_schedule_unsupported_profile".into());
         }
         let context = serde_json::from_value(value.body["context"].clone())
@@ -436,7 +443,8 @@ impl ManagedScheduleContract {
         let model=bound.frozen_artifact_sha256.as_ref().and_then(|sha|FrozenModelIdentity::from_runtime_verified_artifact(self,sha.clone()).ok());
         self.bind_episode_start(run,bound.episode.index,bound.attempt_ordinal,bound.segment_ordinal,model.as_ref()).ok().is_some_and(|expected|serde_json::to_vec(&expected).ok()==serde_json::to_vec(bound).ok())
     }
-    pub fn is_operator_eight_step(&self) -> bool { self.body.profile_id == OPERATOR_EIGHT_PROFILE }
+    pub fn is_operator_eight_step(&self) -> bool { self.body.lead_in_policy.is_operator() }
+    pub fn is_variable_sources(&self) -> bool { self.body.profile_id == OPERATOR_VARIABLE_PROFILE }
     pub fn profile_id(&self) -> &str { self.body.profile_id }
     pub fn sha256(&self) -> &str {
         &self.sha256

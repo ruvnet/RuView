@@ -1,5 +1,6 @@
 //! Strict whole-Temporal public DTOs. These are read models/command inputs,
 //! never Complete/evaluation/selection capabilities. V1 producers are unchanged.
+pub const VARIABLE_SOURCE_PROFILE_ID: &str = super::managed_schedule_contract::OPERATOR_VARIABLE_PROFILE;
 use super::{
     lifecycle::MutationGuard,
     observation::{DataRole, RoomLabel},
@@ -382,6 +383,11 @@ pub struct TemporalDiscardRequestV2 {
 }
 
 impl TemporalProfileWire {
+    pub(crate) fn variable_sources() -> Self {
+        let mut profile = Self::operator_eight_step();
+        profile.profile_id = super::managed_schedule_contract::OPERATOR_VARIABLE_PROFILE.into();
+        profile
+    }
     pub(crate) fn operator_eight_step() -> Self {
         let labels=[RoomLabel::Empty,RoomLabel::OccupiedStatic,RoomLabel::OccupiedMoving,RoomLabel::AdjacentOnly];
         Self {profile_id:super::managed_schedule_contract::OPERATOR_EIGHT_PROFILE.into(),window_unit:"native_receiver_2s_window".into(),native_window_ms:2000,
