@@ -25,6 +25,7 @@ use homecore::HomeCore;
 
 use crate::action::ExecutionContext;
 use crate::automation::{Automation, RunMode};
+use crate::template::TemplateEnvironment;
 
 /// Per-automation runtime state backing the run-mode dispatch.
 ///
@@ -140,7 +141,14 @@ impl RunState {
 
 /// Execute an automation's action sequence once.
 async fn run_actions(hc: &HomeCore, automation: &Automation) {
-    let mut exec_ctx = ExecutionContext::new(hc.clone(), automation.id.clone());
+    let states = Arc::new(hc.states().clone());
+    let templates = Arc::new(TemplateEnvironment::new(Arc::clone(&states)));
+    let mut exec_ctx = ExecutionContext::with_templates(
+        hc.clone(),
+        automation.id.clone(),
+        states,
+        templates,
+    );
     for action in &automation.action {
         if let Err(e) = action.execute(&mut exec_ctx).await {
             eprintln!(
