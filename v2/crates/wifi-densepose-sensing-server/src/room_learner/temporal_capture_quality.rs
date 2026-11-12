@@ -583,7 +583,6 @@ impl TemporalTrainCapture {
     pub(crate) fn test_progress(&self) -> serde_json::Value {
         let w = &self.workflow;
         let asynchronous = w.async_state.as_ref();
-        let pending = asynchronous.and_then(|a| a.pending.as_ref());
         serde_json::json!({
             "segment_ordinal": w.mapping.as_ref().map(|m| m.segment_ordinal),
             "episode_gaps": w.ledger.gaps.iter().filter(|g| g.episode == w.episode).count(),
@@ -593,13 +592,7 @@ impl TemporalTrainCapture {
             "pending_window_slot": w.pending_window.as_ref().map(|target| target.identity().slot_index),
             "custody_sources": w.custody.first_last.len(),
             "source_floors": w.source_high.len(),
-            "pending_slot": pending.map(|p| p.slot),
-            "pending_start_ticket": pending.map(|p| p.start_ticket),
-            "pending_rows": pending.map(|p| p.rows),
-            "busy_pause": asynchronous.map(|a| a.busy_pause),
-            "repairing": asynchronous.map(|a| a.repairing),
-            "deferred_ack_ahead_ns": asynchronous.and_then(|a| a.deferred_ack.as_ref()).map(|ack| ack.completed_at_ns.saturating_sub(w.last_now_ns)),
-            "writer": asynchronous.map(|a| a.writer.test_progress(w.last_now_ns))
+            "asynchronous": asynchronous.map(|a| a.test_progress(w.last_now_ns))
         })
     }
     #[cfg(test)]

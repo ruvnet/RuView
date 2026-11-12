@@ -641,6 +641,19 @@ pub(super) struct AsyncState {
     deferred_ack:Option<CommitAck>,
 }
 impl AsyncState {
+    #[cfg(test)]
+    pub(super) fn test_progress(&self, receiver_now: u64) -> serde_json::Value {
+        let pending = self.pending.as_ref();
+        serde_json::json!({
+            "pending_slot": pending.map(|p| p.slot),
+            "pending_start_ticket": pending.map(|p| p.start_ticket),
+            "pending_rows": pending.map(|p| p.rows),
+            "busy_pause": self.busy_pause,
+            "repairing": self.repairing,
+            "deferred_ack_ahead_ns": self.deferred_ack.as_ref().map(|ack| ack.completed_at_ns.saturating_sub(receiver_now)),
+            "writer": self.writer.test_progress(receiver_now)
+        })
+    }
     pub fn new(writer: Arc<Writer>) -> Self {
         Self {
             writer,
