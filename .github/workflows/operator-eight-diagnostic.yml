@@ -43,15 +43,15 @@ jobs:
           cargo -V
           lscpu
           df -h "$RUNNER_TEMP"
-      - name: Execute exactly the existing operator journey with original guards
+      - name: Execute the existing nine-case C4 batch with original guards
         working-directory: v2
         run: |
           set -o pipefail
           cargo test --release --locked -p wifi-densepose-sensing-server \
             --lib --no-default-features \
-            room_learner::lifecycle::temporal_control::full_run_tests::operator_eight_actual_reserved_checks_fit_complete_cold_and_evaluate \
-            -- --exact --nocapture --test-threads=1 2>&1 | tee "$RUNNER_TEMP/operator-eight.log"
-          python3 -c 'import pathlib,re,sys; s=pathlib.Path(sys.argv[1]).read_text(); assert re.search(r"^test result: ok\. 1 passed; 0 failed; 0 ignored;",s,re.M), "exact nonzero pass missing"' "$RUNNER_TEMP/operator-eight.log"
+            room_learner::lifecycle::temporal_control::full_run_tests:: \
+            -- --nocapture --test-threads=1 2>&1 | tee "$RUNNER_TEMP/operator-eight.log"
+          python3 -c 'import pathlib,re,sys; s=pathlib.Path(sys.argv[1]).read_text(); assert re.search(r"^test result: ok\. 9 passed; 0 failed; 0 ignored;",s,re.M), "exact nonzero pass missing"' "$RUNNER_TEMP/operator-eight.log"
       - name: Retain diagnostic output even on failure
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
