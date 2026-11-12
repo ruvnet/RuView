@@ -227,4 +227,68 @@ class VariableRetryClassificationTests(unittest.TestCase):
             profiles.validate(self.component(), {wrong}, set(), 'release-run')
 
 
+class LiveBatchEvidenceTests(unittest.TestCase):
+    def test_stdout_and_stderr_are_retained_and_nonzero_exit_is_not_hidden(self):
+        import contextlib, io, sys, tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            log = root / 'batch.log'
+            console = io.StringIO()
+            command = [sys.executable, '-u', '-c',
+                       'import sys; print("stdout-progress"); print("stderr-progress", file=sys.stderr); sys.exit(7)']
+            with contextlib.redirect_stdout(console):
+                code = profiles.execute_batch(command, root, log)
+            self.assertEqual(code, 7)
+            self.assertEqual(log.read_text(), 'stdout-progress\nstderr-progress\n')
+            self.assertEqual(console.getvalue(), log.read_text())
+
+    def test_progress_is_visible_before_child_exit(self):
+        import concurrent.futures, contextlib, io, sys, tempfile, time
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            log, release = root / 'batch.log', root / 'release'
+            child = ('import pathlib,sys,time; print("still-running", flush=True); '
+                     'release=pathlib.Path(sys.argv[1]); deadline=time.monotonic()+10\n'
+                     'while not release.exists() and time.monotonic()<deadline: time.sleep(0.01)\n'
+                     'sys.exit(0 if release.exists() else 99)')
+            console = io.StringIO()
+            with contextlib.redirect_stdout(console), concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(profiles.execute_batch, [sys.executable, '-u', '-c', child, str(release)], root, log)
+                try:
+                    deadline = time.monotonic() + 5
+                    while time.monotonic() < deadline:
+                        if log.exists() and 'still-running' in log.read_text() and 'still-running' in console.getvalue():
+                            break
+                        time.sleep(0.01)
+                    self.assertTrue(log.exists(), 'progress log must exist before child exit')
+                    self.assertIn('still-running', log.read_text())
+                    self.assertIn('still-running', console.getvalue())
+                    self.assertFalse(future.done(), 'progress must be visible while the child is alive')
+                finally:
+                    release.touch()
+                self.assertEqual(future.result(timeout=5), 0)
+
+    def test_console_failure_reaps_the_started_child_and_keeps_partial_log(self):
+        import contextlib, io, sys, tempfile
+        from unittest import mock
+        class BrokenConsole(io.StringIO):
+            def write(self, value):
+                raise OSError('synthetic console failure')
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            log = root / 'batch.log'
+            child = 'import time; print("before-console-failure", flush=True); time.sleep(10)'
+            original_popen, spawned = profiles.subprocess.Popen, []
+            def record_real_child(*args, **kwargs):
+                process = original_popen(*args, **kwargs)
+                spawned.append(process)
+                return process
+            with contextlib.redirect_stdout(BrokenConsole()), mock.patch.object(profiles.subprocess, 'Popen', side_effect=record_real_child):
+                with self.assertRaisesRegex(OSError, 'synthetic console failure'):
+                    profiles.execute_batch([sys.executable, '-u', '-c', child], root, log)
+            self.assertEqual(log.read_text(), 'before-console-failure\n')
+            self.assertEqual(len(spawned), 1)
+            self.assertIsNotNone(spawned[0].returncode, 'failed output forwarding must reap the actual child')
+
+
 if __name__=='__main__':unittest.main()

@@ -149,6 +149,29 @@ def compile_binary(root, release):
         raise ValueError('Cargo lib-test compilation failed with exit ' + str(result.returncode))
     return validate_cargo_artifacts(root, metadata, artifacts, release)
 
+def execute_batch(command, cwd, log_path):
+    """Forward progress immediately and keep the same output for count checks."""
+    with log_path.open('w', encoding='utf-8') as log:
+        process = subprocess.Popen(command, cwd=cwd, stdout=subprocess.PIPE,
+                                   stderr=subprocess.STDOUT, text=True, bufsize=1)
+        try:
+            for line in process.stdout:
+                log.write(line)
+                log.flush()
+                sys.stdout.write(line)
+                sys.stdout.flush()
+            return process.wait()
+        finally:
+            # A failed log/console sink must not strand the verified child.
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+            process.stdout.close()
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('mode', choices=['debug-check', 'release-run'])
@@ -184,12 +207,11 @@ def main():
             for index, batch in enumerate(batches):
                 verify_selected_executable(selected, binary_sha256)
                 command = [str(binary), batch['selector'], '--nocapture', '--test-threads=1'] + (['--exact'] if batch['exact'] else [])
-                result = subprocess.run(command, cwd=root/'v2', capture_output=True, text=True)
-                output = result.stdout + result.stderr
-                (args.evidence_dir / f'{index}-{batch["component"]}.log').write_text(output)
-                print(output, flush=True)
+                log_path = args.evidence_dir / f'{index}-{batch["component"]}.log'
+                returncode = execute_batch(command, root/'v2', log_path)
+                output = log_path.read_text(encoding='utf-8')
                 counts = re.findall(r'^test result: ok\. (\d+) passed; (\d+) failed; (\d+) ignored;', output, re.M)
-                if result.returncode or not counts or tuple(map(int, counts[-1])) != (len(batch['names']), 0, 0):
+                if returncode or not counts or tuple(map(int, counts[-1])) != (len(batch['names']), 0, 0):
                     raise ValueError('Release batch failed or nonzero/exact-count verification failed: ' + batch['selector'])
                 batch['passed'] = len(batch['names'])
         receipt['status'] = 'passed'
