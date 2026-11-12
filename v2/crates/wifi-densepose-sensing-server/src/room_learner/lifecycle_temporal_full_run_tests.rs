@@ -1133,7 +1133,10 @@ async fn operator_eight_actual_reserved_checks_fit_complete_cold_and_evaluate(){
             for source in 1..=3{match runtime.ingest_native(&packet(source,sequence,now,episode.condition),now){Ok(())=>{},Err(e)if e=="temporal_storage_busy_pause"=>break,Err(e)=>panic!("operator ingest: {e}")}}
             now+=fixture::PERIOD;
             if fixture::snapshot(&runtime,now)["durability_pending"]==true{std::thread::sleep(Duration::from_nanos(fixture::PERIOD));}
-            assert!(supervised.elapsed()<Duration::from_secs(240));
+            assert!(supervised.elapsed()<Duration::from_secs(240), "operator phase={} progress={}",episode.index,{
+                let p=fixture::snapshot(&runtime,now);
+                serde_json::json!({"stage":p["stage"],"episode_index":p["episode_index"],"retained_rows":p["retained_rows"],"durable_windows":p["durable_windows"],"pending":p["durability_pending"],"durability_error":p["durability_error"],"observed_ns":p["observed_ns"],"durable_observed_ns":p["durable_observed_ns"],"target_ms":p["target_ms"],"failure":p["failure"],"runtime_state":p["runtime_state"],"lead_in_remaining_ms":p["lead_in_remaining_ms"]})
+            });
         }
         let guard=runtime.mutation_guard().unwrap();let challenge=runtime.temporal_confirmation_challenge(&guard).unwrap();
         runtime.confirm_temporal_phase(&guard,&challenge,now).unwrap();now=fixture::settle_async_boundary(&runtime,now);
