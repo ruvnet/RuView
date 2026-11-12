@@ -1,0 +1,60 @@
+name: Operator eight-step diagnostic (not release qualification)
+
+on:
+  push:
+    branches: [diag/2527-operator-eight-20261112]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_BUILD_JOBS: "2"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+  CARGO_PROFILE_RELEASE_DEBUG: "0"
+
+jobs:
+  rust-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          submodules: recursive
+      - name: Install the reviewed signed Ubuntu dependency set
+        run: |
+          bash scripts/ci-install-ubuntu-deps.sh \
+            libglib2.0-dev libgtk-3-dev libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev librsvg2-dev libxdo-dev \
+            libudev-dev libdbus-1-dev libssl-dev pkg-config
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: 1.89.0
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
+        with:
+          workspaces: v2
+      - name: Record non-secret runner and compiler context
+        working-directory: v2
+        run: |
+          printf 'source=%s\n' "$GITHUB_SHA"
+          rustc -Vv
+          cargo -V
+          lscpu
+          df -h "$RUNNER_TEMP"
+      - name: Execute exactly the existing operator journey with original guards
+        working-directory: v2
+        run: |
+          set -o pipefail
+          cargo test --release --locked -p wifi-densepose-sensing-server \
+            --lib --no-default-features \
+            room_learner::lifecycle::temporal_control::full_run_tests::operator_eight_actual_reserved_checks_fit_complete_cold_and_evaluate \
+            -- --exact --nocapture --test-threads=1 2>&1 | tee "$RUNNER_TEMP/operator-eight.log"
+          python3 -c 'import pathlib,re,sys; s=pathlib.Path(sys.argv[1]).read_text(); assert re.search(r"^test result: ok\. 1 passed; 0 failed; 0 ignored;",s,re.M), "exact nonzero pass missing"' "$RUNNER_TEMP/operator-eight.log"
+      - name: Retain diagnostic output even on failure
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: operator-eight-diagnostic
+          path: ${{ runner.temp }}/operator-eight.log

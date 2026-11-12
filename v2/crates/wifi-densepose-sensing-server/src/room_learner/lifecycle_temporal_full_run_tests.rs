@@ -1119,13 +1119,27 @@ async fn operator_eight_actual_reserved_checks_fit_complete_cold_and_evaluate(){
     assert_eq!(runtime.mutation_guard().unwrap().generation,before.generation);
     assert!(runtime.mutation_guard().unwrap().workflow_revision>before.workflow_revision);
     sequence=2;
+    let diagnostic = |p: &serde_json::Value| serde_json::json!({
+        "stage": p["stage"], "episode_index": p["episode_index"],
+        "retained_rows": p["retained_rows"], "durable_windows": p["durable_windows"],
+        "pending": p["durability_pending"], "durability_error": p["durability_error"],
+        "observed_ns": p["observed_ns"], "durable_observed_ns": p["durable_observed_ns"],
+        "target_ms": p["target_ms"], "failure": p["failure"],
+        "runtime_state": p["runtime_state"], "lead_in_remaining_ms": p["lead_in_remaining_ms"]
+    });
     for episode in schedule.episodes(){
         let supervised=Instant::now();
+        let mut last_report=Instant::now();
+        println!("SYNTHETIC_OPERATOR_PHASE_START phase={} receiver_elapsed_ns={}", episode.index, now.saturating_sub(fixture::START));
         loop{
             let progress=fixture::snapshot(&runtime,now);
+            if last_report.elapsed() >= Duration::from_secs(30) {
+                println!("SYNTHETIC_OPERATOR_PHASE_PROGRESS phase={} elapsed_s={} receiver_elapsed_ns={} progress={}", episode.index, supervised.elapsed().as_secs(), now.saturating_sub(fixture::START), diagnostic(&progress));
+                last_report=Instant::now();
+            }
             match progress["stage"].as_str().unwrap(){
                 "ready"|"paused"=>{now=fixture::async_lead_end(&runtime,now);runtime.tick_temporal_capture(&runtime.mutation_guard().unwrap(),now).unwrap();}
-                "needs_confirmation"=>break,
+                "needs_confirmation"=>{println!("SYNTHETIC_OPERATOR_PHASE_READY phase={} elapsed_s={} progress={}", episode.index, supervised.elapsed().as_secs(), diagnostic(&progress));break;},
                 "failed"=>panic!("operator episode{} failed: {progress}",episode.index),
                 _=>{}
             }
@@ -1133,7 +1147,7 @@ async fn operator_eight_actual_reserved_checks_fit_complete_cold_and_evaluate(){
             for source in 1..=3{match runtime.ingest_native(&packet(source,sequence,now,episode.condition),now){Ok(())=>{},Err(e)if e=="temporal_storage_busy_pause"=>break,Err(e)=>panic!("operator ingest: {e}")}}
             now+=fixture::PERIOD;
             if fixture::snapshot(&runtime,now)["durability_pending"]==true{std::thread::sleep(Duration::from_nanos(fixture::PERIOD));}
-            assert!(supervised.elapsed()<Duration::from_secs(240));
+            assert!(supervised.elapsed()<Duration::from_secs(240), "operator phase={} elapsed_s={} progress={}", episode.index, supervised.elapsed().as_secs(), diagnostic(&fixture::snapshot(&runtime,now)));
         }
         let guard=runtime.mutation_guard().unwrap();let challenge=runtime.temporal_confirmation_challenge(&guard).unwrap();
         runtime.confirm_temporal_phase(&guard,&challenge,now).unwrap();now=fixture::settle_async_boundary(&runtime,now);
