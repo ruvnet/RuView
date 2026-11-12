@@ -561,12 +561,19 @@ mod tests {
         );
     }
 
-    /// The RePos leakage experiment: in the training rooms, room position
-    /// correlates with body scale (small people in room A, tall in room B).
-    /// A monolithic absolute-pose head exploits the room feature as a
-    /// shortcut and collapses in an unseen room that breaks the
-    /// correlation; the factorized head's skeleton branch never sees room
-    /// features and generalizes.
+    /// The RePos leakage experiment, on synthetic latents: in the training
+    /// rooms, room position correlates with body scale (small people in room
+    /// A, tall in room B). A monolithic absolute-pose head exploits the room
+    /// feature as a shortcut and collapses in an unseen room that breaks the
+    /// correlation; the factorized head's skeleton branch is given a latent
+    /// without the room column and generalizes.
+    ///
+    /// Scope: the content and full latents here are hand-built
+    /// (`content = [scale, 1]`, `full = [scale, room_x/3, 1]`), so the
+    /// skeleton branch's room-independence is true by construction. What this
+    /// verifies is the head's algebra given such a factorization, not that the
+    /// encoder produces one. `RfEncoder`'s side of the contract is covered by
+    /// `encoder::tests::content_representation_excludes_the_geometry_term`.
     #[test]
     fn factorized_pose_resists_room_shortcut_leakage() {
         use crate::eval::mpjpe;
