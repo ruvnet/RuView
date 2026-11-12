@@ -1607,7 +1607,9 @@ fn retired_variable_temporal_head_does_not_mask_an_active_old_profile_after_cold
 
 /// SYNTHETIC real Runtime/durable journals, never a user-owned capture.
 #[test]
+#[cfg_attr(debug_assertions, ignore = "native-persistence Retry journey requires Release; CI explicitly executes and counts it")]
 fn variable_retry_after_actual_window_cadence_failure_keeps_sixteen_windows_and_seal() {
+    assert!(!cfg!(debug_assertions), "native-persistence Retry acceptance requires Release");
     let directory=tempfile::tempdir().unwrap();let rt=Arc::new(runtime(directory.path(),START));
     rt.temporal_select_profile_v2(Some(crate::room_learner::managed_schedule_contract::OPERATOR_VARIABLE_PROFILE)).unwrap();
     let mut c=context();let mut extra=c.sources[2].clone();extra.source_id=4;extra.device_id="esp32-node-4".into();extra.link_id="native-4".into();c.sources.push(extra);

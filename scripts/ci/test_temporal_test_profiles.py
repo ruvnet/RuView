@@ -159,8 +159,8 @@ class C4CClassificationTests(unittest.TestCase):
                 profiles.policy(root)
     def test_current_policy_registers_exact_c4c_and_preserves_existing_components(self):
         components = profiles.policy(pathlib.Path(__file__).resolve().parents[2])
-        self.assertEqual([c[0] for c in components], ['C2', 'C1', 'C3', 'C4', 'budget343', 'C4B', 'C4C'])
-        current = components[-1]
+        self.assertEqual([c[0] for c in components], ['C2', 'C1', 'C3', 'C4', 'budget343', 'C4B', 'C4C', 'variableRetry'])
+        current = next(c for c in components if c[0] == 'C4C')
         self.assertEqual(current[1].name, 'lifecycle_temporal_public_acceptance_tests.rs')
         self.assertEqual(current[2:], ([profiles.C4C], [(profiles.C4C, True, 1)]))
         self.assertEqual(components[0][3], [(profiles.C2, True, 1)])
@@ -187,5 +187,44 @@ class OperatorEightClassificationTests(unittest.TestCase):
     def test_actual_policy_carries_operator_case_in_cached_c4_batch(self):
         c4=next(c for c in profiles.policy(pathlib.Path(__file__).resolve().parents[2]) if c[0]=='C4')
         self.assertIn(profiles.OPERATOR8,c4[2]);self.assertEqual(c4[3],[(profiles.PREFIX+'full_run_tests::',False,9)])
+
+class VariableRetryClassificationTests(unittest.TestCase):
+    def component(self):
+        root = pathlib.Path(__file__).resolve().parents[2]
+        return [next(c for c in profiles.policy(root) if c[0] == 'variableRetry')]
+
+    def test_current_policy_requires_exact_native_retry_case(self):
+        c = self.component()[0]
+        self.assertEqual(c[1].name, 'lifecycle_temporal_tests.rs')
+        self.assertEqual(c[2:], ([profiles.VARIABLE_RETRY], [(profiles.VARIABLE_RETRY, True, 1)]))
+        self.assertIn('fn variable_retry_after_actual_window_cadence_failure_keeps_sixteen_windows_and_seal()', c[1].read_text())
+
+    def test_debug_keeps_the_case_registered_and_transparently_ignored(self):
+        result = profiles.validate(self.component(), {profiles.VARIABLE_RETRY}, {profiles.VARIABLE_RETRY}, 'debug-check')
+        self.assertEqual(result[0]['names'], [profiles.VARIABLE_RETRY])
+
+    def test_debug_cannot_run_the_native_persistence_case_unclassified(self):
+        with self.assertRaises(ValueError):
+            profiles.validate(self.component(), {profiles.VARIABLE_RETRY}, set(), 'debug-check')
+
+    def test_release_requires_one_active_case_and_does_not_sweep_siblings(self):
+        sibling = profiles.VARIABLE_RETRY + '_manual_performance'
+        result = profiles.validate(self.component(), {profiles.VARIABLE_RETRY, sibling}, {sibling}, 'release-run')
+        self.assertEqual(result, [{'component': 'variableRetry', 'selector': profiles.VARIABLE_RETRY, 'exact': True, 'names': [profiles.VARIABLE_RETRY]}])
+
+    def test_missing_or_lookalike_case_cannot_satisfy_release_coverage(self):
+        for registered in [set(), {profiles.VARIABLE_RETRY + '_lookalike'}]:
+            with self.assertRaises(ValueError):
+                profiles.validate(self.component(), registered, set(), 'release-run')
+
+    def test_ignored_release_case_cannot_be_counted_as_passed(self):
+        with self.assertRaises(ValueError):
+            profiles.validate(self.component(), {profiles.VARIABLE_RETRY}, {profiles.VARIABLE_RETRY}, 'release-run')
+
+    def test_wrong_module_cannot_substitute_the_same_leaf(self):
+        wrong = profiles.VARIABLE_RETRY.replace('tests::', 'wrong_module::')
+        with self.assertRaises(ValueError):
+            profiles.validate(self.component(), {wrong}, set(), 'release-run')
+
 
 if __name__=='__main__':unittest.main()
