@@ -17,7 +17,7 @@ env:
 jobs:
   rust-tests:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -43,13 +43,18 @@ jobs:
           cargo -V
           lscpu
           df -h "$RUNNER_TEMP"
-      - name: Execute the original complete Release profile sequence
+      - name: Execute original C4 path with failure-only metadata
+        working-directory: v2
         run: |
-          python3 scripts/ci/test_temporal_test_profiles.py
-          python3 scripts/ci/temporal_test_profiles.py release-run --evidence-dir "${{ runner.temp }}/temporal-test-profiles"
+          set -o pipefail
+          cargo test --release --locked -p wifi-densepose-sensing-server \
+            --lib --no-default-features \
+            room_learner::lifecycle::temporal_control::full_run_tests:: \
+            -- --nocapture --test-threads=1 2>&1 | tee "$RUNNER_TEMP/operator-eight.log"
+          python3 -c 'import pathlib,re,sys; s=pathlib.Path(sys.argv[1]).read_text(); assert re.search(r"^test result: ok\. 9 passed; 0 failed; 0 ignored;",s,re.M), "exact nonzero pass missing"' "$RUNNER_TEMP/operator-eight.log"
       - name: Retain diagnostic output even on failure
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: operator-eight-diagnostic
-          path: ${{ runner.temp }}/temporal-test-profiles
+          path: ${{ runner.temp }}/operator-eight.log
