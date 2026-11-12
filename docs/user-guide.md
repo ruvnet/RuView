@@ -1462,7 +1462,7 @@ What it ships (and what it does not):
 
 | Capability | Status |
 |------------|--------|
-| Presence detection (occupied / empty) | ✅ Trained head — v2 encoder reports 82.3% held-out temporal-triplet acc (v1's "100% on validation" was a single-class recording — retracted, [#882](https://github.com/ruvnet/RuView/issues/882)) |
+| Presence detection (occupied / empty) | ⚠️ Trained encoder, degenerate head — the 82.3% is held-out temporal-triplet accuracy (embedding quality), not a presence decision rate. The published head's bias exceeds its weight norm, so it cannot output `absent` for any input ([#1521](https://github.com/ruvnet/RuView/issues/1521)). v1's "100% on validation" was a single-class recording — retracted, [#882](https://github.com/ruvnet/RuView/issues/882) |
 | 128-dim CSI embeddings (re-ID, similarity, downstream training) | ✅ Trained encoder |
 | Single-person breathing / heart-rate | ⚠️ Server still uses heuristic DSP — model does not replace this yet |
 | 17-keypoint full-body pose | 🔬 This HF bundle ships no keypoint head — but real pose weights exist elsewhere; see the tier table below |
@@ -2142,6 +2142,12 @@ python firmware/esp32-csi-node/provision.py --port COM7 \
   --ssid "YourWiFi" --password "YourPassword" --target-ip 192.168.1.20 \
   --edge-tier 2
 ```
+
+> **Tier 2 turns off raw CSI.** Tier 0 is raw CSI passthrough with no on-chip DSP; tiers 1 and 2
+> compute on the node and ship derived values instead. The room-learning CLI (`enroll`,
+> `train-room`, `room-watch`) and anything else that needs per-subcarrier CSI require
+> `edge_tier=0` — see `v2/crates/wifi-densepose-cli/src/room.rs`. Provision with `--edge-tier 0`
+> when you intend to capture or train, and with `--edge-tier 2` when you want on-node vitals.
 
 Key NVS settings for edge processing:
 
