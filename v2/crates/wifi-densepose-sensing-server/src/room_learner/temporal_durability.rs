@@ -542,6 +542,14 @@ impl Writer {
     #[cfg(test)]
     pub(crate) fn hold_next_after_publish(&self,entered:mpsc::SyncSender<()>,release:mpsc::Receiver<()>){*self.shared.hold_after_publish.lock().unwrap()=Some((entered,release));}
     #[cfg(test)]
+    pub(crate) fn test_progress(&self, receiver_now: u64) -> serde_json::Value {
+        serde_json::json!({
+            "busy": self.shared.busy.load(Ordering::Acquire),
+            "ack_queued": self.shared.ack_queued.load(Ordering::Acquire),
+            "clock_ahead_ns": self.shared.now().ok().map(|at| at.saturating_sub(receiver_now))
+        })
+    }
+    #[cfg(test)]
     pub fn ack_is_queued(&self) -> bool {
         self.shared.ack_queued.load(Ordering::Acquire)
     }
