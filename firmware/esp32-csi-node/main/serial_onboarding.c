@@ -41,8 +41,39 @@ static const char *chip_name(void)
 #endif
 }
 
+#if defined(CONFIG_C6_XIAO_MR60BHA2) && CONFIG_C6_XIAO_MR60BHA2
+static bool refresh_radar_saved_config(void)
+{
+    nvs_handle_t handle;
+    const esp_err_t opened = nvs_open("csi_cfg", NVS_READONLY, &handle);
+    if (opened == ESP_ERR_NVS_NOT_FOUND) return true; /* Effective factory defaults. */
+    if (opened != ESP_OK) return false;
+    nvs_config_t actual = s_current_config;
+    esp_err_t result = ESP_OK;
+#define READ_OPTIONAL(call) do { const esp_err_t r = (call); if (r != ESP_OK && r != ESP_ERR_NVS_NOT_FOUND) result = r; } while (0)
+    size_t length = sizeof(actual.target_ip);
+    READ_OPTIONAL(nvs_get_str(handle, "target_ip", actual.target_ip, &length));
+    length = sizeof(actual.wifi_ssid);
+    READ_OPTIONAL(nvs_get_str(handle, "ssid", actual.wifi_ssid, &length));
+    length = sizeof(actual.wifi_password);
+    READ_OPTIONAL(nvs_get_str(handle, "password", actual.wifi_password, &length));
+    READ_OPTIONAL(nvs_get_u16(handle, "radar_port", &actual.radar_fused_port));
+    READ_OPTIONAL(nvs_get_u16(handle, "target_port", &actual.target_port));
+    READ_OPTIONAL(nvs_get_u8(handle, "node_id", &actual.node_id));
+#undef READ_OPTIONAL
+    nvs_close(handle);
+    if (result == ESP_OK) s_current_config = actual;
+    memset(&actual, 0, sizeof(actual));
+    return result == ESP_OK;
+}
+#endif
+
 static void emit_hello(const char *nonce)
 {
+#if defined(CONFIG_C6_XIAO_MR60BHA2) && CONFIG_C6_XIAO_MR60BHA2
+    /* Read persisted values again after an uncertain prior commit, not stale RAM. */
+    const bool radar_readable = refresh_radar_saved_config();
+#endif
     const esp_app_desc_t *description = esp_app_get_description();
     char digest[17] = {0};
     ruview_onboarding_device_digest(digest);
@@ -53,6 +84,14 @@ static void emit_hello(const char *nonce)
            nonce, chip_name(), description->version,
            (unsigned)s_current_config.node_id, s_current_config.target_ip,
            (unsigned)s_current_config.target_port, configured ? 1U : 0U, digest);
+#if defined(CONFIG_C6_XIAO_MR60BHA2) && CONFIG_C6_XIAO_MR60BHA2
+    /* Compile-time controller support, not proof that a radar is detected. */
+    if (radar_readable && s_current_config.target_port >= 1024 && strcmp(digest, "0000000000000000") != 0 && (s_current_config.radar_fused_port == 0 ||
+        (s_current_config.radar_fused_port >= 1024 && s_current_config.radar_fused_port != s_current_config.target_port))) {
+        printf("RUVIEW_RADAR_CAP_V1 nonce=%s device_id=%s model=mr60bha2 config=1 radar_port=%u raw_port=%u\n",
+               nonce, digest, (unsigned)s_current_config.radar_fused_port, (unsigned)s_current_config.target_port);
+    }
+#endif
     fflush(stdout);
 }
 
@@ -73,6 +112,86 @@ static esp_err_t commit_config(const ruview_onboarding_config_t *config)
     return result;
 }
 
+#if defined(CONFIG_C6_XIAO_MR60BHA2) && CONFIG_C6_XIAO_MR60BHA2
+static esp_err_t commit_radar_config(const ruview_onboarding_config_t *config)
+{
+    nvs_handle_t handle;
+    esp_err_t result = nvs_open("csi_cfg", NVS_READWRITE, &handle);
+    if (result != ESP_OK) return result;
+    if (!config->preserve_wifi) {
+        result = nvs_set_str(handle, "ssid", config->ssid);
+        if (result == ESP_OK) result = nvs_set_str(handle, "password", config->password);
+    }
+    if (result == ESP_OK) result = nvs_set_str(handle, "target_ip", config->target_ip);
+    if (result == ESP_OK) result = nvs_set_u16(handle, "radar_port", config->target_port);
+    /* Never write raw target_port, node_id, antenna, update keys or other settings. */
+    if (result == ESP_OK) result = nvs_commit(handle);
+    nvs_close(handle);
+    return result;
+}
+
+static bool radar_readback(const ruview_onboarding_config_t *request, nvs_config_t *actual)
+{
+    nvs_handle_t handle;
+    if (nvs_open("csi_cfg", NVS_READONLY, &handle) != ESP_OK) return false;
+    *actual = s_current_config; /* Missing unchanged keys retain their effective startup defaults. */
+    size_t length = sizeof(actual->target_ip);
+    esp_err_t result = nvs_get_str(handle, "target_ip", actual->target_ip, &length);
+    if (result == ESP_OK) result = nvs_get_u16(handle, "radar_port", &actual->radar_fused_port);
+    uint16_t raw_port;
+    const esp_err_t raw_result = nvs_get_u16(handle, "target_port", &raw_port);
+    if (raw_result == ESP_OK) actual->target_port = raw_port;
+    else if (raw_result != ESP_ERR_NVS_NOT_FOUND) result = raw_result;
+    uint8_t node_id;
+    const esp_err_t node_result = nvs_get_u8(handle, "node_id", &node_id);
+    if (node_result == ESP_OK) actual->node_id = node_id;
+    else if (node_result != ESP_ERR_NVS_NOT_FOUND) result = node_result;
+    if (!request->preserve_wifi) {
+        length = sizeof(actual->wifi_ssid);
+        if (result == ESP_OK) result = nvs_get_str(handle, "ssid", actual->wifi_ssid, &length);
+        length = sizeof(actual->wifi_password);
+        if (result == ESP_OK) result = nvs_get_str(handle, "password", actual->wifi_password, &length);
+        if (strcmp(actual->wifi_ssid, request->ssid) || strcmp(actual->wifi_password, request->password)) result = ESP_FAIL;
+    }
+    nvs_close(handle);
+    return result == ESP_OK && strcmp(actual->target_ip, request->target_ip) == 0
+        && actual->radar_fused_port == request->target_port
+        && actual->target_port == s_current_config.target_port && actual->node_id == request->node_id;
+}
+
+static void process_radar_line(const char *line)
+{
+    ruview_onboarding_radar_config_t request = {0};
+    char digest[17] = {0};
+    ruview_onboarding_device_digest(digest);
+    if (ruview_onboarding_parse_radar_config(line, &request) != RUVIEW_ONBOARDING_OK ||
+        !ruview_onboarding_radar_claim_valid(&request, digest, s_current_config.node_id,
+            s_current_config.target_port, s_issued_nonce, s_nonce_issued_at_us, esp_timer_get_time())) {
+        printf("RUVIEW_RADAR_CONFIG_ERR_V1 reason=invalid_or_stale_claim\n");
+        memset(&request, 0, sizeof(request));
+        fflush(stdout);
+        return;
+    }
+    s_issued_nonce[0] = '\0'; /* One attempt, including uncertain NVS failures. */
+    nvs_config_t actual;
+    if (commit_radar_config(&request.config) != ESP_OK || !radar_readback(&request.config, &actual)) {
+        printf("RUVIEW_RADAR_CONFIG_ERR_V1 reason=commit_or_readback\n");
+        memset(&request, 0, sizeof(request));
+        memset(&actual, 0, sizeof(actual));
+        fflush(stdout);
+        return;
+    }
+    printf("RUVIEW_RADAR_CONFIG_OK_V1 nonce=%s device_id=%s node_id=%u target_ip=%s radar_port=%u raw_port=%u rebooting=1\n",
+        request.config.nonce, digest, (unsigned)actual.node_id, actual.target_ip,
+        (unsigned)actual.radar_fused_port, (unsigned)actual.target_port);
+    fflush(stdout);
+    memset(&request, 0, sizeof(request));
+    memset(&actual, 0, sizeof(actual));
+    vTaskDelay(pdMS_TO_TICKS(400));
+    esp_restart();
+}
+#endif
+
 static void process_line(char *line)
 {
     char nonce[RUVIEW_ONBOARDING_NONCE_HEX_LEN + 1] = {0};
@@ -82,7 +201,21 @@ static void process_line(char *line)
         emit_hello(nonce);
         return;
     }
+    if (strncmp(line, "RUVIEW_RADAR_CONFIG_V1 ", sizeof("RUVIEW_RADAR_CONFIG_V1 ") - 1) == 0) {
+#if defined(CONFIG_C6_XIAO_MR60BHA2) && CONFIG_C6_XIAO_MR60BHA2
+        process_radar_line(line);
+#else
+        printf("RUVIEW_RADAR_CONFIG_ERR_V1 reason=unsupported_controller\n");
+        fflush(stdout);
+#endif
+        return;
+    }
     if (strncmp(line, "RUVIEW_CONFIG_V1 ", 17) != 0) return;
+#if defined(CONFIG_C6_XIAO_MR60BHA2) && CONFIG_C6_XIAO_MR60BHA2
+    printf("RUVIEW_CONFIG_ERR_V1 reason=radar_requires_dedicated_config\n");
+    fflush(stdout);
+    return;
+#endif
 
     ruview_onboarding_config_t request;
     const ruview_onboarding_result_t parsed = ruview_onboarding_parse_config(line, &request);
