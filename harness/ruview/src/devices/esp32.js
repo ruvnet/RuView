@@ -258,6 +258,7 @@ export class NodeStats {
       this.nodes.set(key, n);
     }
     n.packets[pkt.kind] = (n.packets[pkt.kind] || 0) + 1;
+    if (sender) n.address = sender; // last sender: lets callers reach the node (e.g. :8032)
     if (pkt.kind === 'csi') {
       n.rssiSum += pkt.rssi; n.rssiCount += 1;
       trackSequence(n, pkt.seq);
@@ -290,6 +291,7 @@ export class NodeStats {
         return {
           source: n.source,
           nodeId: n.nodeId,
+          ...(n.address ? { address: n.address } : {}),
           packets: n.packets,
           csiRateHz: Number((csi / seconds).toFixed(2)),
           csiLossFraction: received ? Number((n.seqGaps / received).toFixed(4)) : null,

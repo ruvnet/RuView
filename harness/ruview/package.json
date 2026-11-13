@@ -47,7 +47,7 @@
   ],
   "scripts": {
     "test": "node --test --test-concurrency=2 test/*.test.mjs",
-    "test:security": "node --test test/hosts.test.mjs test/brain.test.mjs test/policy.test.mjs test/spaces.test.mjs test/kernel.test.mjs test/firmware.test.mjs test/training.test.mjs test/devices.test.mjs test/csi-nodes.test.mjs test/remote.test.mjs test/mcp-apps.test.mjs test/cli-ui.test.mjs test/esphome.test.mjs",
+    "test:security": "node --test test/hosts.test.mjs test/brain.test.mjs test/policy.test.mjs test/spaces.test.mjs test/kernel.test.mjs test/firmware.test.mjs test/training.test.mjs test/devices.test.mjs test/csi-nodes.test.mjs test/remote.test.mjs test/mcp-apps.test.mjs test/cli-ui.test.mjs test/esphome.test.mjs test/node-config.test.mjs",
     "doctor": "node ./bin/cli.js doctor",
     "mcp": "node ./bin/cli.js mcp start",
     "brain:verify": "node ./bin/cli.js brain verify",

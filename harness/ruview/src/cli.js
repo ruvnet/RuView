@@ -182,6 +182,15 @@ Firmware (ADR-370, cross-platform esptool):
   flash --port <p> --bundle <dir> [--variant ...] [--baud 460800] --confirm
         [--boot-log-seconds 15] [--allow-unverified]     write flash, then capture boot evidence
 
+Node config (YAML: ~/.ruview/nodes.yaml, see firmware/esp32-csi-node/nodes.example.yaml):
+  node [plan]                                            validate the config, list nodes, firmware + secrets plan
+  node status                                            read-only: live CSI per node + each node's :8032 status
+  node apply [--port P | --all | --watch] [--confirm]    bring the board (by MAC) to its config: config steps,
+                                                         default flash → provision WiFi/NVS → validate
+  node apply --firmware-only [...]                       flash + validate; keeps WiFi/node settings
+        at a terminal: shows the plan and asks "yes" per board; --confirm skips the
+        question; pipes/--json without --confirm only print the plan
+
 Devices (ADR-373) — run on the machine the hardware is attached to:
   devices                                                classify USB serial devices (ESP32, Realtek, mmWave, RPLIDAR)
   esp32 [--udp-port 5005] [--seconds 10] [--bind 0.0.0.0]  receive + summarize ESP32 / Realtek RAC1 node UDP streams
@@ -222,6 +231,122 @@ Harness:
 Output: a terminal gets a formatted view; pipes and --json get JSON.
 Hosts implemented and tested locally: claude-code (-p), codex (exec)`);
   return 0;
+}
+
+/** `ruview node [plan|status|apply]` — declarative node config (node-config.js). */
+async function nodeConfig(rest, flags) {
+  const action = rest[0] && !rest[0].startsWith('--') ? rest[0] : 'plan';
+  if (!['plan', 'status', 'apply'].includes(action)) {
+    console.error('Usage: ruview node [plan|status|apply] [--config ~/.ruview/nodes.yaml] [--port P | --all | --watch] [--firmware-only] [--confirm] [--json]');
+    return 2;
+  }
+  const flow = action === 'apply' && flags['firmware-only'] === true ? 'firmware' : 'apply';
+  const [fl, { OPERATOR_DEPS }, { captureEsp32 }] = await Promise.all([import('./node-config.js'), tools(), import('./devices/esp32.js')]);
+  const asJson = flags.json === true || !process.stdout.isTTY;
+  const out = (kind, res) => (asJson ? pjson(res) : console.log(fl.formatNodes(kind, res)));
+  let config;
+  try {
+    config = fl.loadNodeConfig(typeof flags.config === 'string' ? flags.config : fl.DEFAULT_CONFIG_PATH);
+  } catch (e) {
+    if (!(e instanceof fl.NodeConfigError)) throw e;
+    out('error', { ok: false, reason: e.reason, detail: e.message, errors: e.errors });
+    return 2;
+  }
+  // cwd first (an explicit checkout wins), then the checkout this CLI ships in,
+  // so `ruview node` works from any directory.
+  const repoRoot = OPERATOR_DEPS.findRepoRoot() || OPERATOR_DEPS.findRepoRoot(ROOT);
+  const tty = process.stderr.isTTY && !asJson;
+  const deps = {
+    exec: OPERATOR_DEPS.exec, python: OPERATOR_DEPS.python, fetch: OPERATOR_DEPS.fetch,
+    capture: (args) => captureEsp32(args), repoRoot, env: process.env,
+    log: (msg) => { if (tty) process.stderr.write(`  … ${msg}\n`); },
+  };
+
+  if (action === 'plan') { const res = fl.planNodes(config, { repoRoot }); out('plan', res); return res.ok ? 0 : 1; }
+  if (action === 'status') {
+    const res = await withProgress(`Listening on UDP :${config.aggregator.port}`, config.validate.udp_secs, () => fl.nodeStatus(config, deps));
+    out('status', res); return res.ok ? 0 : 1;
+  }
+
+  // apply: one port, every ESP32 candidate (--all), or each new one (--watch).
+  // --confirm writes without asking. Otherwise a person at a terminal sees the
+  // plan and must type yes; pipes/--json/MCP only ever get the plan (fail closed).
+  const confirm = flags.confirm === true;
+  const interactive = !confirm && !asJson && process.stdin.isTTY === true && process.stderr.isTTY === true;
+  const askYes = async (question) => {
+    const { createInterface } = await import('node:readline/promises');
+    const rl = createInterface({ input: process.stdin, output: process.stderr });
+    try { return /^(y|yes)$/i.test((await rl.question(question)).trim()); }
+    catch { return false; } // Ctrl+C / closed stdin = no
+    finally { rl.close(); }
+  };
+  const one = async (port) => {
+    if (confirm) {
+      const res = await fl.applyBoard(config, { port, flow, confirm: true }, deps);
+      out(action, res);
+      return res.ok;
+    }
+    const plan = await fl.applyBoard(config, { port, flow, confirm: false }, deps);
+    if (interactive && plan.ok) delete plan.next;
+    out(action, plan);
+    if (!plan.ok || !interactive) return plan.ok;
+    const parts = plan.steps.filter((x) => ['flash', 'wifi'].includes(x)).map((x) => (x === 'flash' ? 'firmware' : 'WiFi/node settings'));
+    const what = `write ${parts.join(' + ') || 'nothing'} to`;
+    if (!(await askYes(`  ? ${what} ${plan.mac} (node ${plan.node_id}) on ${port}? Type yes to continue [y/N] `))) {
+      console.error('  skipped — nothing was written');
+      return true;
+    }
+    const res = await fl.applyBoard(config, { port, flow, confirm: true,
+      expectedIdentity: { mac: plan.mac, nodeId: plan.node_id } }, deps);
+    out(action, res);
+    return res.ok;
+  };
+  const candidates = async () => {
+    const { scanDevices } = await import('./devices/registry.js');
+    const scan = await scanDevices(OPERATOR_DEPS);
+    if (!scan.ok) {
+      // Name the interpreter: an unrelated active venv shadowing python3 is the usual cause.
+      const py = OPERATOR_DEPS.python() || 'python3';
+      throw new fl.NodeConfigError(scan.reason, scan.reason === 'pyserial_missing'
+        ? `${py} has no pyserial; run \`${py} -m pip install pyserial esptool\` or put a venv that has them first on PATH`
+        : (scan.remedy || 'serial scan failed'));
+    }
+    return scan.devices.filter((d) => d.likelyRoles.includes('esp32')).map((d) => d.port);
+  };
+  try {
+    if (typeof flags.port === 'string') return (await one(flags.port)) ? 0 : 1;
+    if (flags.watch === true) {
+      if (!confirm && !interactive) { console.error('node: --watch needs a terminal (asks per board) or --confirm'); return 2; }
+      const done = new Set();
+      let stop = false; let failures = 0;
+      process.once('SIGINT', () => { stop = true; });
+      console.error(`Watching for ESP32 boards (${flow}). Plug them in one at a time; Ctrl+C to finish.`);
+      while (!stop) {
+        const ports = await candidates();
+        for (const p of done) if (!ports.includes(p)) done.delete(p); // unplugged → socket reusable
+        const next = ports.find((p) => !done.has(p));
+        if (!next) { await new Promise((r) => setTimeout(r, 1000)); continue; }
+        await new Promise((r) => setTimeout(r, 1000)); // let the port settle
+        if (!(await one(next))) failures += 1;
+        done.add(next);
+        console.error('→ unplug it and plug in the next board');
+      }
+      return failures ? 1 : 0;
+    }
+    const ports = await candidates();
+    if (flags.all === true) {
+      if (!ports.length) { console.error('node: no ESP32 candidates found (ruview devices)'); return 1; }
+      let ok = true;
+      for (const p of ports) ok = (await one(p)) && ok;
+      return ok ? 0 : 1;
+    }
+    if (ports.length !== 1) { console.error(`node: found ${ports.length} ESP32 candidates (${ports.join(', ') || 'none'}); pass --port, --all or --watch`); return 2; }
+    return (await one(ports[0])) ? 0 : 1;
+  } catch (e) {
+    if (!(e instanceof fl.NodeConfigError)) throw e;
+    out('error', { ok: false, reason: e.reason, detail: e.message });
+    return 1;
+  }
 }
 
 /** tiny flag parser: --k v / --k=v / --flag (boolean) */
@@ -291,6 +416,7 @@ export async function run(args, opts = {}) {
 
   switch (cmd) {
     case 'doctor': return doctor(flags);
+    case 'node': return nodeConfig(rest, flags);
     case 'skills': console.log(listSkills().join('\n') || '(none)'); return 0;
     case 'skill': {
       const n = rest[0];
