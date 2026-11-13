@@ -318,6 +318,27 @@ export function appendRegistry(path, event, fields = {}, now = () => new Date())
   return rec;
 }
 
+// The last valid record for a MAC is its retained assignment. Explicit YAML
+// entries supersede that MAC's history, but must not reuse another board's ID.
+function registryNodes(registry) {
+  const nodes = [];
+  for (const record of registry) {
+    const id = typeof record?.node_id === 'number' ? record.node_id
+      : typeof record?.node_id === 'string' && /^[0-9]{1,3}$/.test(record.node_id) ? Number(record.node_id) : null;
+    if (!record || typeof record.mac !== 'string' || !MAC_RE.test(record.mac)
+      || !Number.isInteger(id) || id < 0 || id > 255) continue;
+    const mac = record.mac.toLowerCase();
+    nodes.push({ mac, node_id: id, source: 'registry' });
+  }
+  return nodes;
+}
+
+function effectiveNodes(config, registry) {
+  const nodes = new Map(registryNodes(registry).map((node) => [node.mac, node]));
+  for (const node of config.nodes) nodes.set(node.mac, { ...node, source: 'config' });
+  return [...nodes.values()];
+}
+
 /**
  * Map a board MAC to its node entry: the config wins; otherwise the node_id
  * this MAC got before (registry); otherwise the next free id if auto_assign.
@@ -329,10 +350,10 @@ export function resolveNode(config, mac, registry = []) {
   let entry; let source;
   if (listed) { entry = listed; source = 'config'; }
   else {
-    const prior = registry.filter((r) => r.mac === m && Number.isInteger(Number(r.node_id))).at(-1);
+    const prior = effectiveNodes(config, registry).find((r) => r.mac === m);
     if (prior) { entry = { mac: m, node_id: Number(prior.node_id) }; source = 'registry'; }
     else if (config.auto_assign) {
-      const used = new Set([...config.nodes.map((n) => n.node_id), ...registry.map((r) => Number(r.node_id)).filter(Number.isInteger)]);
+      const used = new Set([...config.nodes.map((n) => n.node_id), ...registryNodes(registry).map((r) => r.node_id)]);
       let id = 1; while (used.has(id) && id < 256) id += 1;
       if (id > 255) throw new NodeConfigError('node_ids_exhausted', 'no free node_id left (0-255)');
       entry = { mac: m, node_id: id }; source = 'auto-assigned';
@@ -340,6 +361,8 @@ export function resolveNode(config, mac, registry = []) {
       throw new NodeConfigError('node_unlisted', `MAC ${m} is not in the node config and auto_assign is false; add it under nodes:`);
     }
   }
+  const conflict = effectiveNodes(config, registry).find((other) => other.mac !== m && other.node_id === entry.node_id);
+  if (conflict) throw new NodeConfigError('node_id_conflict', `node_id ${entry.node_id} is also assigned to ${conflict.mac}; give each board a unique ID in the node config before applying`);
   const node = { ...config.defaults, ...entry };
   if (node.tdm_slot !== undefined) node.tdm_total = config.tdm_total;
   return { node, source };
@@ -509,7 +532,7 @@ function judgeNode(config, n) {
  * apply (config steps: flash → provision → validate) or firmware-only
  * (flash → validate) to one board. Plans only unless `confirm`. deps = { exec, python, capture, repoRoot, now, nets, log }.
  */
-export async function applyBoard(config, { port, flow = 'apply', confirm = false }, deps) {
+export async function applyBoard(config, { port, flow = 'apply', confirm = false, expectedIdentity }, deps) {
   validatePort(port);
   const steps = new Set(flow === 'firmware' ? ['flash', 'validate'] : config.steps);
   const registry = readRegistry(config.registry);
@@ -526,6 +549,9 @@ export async function applyBoard(config, { port, flow = 'apply', confirm = false
   try { resolved = resolveNode(config, mac, registry); } catch (e) { if (e instanceof NodeConfigError) return { ok: false, reason: e.reason, port, mac, detail: e.message }; throw e; }
   const { node, source } = resolved;
   const result = { ok: false, flow, port, mac, node_id: node.node_id, zone: node.zone ?? null, node_source: source, steps: [...steps], stages: {} };
+  if (expectedIdentity !== undefined && (expectedIdentity?.mac !== mac || expectedIdentity?.nodeId !== node.node_id)) {
+    return { ...result, reason: 'confirmation_changed', detail: 'The selected board or node assignment changed. Read and confirm a new plan before applying.' };
+  }
   if (source === 'auto-assigned' && confirm) appendRegistry(config.registry, 'node_assigned', { mac, node_id: node.node_id }, deps.now);
 
   let target;
@@ -605,16 +631,15 @@ export async function nodeStatus(config, deps) {
   const heard = new Map((cap.nodes || []).filter((n) => n.source === 'esp32').map((n) => [n.nodeId, n]));
   const registry = readRegistry(config.registry);
   const lastIp = new Map();
-  for (const r of registry) if (r.ip && r.node_id !== undefined) lastIp.set(Number(r.node_id), r.ip);
+  for (const r of registry) if (r?.ip && r.node_id !== undefined) lastIp.set(Number(r.node_id), r.ip);
   // Nodes `node apply` auto-assigned are known too (registry), even if not in the YAML.
-  const assigned = new Map();
-  for (const r of registry) if (r.event === 'node_assigned' && r.mac && Number.isInteger(Number(r.node_id))) assigned.set(Number(r.node_id), r.mac);
-  const known = (id) => config.nodes.find((n) => n.node_id === id)
-    || (assigned.has(id) && !config.nodes.some((n) => n.mac === assigned.get(id)) ? { node_id: id, mac: assigned.get(id), zone: null, source: 'registry' } : null);
-  const ids = new Set([...config.nodes.map((n) => n.node_id), ...heard.keys()]);
+  const assigned = effectiveNodes(config, registry);
+  const known = (id) => assigned.find((node) => node.node_id === id);
+  const ids = new Set([...assigned.map((node) => node.node_id), ...heard.keys()]);
   const rows = [];
   for (const id of [...ids].sort((a, b) => a - b)) {
     const listed = known(id);
+    const conflict = assigned.filter((node) => node.node_id === id).length > 1;
     const n = heard.get(id);
     const address = n?.address || lastIp.get(id) || null;
     let http = null;
@@ -626,12 +651,12 @@ export async function nodeStatus(config, deps) {
       } catch { http = { error: 'unreachable' }; }
     }
     const judged = n ? judgeNode(config, n) : null;
-    const health = !listed ? 'unlisted' : judged?.ok ? 'healthy' : n ? 'degraded' : http && !http.error ? 'no-csi-here' : 'offline';
+    const health = conflict ? 'id-conflict' : !listed ? 'unlisted' : judged?.ok ? 'healthy' : n ? 'degraded' : http && !http.error ? 'no-csi-here' : 'offline';
     rows.push({
-      node_id: id, zone: listed?.zone ?? null, mac: listed?.mac ?? null, source: listed ? (listed.source || 'config') : null, address,
+      node_id: id, zone: conflict ? null : listed?.zone ?? null, mac: conflict ? null : listed?.mac ?? null, source: conflict ? null : listed ? (listed.source || 'config') : null, address,
       firmware: http?.version ?? null, ota_state: http?.ota_state ?? null, http: http ? (http.error || 'ok') : null,
       csiRateHz: n?.csiRateHz ?? 0, csiLossFraction: n?.csiLossFraction ?? null, rssiMean: n?.rssiMean ?? null,
-      health, problems: judged?.problems ?? [],
+      health, problems: conflict ? ['Multiple boards have this node ID; reconcile their config/registry assignments before applying.'] : judged?.problems ?? [],
     });
   }
   const bad = rows.filter((r) => !['healthy', 'unlisted'].includes(r.health));

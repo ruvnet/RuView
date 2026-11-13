@@ -296,7 +296,8 @@ async function nodeConfig(rest, flags) {
       console.error('  skipped — nothing was written');
       return true;
     }
-    const res = await fl.applyBoard(config, { port, flow, confirm: true }, deps);
+    const res = await fl.applyBoard(config, { port, flow, confirm: true,
+      expectedIdentity: { mac: plan.mac, nodeId: plan.node_id } }, deps);
     out(action, res);
     return res.ok;
   };

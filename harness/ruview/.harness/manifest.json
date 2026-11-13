@@ -45,7 +45,7 @@
     "skills/verify.md": "2d38d240e9810a7827e2ebd3717dc0f85c646cc92e46c3812fe77c5b9eb40b76",
     "src/brain.js": "0f16a75aea943acdacc430ff11d5df7ecdec9cca2ab497795ff6f33eaebdfab6",
     "src/cli-ui.js": "5ac04c5790f03df708c24a6dd366b51ff33a643691642b689284bcada25c9d9a",
-    "src/cli.js": "9f2fcb67faa9540c6335d36edb284dcb1e9a22e185445307eaf6695efc635f01",
+    "src/cli.js": "90d3d2dfeb44ddadb51455d2cd336e3834faaf5d2a733332900ac372a4dad2a5",
     "src/devices/esp32.js": "587e875cdaddb7b942c4e2c0521595456894762b842446e553b8c69d2c1ad32f",
     "src/devices/esphome.js": "d4429fd09c8d93fdc2e5926305d8193c98e074affc48deabda4b16bb9b620056",
     "src/devices/lidar.js": "d9a91e2b6eec21463bbb950fc333e9d0ebd2699a7c533d534323bb4d6a55bd97",
@@ -63,7 +63,7 @@
     "src/kernel.js": "48dfd218a747dd158f82ae108e7e8ed89a82cd68649214d23266112dc9033f5d",
     "src/mcp-http.js": "b72e021ae00d01831ef7184db824f5e85a2b8747e1d8e994b6a1cb1cb4d08945",
     "src/mcp-server.js": "5eb8c3431768932c3a85476df032d0608fc7a732ede3d6bdcc8467ca47552666",
-    "src/node-config.js": "ed7e9e83668dace777b71af2fa475f153a2793a826ae446047e9103aba95539e",
+    "src/node-config.js": "6f53ae40b9ff70a65a350c9379c993cf1227c0998fecc6fa86c3354521f7cab8",
     "src/policy.js": "baad5eb8c3eb2e416e0a71b342ad850d7c8413d7d976571ebf596937f69da8e2",
     "src/process-runner.js": "49533b038044dfb8bc76ed01c030d06a9856ead0836157fb693e2a7d40f786d6",
     "src/redact.js": "ebf1afff46341078706b0401838c53db043603586e280d51ece5cf1feba35189",
@@ -76,7 +76,7 @@
     "src/training.js": "bd8a6c12eba4f9d2f8990fa9692cd04c743ea247f9b13e10f8717ceefcbd09ac",
     "src/ui/console-widget.js": "0d2f707d57b5ec54968dee1dc80f31c7db9152dcadfc48700c18379dabb55462"
   },
-  "filesDigest": "c5afe0760a50ee0be0c086f1c92138f10b7937b416d23468a6559c943573eeea",
+  "filesDigest": "5311fa218f92c3617a488a83ef1e00642cf0549b0bb9757c1d4bc9a90009738b",
   "brainDigest": "c0fb7b079ded157059b91601361429944697dae3cc42abc00dfe1a680986b0f4",
   "gateFingerprint": "6e53c784eee38310188948fc75fb49e6b4ebc04e247d01b903fa8c8a92d67bdd",
   "developmentPins": {

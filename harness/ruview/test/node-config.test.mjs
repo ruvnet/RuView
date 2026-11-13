@@ -297,3 +297,108 @@ test('plan resolves every node and warns when OTA is not configured', () => {
     assert.ok(res.warnings.some((w) => w.includes('ota.psk_file')));
   } finally { rmSync(repo, { recursive: true, force: true }); }
 });
+
+// Review regressions: identity binding, assignment collisions and retained inventory.
+test('interactive confirmation rejects a replacement board before writes or registry changes', async () => {
+  const repo = fakeRepo(); const s = withSecrets({ steps: ['flash', 'wifi'] });
+  try {
+    const plan = await applyBoard(s.config, { port: '/dev/cu.usbmodem1' }, fakeDeps({ repoRoot: repo }));
+    const deps = fakeDeps({ repoRoot: repo, macOut: 'MAC: 11:22:33:44:55:66' });
+    const result = await applyBoard(s.config, { port: plan.port, confirm: true,
+      expectedIdentity: { mac: plan.mac, nodeId: plan.node_id } }, deps);
+    assert.equal(result.reason, 'confirmation_changed');
+    assert.equal(deps.calls.length, 1, 'only the identity probe may run');
+    assert.equal(existsSync(s.reg), false, 'replacement cannot reserve a node ID');
+  } finally { rmSync(repo, { recursive: true, force: true }); rmSync(s.dir, { recursive: true, force: true }); }
+});
+
+test('interactive confirmation rejects a changed assignment for the same board', async () => {
+  const repo = fakeRepo(); const s = withSecrets();
+  try {
+    const deps = fakeDeps({ repoRoot: repo });
+    const result = await applyBoard(s.config, { port: '/dev/cu.usbmodem1', confirm: true,
+      expectedIdentity: { mac: MAC, nodeId: 7 } }, deps);
+    assert.equal(result.reason, 'confirmation_changed');
+    assert.equal(deps.calls.length, 1);
+    assert.equal(existsSync(s.reg), false);
+  } finally { rmSync(repo, { recursive: true, force: true }); rmSync(s.dir, { recursive: true, force: true }); }
+});
+
+test('interactive confirmation proceeds for the same board and node assignment', async () => {
+  const repo = fakeRepo(); const s = withSecrets();
+  try {
+    const result = await applyBoard(s.config, { port: '/dev/cu.usbmodem1', confirm: true,
+      expectedIdentity: { mac: MAC, nodeId: 1 } }, fakeDeps({ repoRoot: repo }));
+    assert.equal(result.ok, true);
+  } finally { rmSync(repo, { recursive: true, force: true }); rmSync(s.dir, { recursive: true, force: true }); }
+});
+
+test('registry restoration refuses an ID now configured for a different MAC', () => {
+  const other = '11:22:33:44:55:66';
+  assert.throws(() => resolveNode(cfg(), other, [{ event: 'node_assigned', mac: other, node_id: 1 }]),
+    error => error.reason === 'node_id_conflict');
+});
+
+test('explicit config also refuses an ID retained by another unlisted board', () => {
+  const other = '11:22:33:44:55:66';
+  assert.throws(() => resolveNode(cfg(), MAC, [{ event: 'node_assigned', mac: other, node_id: 1 }]),
+    error => error.reason === 'node_id_conflict');
+});
+
+test('latest registry assignments detect duplicate IDs between unlisted boards', () => {
+  const a = '11:22:33:44:55:66', b = '11:22:33:44:55:77';
+  assert.throws(() => resolveNode(cfg(), a, [{ mac: a, node_id: 7 }, { mac: b, node_id: 7 }]),
+    error => error.reason === 'node_id_conflict');
+});
+
+test('explicit reassignment supersedes a historical registry ID for the same MAC', () => {
+  const other = '11:22:33:44:55:66';
+  const registry = [{ mac: MAC, node_id: 7 }, { mac: other, node_id: 7 }];
+  assert.equal(resolveNode(cfg(), other, registry).node.node_id, 7);
+});
+
+test('status retains offline auto-assigned nodes and observes their return', async () => {
+  const s = withSecrets({ nodes: [] });
+  try {
+    writeFileSync(s.reg, JSON.stringify({ event: 'node_assigned', mac: MAC, node_id: 1 }) + '\n');
+    const offline = await nodeStatus(s.config, fakeDeps({ silent: true }));
+    assert.equal(offline.ok, false);
+    assert.equal(offline.nodes.length, 1);
+    assert.deepEqual([offline.nodes[0].node_id, offline.nodes[0].mac, offline.nodes[0].health], [1, MAC, 'offline']);
+    assert.match(offline.summary, /^0\/1 known nodes healthy/);
+    const online = await nodeStatus(s.config, fakeDeps());
+    assert.equal(online.nodes[0].health, 'healthy');
+    assert.equal(online.ok, true);
+  } finally { rmSync(s.dir, { recursive: true, force: true }); }
+});
+
+test('malformed registry assignments cannot restore invalid IDs', () => {
+  const other = '11:22:33:44:55:66';
+  for (const bad of [null, { mac: other, node_id: null }, { mac: other, node_id: true },
+    { mac: other, node_id: -1 }, { mac: other, node_id: 256 }]) {
+    const result = resolveNode(cfg(), other, [bad]);
+    assert.equal(result.source, 'auto-assigned');
+    assert.equal(result.node.node_id, 3);
+  }
+});
+
+test('status reports conflicting board assignments instead of a healthy source identity', async () => {
+  const s = withSecrets();
+  try {
+    writeFileSync(s.reg, JSON.stringify({ event: 'node_assigned', mac: '11:22:33:44:55:66', node_id: 1 }) + '\n');
+    const result = await nodeStatus(s.config, fakeDeps());
+    const node = result.nodes.find(row => row.node_id === 1);
+    assert.equal(node.health, 'id-conflict');
+    assert.equal(node.mac, null);
+    assert.equal(result.ok, false);
+  } finally { rmSync(s.dir, { recursive: true, force: true }); }
+});
+
+test('status uses an explicit reassignment without retaining the same MAC under its old ID', async () => {
+  const s = withSecrets();
+  try {
+    writeFileSync(s.reg, JSON.stringify({ event: 'node_assigned', mac: MAC, node_id: 7 }) + '\n');
+    const result = await nodeStatus(s.config, fakeDeps({ silent: true }));
+    assert.deepEqual(result.nodes.map(row => row.node_id), [1, 2]);
+  } finally { rmSync(s.dir, { recursive: true, force: true }); }
+});

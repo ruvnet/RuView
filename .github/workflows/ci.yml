@@ -385,6 +385,7 @@ jobs:
   # workflow, so it doesn't gate the rest of the pipeline.
   docker-build:
     name: Docker Build & Test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     needs: [code-quality, test, rust-tests]
     continue-on-error: true
@@ -505,7 +506,7 @@ jobs:
     name: Notify
     runs-on: ubuntu-latest
     needs: [code-quality, test, rust-tests, ui-tests, performance-test, docker-build, docs]
-    if: always()
+    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: write   # required by softprops/action-gh-release
     # GitHub Actions does not allow `secrets.X` directly in step-level `if:`
