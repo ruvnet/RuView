@@ -19,8 +19,8 @@
 //!    subscription with the exact JSON shape `mqtt::discovery` produces.
 //! 3. Availability is published `online` retained on connect and
 //!    `offline` on graceful disconnect (the LWT/disconnect path).
-//! 4. Privacy mode strips heart-rate / breathing-rate / pose discovery
-//!    from the wire entirely — the integration confirms the strip
+//! 4. Privacy mode strips heart-rate / breathing-rate / pose discovery,
+//!    and the vitals-derived sleeping / distress states, from the wire entirely — the integration confirms the strip
 //!    happens at the broker boundary, not just in unit-test logic.
 //!
 //! ## Why this is gated
@@ -274,18 +274,24 @@ async fn privacy_mode_suppresses_biometric_discovery() {
     assert!(!leaked_br, "breathing_rate leaked under privacy mode");
     assert!(!leaked_pose, "pose leaked under privacy mode");
 
-    // Non-biometric entities + semantic primitives still appear.
+    // Non-biometric entities + semantic primitives not built on vitals
+    // still appear; states inferred from vitals do not (#2165).
     let presence_cfg = topics
         .iter()
         .any(|t| t.ends_with("/wifi_densepose_inttest2/presence/config"));
-    let sleeping_cfg = topics.iter().any(|t| {
+    let room_active_cfg = topics
+        .iter()
+        .any(|t| t.ends_with("/wifi_densepose_inttest2/room_active/config"));
+    let vitals_state_cfg = topics.iter().any(|t| {
         t.ends_with("/wifi_densepose_inttest2/someone_sleeping/config")
+            || t.ends_with("/wifi_densepose_inttest2/possible_distress/config")
     });
 
     assert!(presence_cfg, "presence missing in privacy mode");
+    assert!(room_active_cfg, "room_active missing in privacy mode");
     assert!(
-        sleeping_cfg,
-        "someone_sleeping must remain in privacy mode (it's inferred, not biometric)"
+        !vitals_state_cfg,
+        "someone_sleeping / possible_distress are inferred from vitals and must not be announced"
     );
 }
 
