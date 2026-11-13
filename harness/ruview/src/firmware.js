@@ -143,7 +143,8 @@ export function summarizeBootLog(text) {
   const lines = String(text).split(/\r?\n/);
   const csi = lines.filter((l) => /CSI cb|csi_collector/.test(l)).length;
   const panic = lines.some((l) => /Guru Meditation|abort\(\) was called|Backtrace:/.test(l));
-  const version = (/(?:RuView|esp32-csi-node)[^\n]*?v?(\d+\.\d+\.\d+)/i.exec(text) || [])[1] || null;
+  // Banners: "esp32-csi-node v0.8.1", "RuView … 0.8.1", "ESP32-S3 CSI Node (ADR-018 / ADR-110) — v0.8.15".
+  const version = (/(?:RuView|esp32-csi-node|CSI Node)[^\n]*?v?(\d+\.\d+\.\d+)/i.exec(text) || [])[1] || null;
   return {
     lines: lines.filter(Boolean).length,
     csiCallbacks: csi,

@@ -223,3 +223,8 @@ test('boot-log capture survives non-ASCII firmware logs on a cp1252 stdout', (t)
     rmSync(fake, { recursive: true, force: true });
   }
 });
+
+test('boot log version parsing covers the current CSI Node banner', () => {
+  assert.equal(summarizeBootLog('I (406) main: ESP32-S3 CSI Node (ADR-018 / ADR-110) \u2014 v0.8.15 \u2014 Node ID: 2\n').firmwareVersion, '0.8.15');
+  assert.equal(summarizeBootLog('I (1) main: esp32-csi-node v0.8.1\n').firmwareVersion, '0.8.1');
+});

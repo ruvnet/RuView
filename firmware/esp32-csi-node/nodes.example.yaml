@@ -1,0 +1,60 @@
+# RuView declarative node config — read by `ruview node` (harness/ruview/src/node-config.js).
+#
+#   cp nodes.example.yaml ~/.ruview/nodes.yaml   # keep the real one OUT of git
+#   ruview node plan                             # validate + show what would happen
+#   ruview node apply --watch                    # apply to each board as you plug it in
+#   ruview node status                           # read-only health of every node
+#
+# Supported YAML: block maps/lists, [a, b] lists, quoted or plain scalars and
+# comments. Anchors, tags, multi-line strings and unknown keys are rejected.
+
+wifi:
+  ssid: "MyHome-2G"                      # 2.4 GHz network
+  # Path only: ruview never reads it, provision.py does. Inline passwords are refused.
+  password_file: ~/.ruview/wifi-pass     # chmod 600; the password, one line
+
+# OTA key (64 hex chars, chmod 600). Without it, provisioning DISABLES remote
+# OTA updates and config_push on the node. Create one with:
+#   (umask 077; set -C; openssl rand -hex 32 > ~/.ruview-ota-psk)
+# ota:
+#   psk_file: ~/.ruview-ota-psk
+
+aggregator:
+  ip: auto                               # auto = this machine's private LAN IPv4
+  port: 5005
+
+firmware:
+  source: auto      # auto: repo build/ unless sources changed | reuse: build/ as-is | bundle: release dir
+  variant: s3-8mb   # s3-8mb | s3-4mb | c6
+  # bundle: ~/Downloads/esp32-csi-node-firmware-4mb  # source: bundle (needs SHA256SUMS)
+
+steps: [device, driver, flash, wifi, validate]   # used by `node apply`
+
+validate:
+  wait_secs: 60     # max wait for the node's first CSI packet after provisioning
+  udp_secs: 15      # measurement window
+  min_pps: 20       # CSI rate floor (firmware README acceptance floor)
+  # max_loss: 0.4   # optional ceiling on CSI sequence loss (0-1)
+
+# Applied to every node unless the node overrides it.
+defaults:
+  edge_tier: 2      # 0=raw, 1=stats, 2=vitals
+  # channel: 6
+  # pres_thresh: 50
+
+# Boards not listed get the next free node_id; the registry
+# (~/.ruview/esp32-setup/devices.jsonl) keeps it stable across runs.
+# Set false to refuse unlisted boards.
+auto_assign: true
+
+# Matched by MAC (`ruview node apply` prints it). tdm_total = nodes with a tdm_slot.
+nodes:
+  - mac: "aa:bb:cc:dd:ee:01"
+    node_id: 1
+    zone: living-room
+    tdm_slot: 0
+  # - mac: "aa:bb:cc:dd:ee:02"
+  #   node_id: 2
+  #   zone: bedroom
+  #   tdm_slot: 1
+  #   edge_tier: 1

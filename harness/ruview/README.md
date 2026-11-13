@@ -129,6 +129,42 @@ panic. A successful write alone is not hardware validation. WiFi provisioning
 stays with `provision.py` (see the `provision-node` skill) so credentials never
 pass through the harness.
 
+## Declarative node config (`ruview node`)
+
+One file, `~/.ruview/nodes.yaml` (template:
+`firmware/esp32-csi-node/nodes.example.yaml`), declares the WiFi network, the
+aggregator, the firmware source and every node by MAC: node ID, zone, TDM slot
+and provisioning overrides. `ruview node apply` brings an attached board to its
+declared state.
+
+```bash
+ruview node plan                              # validate config; nodes, firmware, secrets plan
+ruview node status                            # read-only: per-node CSI rate/loss/RSSI + :8032 status
+ruview node apply                             # read MAC, show the plan, ask "yes" before writing
+ruview node apply --watch                     # each board plugged in: plan → yes → apply
+ruview node apply --firmware-only --all --confirm   # no questions (scripts); flash + validate, settings kept
+```
+
+- **Confirmation:** at a terminal every write is shown first and needs a
+  typed `yes`. `--confirm` skips the question. Without a terminal (pipes,
+  `--json`, MCP) and without `--confirm`, only the plan is printed.
+- **Matching:** a board is identified by `esptool read_mac`. Listed MACs take
+  their configured node. Unlisted MACs reuse the node ID they had before, from
+  `~/.ruview/esp32-setup/devices.jsonl`, or get the next free ID unless
+  `auto_assign: false`.
+- **Secrets:** `wifi.password_file` and `ota.psk_file` are paths (owner-only
+  files) passed to `provision.py`. The harness never reads them. Inline
+  passwords and env-var sources are refused.
+- **Flashing:** reuses `flash` (checksums, chip check, boot log). `source:
+  auto|reuse` flashes the repo's ESP-IDF `build/` as an unverified local
+  build. `auto` refuses a build older than the firmware sources.
+- **Validation:** waits for the node's CSI on the aggregator UDP port, then
+  checks `validate.min_pps` and the optional `validate.max_loss`. This is a
+  live measurement on this host, so stop the sensing server first (UDP port in
+  use otherwise).
+- **YAML:** a strict subset (no dependency). Anchors, tags, multi-line strings,
+  flow maps, tabs, duplicate and unknown keys are errors.
+
 ## Training (ADR-371)
 
 ```bash
