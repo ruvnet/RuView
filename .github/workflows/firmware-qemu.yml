@@ -214,6 +214,10 @@ jobs:
         working-directory: firmware/esp32-csi-node/test
         run: make all CC="$CC"
 
+      - name: Run radar parser, routing and NVS regressions
+        working-directory: firmware/esp32-csi-node/test
+        run: make run_mmwave_freshness run_radar_fused_route run_radar_nvs CC="$CC"
+
       - name: Run serialize fuzzer (60s)
         working-directory: firmware/esp32-csi-node/test
         run: make run_serialize CC="$CC" FUZZ_DURATION=60 || echo "FUZZER_CRASH=serialize" >> "$GITHUB_ENV"

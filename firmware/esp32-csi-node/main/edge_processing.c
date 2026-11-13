@@ -984,7 +984,7 @@ static void send_vitals_packet(void)
         fpkt.mmwave_targets = mw.target_count;
         fpkt.mmwave_confidence = (mw.frame_count > 10) ? 80 : 40;
 
-        stream_sender_send((const uint8_t *)&fpkt, sizeof(fpkt));
+        stream_sender_send_radar_fused((const uint8_t *)&fpkt, sizeof(fpkt));
     } else {
         /* No mmWave — send standard 32-byte packet. */
         stream_sender_send((const uint8_t *)&pkt, sizeof(pkt));

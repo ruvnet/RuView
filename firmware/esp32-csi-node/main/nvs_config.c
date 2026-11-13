@@ -47,6 +47,7 @@ void nvs_config_load(nvs_config_t *cfg)
     strlcpy(cfg->target_ip, CONFIG_CSI_TARGET_IP, sizeof(cfg->target_ip));
 
     cfg->target_port = (uint16_t)CONFIG_CSI_TARGET_PORT;
+    cfg->radar_fused_port = 0; /* Only absent NVS or explicit zero selects legacy routing. */
     cfg->node_id     = (uint8_t)CONFIG_CSI_NODE_ID;
 
     /* ADR-029: Defaults for channel hopping and TDM.
@@ -109,7 +110,12 @@ void nvs_config_load(nvs_config_t *cfg)
     nvs_handle_t handle;
     esp_err_t err = nvs_open("csi_cfg", NVS_READONLY, &handle);
     if (err != ESP_OK) {
-        ESP_LOGI(TAG, "No NVS config found, using compiled defaults");
+        if (err == ESP_ERR_NVS_NOT_FOUND) {
+            ESP_LOGI(TAG, "No NVS config found, using compiled defaults");
+        } else {
+            cfg->radar_fused_port = 1; /* Unknown opt-in state must not select bulk. */
+            ESP_LOGW(TAG, "NVS config unreadable; split radar routing blocked");
+        }
         return;
     }
 
@@ -142,6 +148,20 @@ void nvs_config_load(nvs_config_t *cfg)
     if (nvs_get_u16(handle, "target_port", &port_val) == ESP_OK) {
         cfg->target_port = port_val;
         ESP_LOGI(TAG, "NVS override: target_port=%u", cfg->target_port);
+    }
+
+    /* Explicit opt-in split route. Preserve invalid intent as a blocked port
+     * so a bad nonzero/wrong-type value cannot silently resume legacy routing. */
+    uint16_t radar_port;
+    const esp_err_t radar_result = nvs_get_u16(handle, "radar_port", &radar_port);
+    if (radar_result == ESP_OK) {
+        cfg->radar_fused_port = radar_port;
+        if (radar_port != 0 && (radar_port < 1024 || radar_port == cfg->target_port)) {
+            ESP_LOGW(TAG, "Refusing invalid split radar port");
+        }
+    } else if (radar_result != ESP_ERR_NVS_NOT_FOUND) {
+        cfg->radar_fused_port = 1; /* Invalid reserved sentinel: fail closed. */
+        ESP_LOGW(TAG, "Refusing unreadable split radar port");
     }
 
     /* Node ID */

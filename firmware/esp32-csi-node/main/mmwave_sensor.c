@@ -71,6 +71,18 @@ static const char *TAG = "mmwave";
 /* ---- Shared state ---- */
 static mmwave_state_t s_state;
 static volatile bool s_running;
+static portMUX_TYPE s_state_lock = portMUX_INITIALIZER_UNLOCKED;
+/* Transport expiry only; this is not a clinical or occupancy qualification. */
+#define MMWAVE_DATA_MAX_AGE_US INT64_C(5000000)
+typedef struct {
+    int64_t presence_us, heart_us, breathing_us, distance_us;
+} mmwave_field_times_t;
+static mmwave_field_times_t s_field_times;
+
+static bool mmwave_time_fresh(int64_t observed, int64_t now)
+{
+    return observed > 0 && now >= observed && now - observed <= MMWAVE_DATA_MAX_AGE_US;
+}
 
 /* ======================================================================
  * MR60BHA2 Parser (corrected protocol from Seeed Arduino library)
@@ -106,63 +118,59 @@ static mr60_parser_t s_mr60;
 
 static void mr60_process_frame(uint16_t type, const uint8_t *data, uint16_t len)
 {
+    const int64_t now = esp_timer_get_time();
+    bool accepted = false;
+    portENTER_CRITICAL(&s_state_lock);
     s_state.frame_count++;
-    s_state.last_update_us = esp_timer_get_time();
-
     switch (type) {
-    case MR60_TYPE_BREATHING:
-        if (len >= sizeof(float)) {
-            /* Breathing rate as float32 (little-endian in payload). */
-            float br;
-            memcpy(&br, data, sizeof(float));
-            if (br >= 0.0f && br <= 60.0f) {
-                s_state.breathing_rate = br;
-            }
-        }
+    case MR60_TYPE_BREATHING: {
+        float value = NAN;
+        if (len >= sizeof(value)) memcpy(&value, data, sizeof(value));
+        const bool valid = isfinite(value) && value >= 0.0f && value <= 60.0f;
+        s_state.breathing_rate = valid ? value : 0.0f;
+        s_field_times.breathing_us = valid ? now : 0;
+        accepted = valid;
         break;
-
-    case MR60_TYPE_HEARTRATE:
-        if (len >= sizeof(float)) {
-            float hr;
-            memcpy(&hr, data, sizeof(float));
-            if (hr >= 0.0f && hr <= 250.0f) {
-                s_state.heart_rate_bpm = hr;
-            }
-        }
+    }
+    case MR60_TYPE_HEARTRATE: {
+        float value = NAN;
+        if (len >= sizeof(value)) memcpy(&value, data, sizeof(value));
+        const bool valid = isfinite(value) && value >= 0.0f && value <= 250.0f;
+        s_state.heart_rate_bpm = valid ? value : 0.0f;
+        s_field_times.heart_us = valid ? now : 0;
+        accepted = valid;
         break;
-
-    case MR60_TYPE_DISTANCE:
-        if (len >= sizeof(uint32_t) + sizeof(float)) {
-            /* Bytes 0-3: range flag (uint32 LE). 0 = no valid distance. */
-            uint32_t range_flag;
-            memcpy(&range_flag, data, sizeof(uint32_t));
-            if (range_flag != 0) {
-                float dist;
-                memcpy(&dist, &data[sizeof(uint32_t)], sizeof(float));
-                s_state.distance_cm = dist;
-            }
+    }
+    case MR60_TYPE_DISTANCE: {
+        uint32_t range_flag = 0;
+        float value = NAN;
+        if (len >= sizeof(range_flag) + sizeof(value)) {
+            memcpy(&range_flag, data, sizeof(range_flag));
+            memcpy(&value, data + sizeof(range_flag), sizeof(value));
         }
+        const bool valid = range_flag != 0 && isfinite(value) && value >= 0.0f;
+        s_state.distance_cm = valid ? value : 0.0f;
+        s_field_times.distance_us = valid ? now : 0;
+        accepted = valid;
         break;
-
+    }
     case MR60_TYPE_PRESENCE:
         if (len >= 1) {
-            s_state.person_present = (data[0] != 0);
-            /* MR60BHA2 exposes a single-target vital-sign presence flag rather
-             * than a reliable people-count frame. Keep the public count in
-             * lockstep with that authoritative flag so downstream clients do
-             * not report zero targets while fresh radar vitals are arriving. */
+            s_state.person_present = data[0] != 0;
             s_state.target_count = mmwave_mr60_target_count(s_state.person_present);
+            s_field_times.presence_us = now;
+            accepted = true;
             if (!s_state.person_present) {
-                s_state.heart_rate_bpm = 0.0f;
-                s_state.breathing_rate = 0.0f;
-                s_state.distance_cm = 0.0f;
+                s_state.heart_rate_bpm = s_state.breathing_rate = s_state.distance_cm = 0.0f;
+                s_field_times.heart_us = s_field_times.breathing_us = s_field_times.distance_us = 0;
             }
         }
         break;
-
     default:
         break;
     }
+    if (accepted) s_state.last_update_us = now;
+    portEXIT_CRITICAL(&s_state_lock);
 }
 
 static void mr60_feed_byte(uint8_t b)
@@ -249,15 +257,12 @@ static ld2410_parser_t s_ld;
 
 static void ld2410_process_frame(const uint8_t *data, uint16_t len)
 {
-    s_state.frame_count++;
-    s_state.last_update_us = esp_timer_get_time();
-
     if (len < 12) return;
 
     uint8_t data_type = data[0];   /* 0x02 = normal, 0x01 = engineering */
     uint8_t head_marker = data[1]; /* Must be 0xAA */
 
-    if (head_marker != LD2410_REPORT_HEAD) return;
+    if (head_marker != LD2410_REPORT_HEAD || (data_type != 1 && data_type != 2) || data[2] > 3) return;
 
     /* Normal mode target report (data_type 0x02 or 0x01) */
     uint8_t  target_state  = data[2];
@@ -271,6 +276,11 @@ static void ld2410_process_frame(const uint8_t *data, uint16_t len)
     (void)static_energy;
     (void)detect_dist;
 
+    const int64_t now = esp_timer_get_time();
+    portENTER_CRITICAL(&s_state_lock);
+    s_state.frame_count++;
+    s_state.last_update_us = now;
+    s_field_times.presence_us = s_field_times.distance_us = now;
     s_state.person_present = (target_state != 0);
     s_state.target_count = (target_state != 0) ? 1 : 0;
 
@@ -281,6 +291,7 @@ static void ld2410_process_frame(const uint8_t *data, uint16_t len)
     } else {
         s_state.distance_cm = 0.0f;
     }
+    portEXIT_CRITICAL(&s_state_lock);
 }
 
 static void ld2410_feed_byte(uint8_t b)
@@ -346,6 +357,7 @@ static void mock_mmwave_task(void *arg)
         float hr_noise = 2.0f * sinf((float)tick * 0.1f) + 0.5f * sinf((float)tick * 0.37f);
         float br_noise = 1.0f * sinf((float)tick * 0.07f) + 0.3f * sinf((float)tick * 0.23f);
 
+        portENTER_CRITICAL(&s_state_lock);
         s_state.heart_rate_bpm = hr_base + hr_noise;
         s_state.breathing_rate = br_base + br_noise;
         s_state.person_present = true;
@@ -353,6 +365,8 @@ static void mock_mmwave_task(void *arg)
         s_state.target_count = 1;
         s_state.frame_count++;
         s_state.last_update_us = esp_timer_get_time();
+        s_field_times = (mmwave_field_times_t){s_state.last_update_us, s_state.last_update_us,
+                                             s_state.last_update_us, s_state.last_update_us};
 
         /* Simulate person leaving at tick 200-250 (for scenario testing). */
         if (tick >= 200 && tick <= 250) {
@@ -363,6 +377,7 @@ static void mock_mmwave_task(void *arg)
             s_state.target_count = 0;
         }
 
+        portEXIT_CRITICAL(&s_state_lock);
         /* ~1 Hz update rate (matches real MR60BHA2). */
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
@@ -496,6 +511,7 @@ const char *mmwave_type_name(mmwave_type_t type)
 esp_err_t mmwave_sensor_init(int uart_tx_pin, int uart_rx_pin)
 {
     memset(&s_state, 0, sizeof(s_state));
+    memset(&s_field_times, 0, sizeof(s_field_times));
     memset(&s_mr60, 0, sizeof(s_mr60));
     memset(&s_ld, 0, sizeof(s_ld));
     s_running = true;
@@ -641,7 +657,30 @@ esp_err_t mmwave_sensor_init(int uart_tx_pin, int uart_rx_pin)
 
 bool mmwave_sensor_get_state(mmwave_state_t *state)
 {
-    if (!s_state.detected || state == NULL) return false;
-    memcpy(state, &s_state, sizeof(mmwave_state_t));
+    if (state == NULL) return false;
+    mmwave_field_times_t times;
+    portENTER_CRITICAL(&s_state_lock);
+    memcpy(state, &s_state, sizeof(*state));
+    times = s_field_times;
+    portEXIT_CRITICAL(&s_state_lock);
+    const int64_t now = esp_timer_get_time();
+    /* Missing presence is unavailable, never a new empty-room observation.
+     * The existing wire format cannot represent unknown range while present:
+     * mobile treats zero as a measured distance. Withhold that whole snapshot. */
+    if (!state->detected || !mmwave_time_fresh(times.presence_us, now) ||
+        (state->person_present && !mmwave_time_fresh(times.distance_us, now))) {
+        state->detected = false;
+        state->person_present = false;
+        state->target_count = 0;
+        state->heart_rate_bpm = state->breathing_rate = state->distance_cm = 0.0f;
+        return false;
+    }
+    if (!state->person_present) {
+        state->heart_rate_bpm = state->breathing_rate = state->distance_cm = 0.0f;
+    } else {
+        /* Zero is the existing unavailable encoding for numeric vital rates. */
+        if (!mmwave_time_fresh(times.heart_us, now)) state->heart_rate_bpm = 0.0f;
+        if (!mmwave_time_fresh(times.breathing_us, now)) state->breathing_rate = 0.0f;
+    }
     return true;
 }

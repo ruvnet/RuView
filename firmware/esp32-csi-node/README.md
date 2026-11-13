@@ -323,6 +323,27 @@ The boot log must identify `MR60BHA2` and the server must receive fresh
 `edge_fused_vitals` packets before the radar is considered connected. Radar
 reported heart and breathing values remain unvalidated, nonmedical evidence.
 
+##### Optional split destination for MR60 fused radar
+
+The default remains one target for every stream. An explicit `csi_cfg`
+NVS `u16` key `radar_port` opts the fresh MR60 fused-vitals branch into another
+UDP port on the **same configured `target_ip`**. Absent/zero means legacy;
+nonzero must be at least1024 and differ from `target_port`. For example, keep
+raw CSI and ordinary edge/sync/feature packets on a private receiver port and
+route only the existing48-byte `0xC5110004` MR60 packet to a radar-aware server.
+The configured node ID, MR60 type, finite/range bounds and presence/count
+consistency are checked, and the split path is capped at two packets/second.
+Invalid explicit configuration, invalid packets or a split send failure never
+fall back to the bulk destination. A wrong-type/unreadable NVS key blocks the
+split rather than silently resuming legacy routing.
+
+Provision this opt-in using an existing private NVS workflow which preserves
+network settings and the other namespace entries; it is not a new HTTP or
+serial configuration field. Confirm the receiving server handles fused radar
+without inserting it into RF learner ingress. Keep CSI acquisition enabled:
+the current edge processing cadence drives fused delivery. Firmware routing
+changes neither server output/privacy gates nor sensing qualification.
+
 ### 3. Provision WiFi credentials (no reflash needed)
 
 ```bash
@@ -648,6 +669,8 @@ python config_push.py --fleet nodes.txt --set edge_tier=1 --no-reboot
 
 Config is read only at boot, so a change does nothing until the node restarts.
 `config_push.py` therefore restarts it by default; `--no-reboot` stages instead.
+
+
 
 #### Why some parameters reboot-and-prove
 
