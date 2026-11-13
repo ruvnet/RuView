@@ -162,7 +162,7 @@ const SECTIONS = Object.freeze({
   validate: new Set(['wait_secs', 'udp_secs', 'min_pps', 'max_loss']),
   ota: new Set(['psk_file']),
 });
-const TOP_KEYS = new Set([...Object.keys(SECTIONS), 'defaults', 'nodes', 'steps', 'auto_assign', 'registry']);
+const TOP_KEYS = new Set([...Object.keys(SECTIONS), 'defaults', 'nodes', 'retired', 'steps', 'auto_assign', 'registry']);
 
 const expandHome = (p, home = homedir()) => (typeof p === 'string' && (p === '~' || p.startsWith('~/')) ? join(home, p.slice(2)) : p);
 
@@ -264,6 +264,17 @@ export function normalizeNodeConfig(doc, { home = homedir() } = {}) {
     });
   }
   if (doc.auto_assign !== undefined && typeof doc.auto_assign !== 'boolean') err('auto_assign', 'must be true or false');
+  // Boards that are gone for good: their retained registry IDs are released.
+  const retired = [];
+  if (doc.retired !== undefined && doc.retired !== null) {
+    if (!Array.isArray(doc.retired)) err('retired', 'must be a list of MAC addresses');
+    else doc.retired.forEach((m, i) => {
+      const mac = typeof m === 'string' ? m.toLowerCase() : null;
+      if (!mac || !MAC_RE.test(mac)) err(`retired[${i}]`, 'must be a MAC like aa:bb:cc:dd:ee:01');
+      else if (nodes.some((n) => n.mac === mac)) err(`retired[${i}]`, `${mac} is also listed under nodes; a board is either active or retired`);
+      else if (!retired.includes(mac)) retired.push(mac);
+    });
+  }
   if (doc.registry !== undefined && typeof doc.registry !== 'string') err('registry', 'must be a path');
 
   if (errors.length) {
@@ -283,6 +294,7 @@ export function normalizeNodeConfig(doc, { home = homedir() } = {}) {
     steps,
     defaults: obj(defaults) ? defaults : {},
     nodes,
+    retired,
     auto_assign: doc.auto_assign !== false,
     registry: expandHome(doc.registry, home) || DEFAULT_REGISTRY_PATH,
     tdm_total: nodes.filter((n) => n.tdm_slot !== undefined).length,
@@ -320,7 +332,9 @@ export function appendRegistry(path, event, fields = {}, now = () => new Date())
 
 // The last valid record for a MAC is its retained assignment. Explicit YAML
 // entries supersede that MAC's history, but must not reuse another board's ID.
-function registryNodes(registry) {
+// MACs under `retired:` are dropped, which releases their IDs.
+function registryNodes(registry, retired = []) {
+  const gone = new Set(retired);
   const nodes = [];
   for (const record of registry) {
     const id = typeof record?.node_id === 'number' ? record.node_id
@@ -328,13 +342,14 @@ function registryNodes(registry) {
     if (!record || typeof record.mac !== 'string' || !MAC_RE.test(record.mac)
       || !Number.isInteger(id) || id < 0 || id > 255) continue;
     const mac = record.mac.toLowerCase();
+    if (gone.has(mac)) continue;
     nodes.push({ mac, node_id: id, source: 'registry' });
   }
   return nodes;
 }
 
 function effectiveNodes(config, registry) {
-  const nodes = new Map(registryNodes(registry).map((node) => [node.mac, node]));
+  const nodes = new Map(registryNodes(registry, config.retired).map((node) => [node.mac, node]));
   for (const node of config.nodes) nodes.set(node.mac, { ...node, source: 'config' });
   return [...nodes.values()];
 }
@@ -346,6 +361,7 @@ function effectiveNodes(config, registry) {
 export function resolveNode(config, mac, registry = []) {
   const m = String(mac || '').toLowerCase();
   if (!MAC_RE.test(m)) throw new NodeConfigError('invalid_mac', `not a MAC address: ${mac}`);
+  if ((config.retired || []).includes(m)) throw new NodeConfigError('node_retired', `MAC ${m} is listed under retired:; remove it there (and add it under nodes:) to use this board again`);
   const listed = config.nodes.find((n) => n.mac === m);
   let entry; let source;
   if (listed) { entry = listed; source = 'config'; }
@@ -353,7 +369,7 @@ export function resolveNode(config, mac, registry = []) {
     const prior = effectiveNodes(config, registry).find((r) => r.mac === m);
     if (prior) { entry = { mac: m, node_id: Number(prior.node_id) }; source = 'registry'; }
     else if (config.auto_assign) {
-      const used = new Set([...config.nodes.map((n) => n.node_id), ...registryNodes(registry).map((r) => r.node_id)]);
+      const used = new Set([...config.nodes.map((n) => n.node_id), ...registryNodes(registry, config.retired).map((r) => r.node_id)]);
       let id = 1; while (used.has(id) && id < 256) id += 1;
       if (id > 255) throw new NodeConfigError('node_ids_exhausted', 'no free node_id left (0-255)');
       entry = { mac: m, node_id: id }; source = 'auto-assigned';
@@ -362,7 +378,7 @@ export function resolveNode(config, mac, registry = []) {
     }
   }
   const conflict = effectiveNodes(config, registry).find((other) => other.mac !== m && other.node_id === entry.node_id);
-  if (conflict) throw new NodeConfigError('node_id_conflict', `node_id ${entry.node_id} is also assigned to ${conflict.mac}; give each board a unique ID in the node config before applying`);
+  if (conflict) throw new NodeConfigError('node_id_conflict', `node_id ${entry.node_id} is also assigned to ${conflict.mac}; give each board a unique ID in the node config, or list ${conflict.mac} under retired: if that board is gone`);
   const node = { ...config.defaults, ...entry };
   if (node.tdm_slot !== undefined) node.tdm_total = config.tdm_total;
   return { node, source };
@@ -472,12 +488,22 @@ export function planNodes(config, { repoRoot, nets } = {}) {
     ota_psk: config.ota.psk_file ? `file ${config.ota.psk_file}` : 'not configured — remote OTA and config_push stay disabled',
   };
   if (!config.ota.psk_file) warnings.push('no ota.psk_file: provisioning disables OTA updates and remote config_push on these nodes');
+  // Resolve against the same registry `apply` uses, so plan reports what apply
+  // would refuse (e.g. node_id_conflict) instead of passing and failing later.
+  const registry = readRegistry(config.registry);
+  const conflicts = [];
   const nodes = config.nodes.map((n) => {
-    const { node } = resolveNode(config, n.mac, []);
-    return { mac: n.mac, node_id: node.node_id, zone: node.zone ?? null, tdm: node.tdm_slot !== undefined ? `${node.tdm_slot}/${node.tdm_total}` : null, edge_tier: node.edge_tier ?? null };
+    try {
+      const { node } = resolveNode(config, n.mac, registry);
+      return { mac: n.mac, node_id: node.node_id, zone: node.zone ?? null, tdm: node.tdm_slot !== undefined ? `${node.tdm_slot}/${node.tdm_total}` : null, edge_tier: node.edge_tier ?? null };
+    } catch (e) {
+      if (!(e instanceof NodeConfigError)) throw e;
+      conflicts.push({ mac: n.mac, node_id: n.node_id, reason: e.reason, detail: e.message });
+      return { mac: n.mac, node_id: n.node_id, zone: n.zone ?? null, tdm: null, edge_tier: null, error: e.reason };
+    }
   });
   return {
-    ok: !firmware.error,
+    ok: !firmware.error && conflicts.length === 0,
     config: config.path,
     ssid: config.wifi.ssid,
     target: target ? `${target.ip}:${config.aggregator.port}` : null,
@@ -488,6 +514,8 @@ export function planNodes(config, { repoRoot, nets } = {}) {
     auto_assign: config.auto_assign,
     registry: config.registry,
     nodes,
+    retired: config.retired,
+    conflicts,
     warnings,
   };
 }
@@ -688,7 +716,9 @@ export function formatNodes(kind, res) {
     lines.push(`  Secrets: wifi ${res.secrets.wifi_password}; ota ${res.secrets.ota_psk}`);
     lines.push(res.firmware.error ? `  Firmware: ✘ ${res.firmware.error} — ${res.firmware.detail}` : `  Firmware: ${res.firmware.kind} ${res.firmware.dir} (${res.firmware.chip} ${res.firmware.flashSize}; ${res.firmware.images.map((i) => `${i.role}:${i.integrity}`).join(', ')})`);
     lines.push(`  Validate: wait ${res.validate.wait_secs}s, measure ${res.validate.udp_secs}s, min ${res.validate.min_pps} Hz${res.validate.max_loss !== null ? `, max loss ${res.validate.max_loss}` : ''}`, '');
-    table(res.nodes, [['NODE', (r) => r.node_id], ['MAC', (r) => r.mac], ['ZONE', (r) => r.zone], ['TDM', (r) => r.tdm], ['TIER', (r) => r.edge_tier]]);
+    table(res.nodes, [['NODE', (r) => r.node_id], ['MAC', (r) => r.mac], ['ZONE', (r) => r.zone], ['TDM', (r) => r.tdm], ['TIER', (r) => r.edge_tier], ['STATE', (r) => r.error || 'ok']]);
+    for (const c of res.conflicts || []) lines.push(`  ✘ ${c.mac}: ${c.detail}`);
+    if (res.retired?.length) lines.push(`  retired (IDs released): ${res.retired.join(', ')}`);
     for (const w of res.warnings) lines.push(`  ! ${w}`);
   } else if (kind === 'status') {
     table(res.nodes, [['NODE', (r) => r.node_id], ['ZONE', (r) => r.zone], ['MAC', (r) => r.mac], ['IP', (r) => r.address], ['FW', (r) => r.firmware], ['HTTP', (r) => r.http], ['CSI Hz', (r) => r.csiRateHz], ['LOSS', (r) => (r.csiLossFraction === null ? null : `${(r.csiLossFraction * 100).toFixed(1)}%`)], ['RSSI', (r) => r.rssiMean], ['HEALTH', (r) => r.health]]);

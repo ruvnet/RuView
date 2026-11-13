@@ -162,7 +162,9 @@ ruview node apply --firmware-only --all --confirm   # no questions (scripts); fl
 - **Matching:** a board is identified by `esptool read_mac`. Listed MACs take
   their configured node. Unlisted MACs reuse the node ID they had before, from
   `~/.ruview/esp32-setup/devices.jsonl`, or get the next free ID unless
-  `auto_assign: false`.
+  `auto_assign: false`. Two boards may never share an ID: `plan` and `apply`
+  both refuse a conflict. A board that is gone for good goes under
+  `retired:`, which releases its retained ID for a replacement.
 - **Secrets:** `wifi.password_file` and `ota.psk_file` are paths (owner-only
   files) passed to `provision.py`. The harness never reads them. Inline
   passwords and env-var sources are refused.

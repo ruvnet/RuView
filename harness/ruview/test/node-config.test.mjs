@@ -13,8 +13,11 @@ const EXAMPLE = fileURLToPath(new URL('../../../firmware/esp32-csi-node/nodes.ex
 const NETS = { en0: [{ family: 'IPv4', internal: false, address: '192.168.1.20' }] };
 const MAC = 'aa:bb:cc:dd:ee:01';
 
+// Never read the operator's real ~/.ruview registry from tests.
+const NO_REGISTRY = join(tmpdir(), `ruview-node-test-no-registry-${process.pid}.jsonl`);
 const base = (extra = {}) => ({
   wifi: { ssid: 'Lab-2G', password_file: '/tmp/none' },
+  registry: NO_REGISTRY,
   nodes: [{ mac: MAC, node_id: 1, zone: 'living-room', tdm_slot: 0 }, { mac: 'aa:bb:cc:dd:ee:02', node_id: 2, tdm_slot: 1 }],
   ...extra,
 });
@@ -400,5 +403,53 @@ test('status uses an explicit reassignment without retaining the same MAC under 
     writeFileSync(s.reg, JSON.stringify({ event: 'node_assigned', mac: MAC, node_id: 7 }) + '\n');
     const result = await nodeStatus(s.config, fakeDeps({ silent: true }));
     assert.deepEqual(result.nodes.map(row => row.node_id), [1, 2]);
+  } finally { rmSync(s.dir, { recursive: true, force: true }); }
+});
+
+// Plan/apply parity and retired boards.
+test('plan reads the registry and reports the conflict apply would refuse', () => {
+  const repo = fakeRepo(); const s = withSecrets();
+  try {
+    const old = '11:22:33:44:55:66';
+    writeFileSync(s.reg, `${JSON.stringify({ event: 'node_assigned', mac: old, node_id: 1 })}\n`);
+    const res = planNodes({ ...s.config, path: '/x/nodes.yaml' }, { repoRoot: repo, nets: NETS });
+    assert.equal(res.ok, false, 'plan must not pass when apply would refuse');
+    assert.equal(res.conflicts.length, 1);
+    assert.equal(res.conflicts[0].reason, 'node_id_conflict');
+    assert.match(res.conflicts[0].detail, /retired:/, 'the error points at the way out');
+    assert.equal(res.nodes.find((n) => n.node_id === 1).error, 'node_id_conflict');
+  } finally { rmSync(repo, { recursive: true, force: true }); rmSync(s.dir, { recursive: true, force: true }); }
+});
+
+test('retired: releases a dead board\'s retained ID for its replacement', () => {
+  const old = '11:22:33:44:55:66';
+  const registry = [{ event: 'node_assigned', mac: old, node_id: 1 }];
+  assert.throws(() => resolveNode(cfg(), MAC, registry), (e) => e.reason === 'node_id_conflict');
+  const freed = resolveNode(cfg({ retired: [old.toUpperCase()] }), MAC, registry);
+  assert.deepEqual([freed.source, freed.node.node_id], ['config', 1]);
+  // auto-assign may reuse the released ID too
+  const fresh = resolveNode(normalizeNodeConfig({ wifi: { ssid: 'x' }, retired: [old] }), '11:22:33:44:55:77', registry);
+  assert.deepEqual([fresh.source, fresh.node.node_id], ['auto-assigned', 1]);
+});
+
+test('a retired board plugged back in is refused, not silently re-used', () => {
+  const old = '11:22:33:44:55:66';
+  assert.throws(() => resolveNode(cfg({ retired: [old] }), old, [{ mac: old, node_id: 9 }]), (e) => e.reason === 'node_retired');
+});
+
+test('retired: is validated and cannot overlap active nodes', () => {
+  const text = problems(base({ retired: ['nope', MAC] })).join('\n');
+  assert.ok(text.includes('retired[0]: must be a MAC'), text);
+  assert.ok(text.includes('retired[1]') && text.includes('also listed under nodes'), text);
+  assert.ok(problems(base({ retired: 'aa:bb:cc:dd:ee:09' })).join('\n').includes('retired: must be a list'));
+});
+
+test('status drops retired boards from the known inventory', async () => {
+  const s = withSecrets({ nodes: [], retired: [MAC] });
+  try {
+    writeFileSync(s.reg, `${JSON.stringify({ event: 'node_assigned', mac: MAC, node_id: 1 })}\n`);
+    const res = await nodeStatus(s.config, fakeDeps({ silent: true }));
+    assert.deepEqual(res.nodes, [], 'a retired, silent board is not reported offline');
+    assert.equal(res.ok, true);
   } finally { rmSync(s.dir, { recursive: true, force: true }); }
 });

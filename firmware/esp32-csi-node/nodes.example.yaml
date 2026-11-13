@@ -42,6 +42,11 @@ defaults:
   # channel: 6
   # pres_thresh: 50
 
+# Boards that are gone for good. Their node_id (kept in the registry) is
+# released so a replacement can take it; plugging a retired board back in is refused.
+# retired:
+#   - "aa:bb:cc:dd:ee:09"
+
 # Boards not listed get the next free node_id; the registry
 # (~/.ruview/esp32-setup/devices.jsonl) keeps it stable across runs.
 # Set false to refuse unlisted boards.

@@ -146,8 +146,7 @@ export function summarizeBootLog(text) {
   const lines = String(text).split(/\r?\n/);
   const csi = lines.filter((l) => /\bCSI cb #[1-9]\d*\b/.test(l)).length;
   const panic = lines.some((l) => /Guru Meditation|abort\(\) was called|Backtrace:|SPI flash busy detected|TG[01]_WDT/.test(l));
-  // Banners: "esp32-csi-node v0.8.1", "RuView … 0.8.1", "ESP32-S3 CSI Node (ADR-018 / ADR-110) — v0.8.15".
-  const version = (/(?:RuView|esp32-csi-node|CSI Node)[^\n]*?v?(\d+\.\d+\.\d+)/i.exec(text) || [])[1] || null;
+  const version = (/(?:RuView|esp32-csi-node|ESP32(?:-[A-Z0-9]+)? CSI Node)[^\n]*?v?(\d+\.\d+\.\d+)/i.exec(text) || [])[1] || null;
   return {
     lines: lines.filter(Boolean).length,
     csiCallbacks: csi,
