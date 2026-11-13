@@ -1664,13 +1664,7 @@ impl NodeState {
     ) -> Option<(CsiGridKey, CalibrationGridEvidence)> {
         self.calibration_grid_candidates(now)
             .into_iter()
-            .filter(|(grid, evidence)| {
-                grid.ppdu_type <= 3
-                    && evidence.span_s >= CALIBRATION_GRID_MIN_SPAN_S
-                    && evidence.rate_hz >= CALIBRATION_GRID_MIN_RATE_HZ
-                    && evidence.max_gap_s < CALIBRATION_GRID_MAX_GAP_S
-                    && evidence.latest_age_s < CALIBRATION_GRID_MAX_GAP_S
-            })
+            .filter(|(grid, evidence)| legacy_grid_readiness::eligible_grid(*grid, *evidence))
             // Density first. This was chosen to agree with `accept_grid` when
             // that gate locked each node onto the densest grid it had seen;
             // since #1894 the gate locks onto the most frequent grid instead,
@@ -9764,6 +9758,18 @@ async fn calibration_start(
         };
         *binding
     };
+    let source_grid_readiness=legacy_grid_readiness::inspect(&s,&request.source_node_ids,selected_binding,now)
+        .expect("validated binding includes the selected author");
+    if !source_grid_readiness.all_bound_nodes_ready {
+        return Json(serde_json::json!({
+            "success":false,
+            "error_code":"calibration_bound_grid_unavailable",
+            "error":format!("Legacy baseline uses one author and exact {}-bin/PPDU{} data. Placed nodes {:?} are not grid-ready. No baseline changed. Review grid diagnostics; managed per-source learning is a separate workflow.",selected_binding.grid.n_subcarriers,selected_binding.grid.ppdu_type,source_grid_readiness.nodes.iter().filter(|n|!n.ready).map(|n|n.node_id).collect::<Vec<_>>()),
+            "source_node_ids":request.source_node_ids,
+            "source_grid":selected_binding.grid,
+            "source_grid_readiness":source_grid_readiness,
+        }));
+    }
     if s.bootstrap_baseline_active {
         s.field_model = None;
         s.bootstrap_baseline_active = false;
@@ -9815,6 +9821,7 @@ async fn calibration_start(
                 "source_node_ids": s.calibration_source_node_ids,
                 "source_grid": selected_binding.grid,
                 "grid_evidence": selected_binding.evidence,
+                "source_grid_readiness":source_grid_readiness,
             }))
         }
         // ADR-080 #2: FieldModel init error chain stays server-side only.
@@ -9889,6 +9896,19 @@ async fn calibration_stop(
             "source_grid": source_grid,
             "latest_seen_ms": latest_seen_ms,
         }));
+    }
+    let unfinished=s.field_model.as_ref().is_some_and(|fm|matches!(fm.status(),CalibrationStatus::Collecting|CalibrationStatus::Uncalibrated));
+    if unfinished {
+        if let Some(readiness)=legacy_grid_readiness::inspect(&s,&source_node_ids,binding,std::time::Instant::now()) {
+            if readiness.known_incompatibility() {
+                return Json(serde_json::json!({
+                    "success":false,"error_code":"calibration_bound_grid_unavailable",
+                    "error":"A placed node now has only a different qualified raw CSI grid from this legacy baseline. Restore the frozen grid before finalizing, or review the separate managed per-source learner. The unfinished baseline was preserved.",
+                    "model_id":model_id,"source_node_ids":source_node_ids,"source_grid":source_grid,
+                    "source_grid_readiness":readiness,
+                }));
+            }
+        }
     }
     if let Some(ref mut fm) = s.field_model {
         // Guard: finalizing before enough empty-room frames have accumulated
@@ -10031,6 +10051,10 @@ async fn calibration_status(State(state): State<SharedState>) -> Json<serde_json
             { "active" } else { "stale" },
         })
     });
+    let source_grid_readiness=if bound {s.calibration_grid_binding.and_then(|binding| {
+        let ids:Vec<_>=s.calibration_source_node_ids.iter().copied().collect();
+        legacy_grid_readiness::inspect(&s,&ids,binding,now)
+    })} else {None};
     let mut response = serde_json::json!({
         "active": active,
         "status": status,
@@ -10082,6 +10106,7 @@ async fn calibration_status(State(state): State<SharedState>) -> Json<serde_json
             "numeric_vitals_authorized": false,
         })),
     });
+    response["source_grid_readiness"] = serde_json::json!(source_grid_readiness);
     response["boot_epoch"] = serde_json::json!(s.calibration_boot_epoch);
     response["session_id"] = serde_json::json!(if bound { s.calibration_session_id.clone() } else { None });
     response["binding_digest"] = serde_json::json!(if bound { s.calibration_binding_digest.clone() } else { None });
@@ -17166,3 +17191,10 @@ mod issue_2088_data_dir_tests {
         assert!(!models_dir.join("dd_model_2088.rvf").exists());
     }
 }
+
+#[cfg(test)]
+#[path="legacy_grid_readiness_tests.rs"]
+mod legacy_grid_readiness_tests;
+
+#[path="legacy_grid_readiness.rs"]
+mod legacy_grid_readiness;
