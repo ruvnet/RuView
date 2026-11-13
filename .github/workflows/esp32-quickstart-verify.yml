@@ -1,0 +1,56 @@
+name: ESP32-S3 quick start validation
+
+on:
+  pull_request:
+    paths:
+      - 'docs/tutorials/esp32-s3-csi-quickstart.md'
+      - 'docs/tutorials/evidence/esp32-s3-quickstart-2026-10-22/**'
+      - 'firmware/esp32-csi-node/version.txt'
+      - 'firmware/esp32-csi-node/partitions_*.csv'
+      - 'firmware/esp32-csi-node/provision.py'
+      - 'firmware/esp32-csi-node/config_push.py'
+      - 'v2/crates/wifi-densepose-sensing-server/src/cli.rs'
+      - 'docker/docker-compose.yml'
+      - 'docker/docker-entrypoint.sh'
+      - 'ui/**'
+      - 'scripts/esp32_quickstart_contract.py'
+      - 'scripts/verify-esp32-quickstart.py'
+      - 'scripts/tests/test_esp32_quickstart_contract.py'
+      - '.github/workflows/esp32-quickstart-verify.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'docs/tutorials/esp32-s3-csi-quickstart.md'
+      - 'docs/tutorials/evidence/esp32-s3-quickstart-2026-10-22/**'
+      - 'firmware/esp32-csi-node/version.txt'
+      - 'firmware/esp32-csi-node/partitions_*.csv'
+      - 'firmware/esp32-csi-node/provision.py'
+      - 'firmware/esp32-csi-node/config_push.py'
+      - 'v2/crates/wifi-densepose-sensing-server/src/cli.rs'
+      - 'docker/docker-compose.yml'
+      - 'docker/docker-entrypoint.sh'
+      - 'ui/**'
+      - 'scripts/esp32_quickstart_contract.py'
+      - 'scripts/verify-esp32-quickstart.py'
+      - 'scripts/tests/test_esp32_quickstart_contract.py'
+      - '.github/workflows/esp32-quickstart-verify.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: The ESP32-S3 quick start matches the repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          submodules: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - name: Test the quick start contract
+        run: python -m unittest discover -s scripts/tests -p test_esp32_quickstart_contract.py
+      - name: Verify the guide against the repository and the captured evidence
+        run: python scripts/verify-esp32-quickstart.py
