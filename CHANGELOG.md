@@ -7,6 +7,99 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **ruv-FANN proof tooling and a default-off server shadow (ADR-426).**
+  `ruview-fann-repro` checks whether a fit is reproducible across machines;
+  `ruview-fann-fit` exports a head from Train rows; `ruview-fann-replay
+  --learning-curve` refits on growing Train prefixes; and
+  `scripts/build_replay_rows.py` turns a server feature capture into replay
+  rows with radar-gated or incumbent labels. Every report now states where its
+  labels came from and whether they are an independent reference. The sensing
+  server gains an optional `fann-shadow` cargo feature (off by default): with
+  `RUVIEW_FANN_SHADOW_LOG` it captures per-node features, with
+  `RUVIEW_FANN_SHADOW_HEAD` it scores a head beside the live classification
+  and reports disagreement at `GET /api/v1/shadow/fann`. The shadow has no
+  path to a published result. MEASURED: fits are bit-identical across three
+  Linux targets but differ on Windows (`f32::exp` differs), while one exported
+  head scores identically on all four. On a live ESP32-C6 with incumbent
+  labels, the candidate and the linear control both collapse to "always
+  occupied", because the classifier they were imitating is itself always on:
+  MEASURED against keyboard-activity and operator-declared labels on one node
+  in one room, the existing per-node classifier reported present on 99.6 % of
+  held-out empty-room observations. On the same held-out data a class-balanced
+  fit (`--balance`) gave the ruv-FANN candidate 2.6 % false positives at
+  87.2 % sensitivity and the linear control 11.9 % at 55.3 %. One afternoon,
+  seated-and-typing occupancy only; the 90 % sensitivity gate is not met.
+  A windowed schema, `ruview.node-features/2` (variability over 30 s instead
+  of levels, `ruview-fann-window` to re-encode captures), then removed the
+  drift: 0 false positives in 3,069 held-out empty observations and 91 %
+  sensitivity for both the candidate and the linear control, which no longer
+  differ.
+
+- **Any-source sensor fusion: per-zone presence from CSI plus any sensor (ADR-424).**
+  `POST /api/v1/sources/readings` accepts JSON-line readings from any sensor or
+  time series; `GET /api/v1/zones` returns one fused presence probability per
+  zone with confidence, agreement, an evidence grade and each source's own
+  contribution. CSI nodes join a zone through `RUVIEW_NODE_ZONES`. A stale
+  source lowers confidence and never reads as empty; any synthetic input grades
+  the result SYNTHETIC; a reading posted to the open route is a claim (CLAIMED),
+  and only the server's own hardware readings are MEASURED. Fusion weights are
+  placeholders (`weights_measured: false`). `/api/v1/pose/zones/summary` no
+  longer returns four invented zones. Tests use SYNTHETIC readings; no accuracy
+  claim.
+- **Track-aware benchmark (ADR-424 D7).** `scripts/track_benchmark.py` scores
+  predicted person tracks against a per-person reference, one held-out room at
+  a time. Windows the reference cannot resolve (count disagreement, tracks too
+  close, a track just appeared or left, a missing position) are their own
+  `ambiguous` class, reported with share and reasons and never forced into a
+  count. Protocol in `docs/adr/ADR-424/track-benchmark-protocol.md`. No hardware
+  run yet.
+- **Default-off ruv-FANN presence head (ADR-425).** New crate
+  `ruview-fann-head`: bit-identical parity with the incumbent linear head, a
+  fixed 49-parameter candidate with a feature-matched linear control, export and
+  load bound to engine revision and context, shadow scoring with no authority,
+  and `ruview-fann-replay` with the qualification gates fixed in code. Nothing
+  in the server depends on it. Engine times on one workstation (MEASURED):
+  incumbent 6.5 ns, same head through ruv-FANN 33.6 ns, candidate 61-70 ns.
+  Tests use SYNTHETIC features; no sensing-accuracy claim.
+
+- **ESP32 firmware 0.8.18: HE-LTF validity gate for C5/C6 and node mDNS discovery (ADR-423).**
+  On the ESP32-C6 bench, 77-90 % of HE-SU CSI frames arrived with
+  `rx_ctrl.rx_channel_estimate_info_vld = 0` and an unstable estimate (MEASURED).
+  HE-capable targets now drop those frames by default before edge DSP and
+  streaming (Kconfig `CSI_HE_INVALID_POLICY`: drop / tag via ADR-018 byte 19
+  bit 5 / pass). On COM11 the gate dropped 78.3 % of HE frames with no faults,
+  and the streamed frame rate stayed at 36-42 per second (MEASURED). Nodes also
+  advertise `_ruview-node._tcp` with TXT `node_id`, `fw`, `chip`,
+  `csi_target`. The node never follows a discovered server. mDNS is on for the
+  C6 4 MB and S3 4 MB images and off where the image would exceed its CI size
+  gate (S3 8 MB 1176/1200 KiB, XIAO C6, C5). No sensing-accuracy claim.
+- **Presence benchmark harness (ADR-423 D3).** `scripts/radar_window_logger.py`,
+  `scripts/csi_presence_recorder.py` and `scripts/presence_benchmark.py` record
+  60 GHz radar reference labels and per-node CSI presence, then score presence
+  with a leave-one-room-out threshold against a majority-class baseline;
+  protocol in `docs/adr/ADR-423/presence-benchmark-protocol.md`. Tests use
+  SYNTHETIC data; no hardware result yet.
+- **HA blueprints state which primitives the server cannot publish yet.**
+  `bed_exit`, `meeting_in_progress` and `bathroom_occupied` have no server
+  source, so blueprints 03/05/06 now say so; the validator reads the MQTT
+  planner and fails on a mismatch, and now runs when blueprints change.
+
+- **CLI calibration commands accept merged-LTF CSI frames (192 subcarriers, refs #1000).**
+  ESP32-S3 firmware enables L-LTF + HT-LTF + STBC HT-LTF, so HT frames carry 192
+  complex values. `parse_csi_packet` passed them through whole, and every frame
+  failed the HT20 tier geometry check, so `calibrate`/`enroll`/`room-watch` could
+  never record a baseline on those nodes. The parser now slices the HT-LTF segment
+  `[64..128)`. Contributed by @schaferjart (#1002), who validated it on a bare
+  ESP32-S3-N16R8.
+
+- **ESP32-C5 release candidate (hardware qualification pending).** Add a
+  headless IDF 6.0.2 C5 build and checksum-verified operator variant, use the
+  C5 ROM's `0x2000` bootloader address, and check image chip IDs and generated
+  flash layouts before packaging. The baseline keeps UART onboarding, a
+  conservative DSP rate, 2.4 GHz association, and no assumed LED/PSRAM wiring.
+  The C5 dependency graph excludes unused display libraries. No measured C5
+  runtime improvement or sensing accuracy is claimed.
+
 
 ### Community batch (PRs #2100-#2157 by aepod, reviewed and integrated)
 
@@ -47,6 +140,7 @@ Integrated as one set: conflicts resolved, review findings fixed, validated on t
 - **`archive/v1` (the original pure-Python implementation) formally deprecated (ADR-187)** — commits `1fb5397dd`, `b1417fb6e`; refs #509, #1125. Added `archive/v1/DEPRECATED.md` (a loud tombstone) and a `> ⚠️ DEPRECATED` notice atop `archive/v1/README.md`, both pointing at the maintained `v2/` workspace and the `wifi-densepose 2.x` / `ruview` pip wheel (ADR-117). Records the honest fact behind #509: `archive/v1`'s `DensePoseHead` is **architecture-only** — random `kaiming_normal_` init with **zero committed checkpoints** under `archive/v1/` (MEASURED by Glob over `**/*.{pth,onnx,safetensors,pt,ckpt,bin}`). The ADR-028 deterministic proof `archive/v1/data/proof/verify.py` stays live and is explicitly out of scope. The same effort added a **"Model weights: what's real, what's not" three-tier table** to `README.md` + `docs/user-guide.md`, separating real-and-validated checkpoints (presence 82.3% held-out temporal-triplet, MM-Fi pose 82.69% torso-PCK@20, `count_v1`) from the real-but-weak on-device `pose_v1` (PCK@20 = 3.0%, runtime `confidence=0` stub, below the ADR-079 ≥35% target) from the architecture-only `archive/v1` head — and caveated every live single-ESP32 17-keypoint advertisement accordingly. Docs/labeling only; no code or model behavior changed.
 
 ### Fixed
+- **`feature_state` emit cadence is now derived from the configured fast-loop period instead of a hardcoded divider.** `fast_loop_cb()` emitted once every 5 ticks, which is 1 Hz only at the 200 ms `ADAPTIVE_FAST_LOOP_MS` default. Kconfig permits 50–2000 ms, so a node tuned toward the 50 ms floor emitted at 4 Hz — reintroducing exactly the WiFi TX-airtime saturation the divider was added to prevent (`sendto ENOMEM — backing off 100 ms`, ~90 % of CSI frames dropped before reaching the host). The divider is now `FEATURE_STATE_PERIOD_MS / fast_loop_ms` with a floor of 1, holding ~1 Hz across the whole permitted range; behaviour at the 200 ms default is unchanged (divider still evaluates to 5). Also refreshed the stale note in `sdkconfig.defaults` that still described this rate-limit as an unimplemented follow-up.
 - **Pose-vitals, desktop, and repository-integrity issue remediation.** Breathing confidence now measures periodic autocorrelation at the estimated respiratory frequency instead of penalizing clean sinusoidal signals via crest factor (#1610). The desktop launcher resolves the Windows `.exe`, uses `where` for PATH lookup, and passes log filtering through `RUST_LOG`; its React versions, Vite type declarations, and Tauri UI hook working directories are aligned (#1516, #1517, #1518). Runtime session secrets written from `v2/` are ignored, and contributor-harness provenance inputs are pinned to LF across Windows checkouts (#1519, #1520). With explicit owner authorization, the six raw CSI/person-data capture and metadata files identified by ADR-299 were removed from the current tree; historical copies remain pending separately coordinated incident response.
 - **`docs/huggingface/MODEL_CARD.md` had drifted from the model card actually published on the Hub (issue #1481).** Every filename in its "Files in this repo" table (`pretrained-encoder.onnx`, `pretrained-heads.onnx`, `pretrained.rvf`, `room-profiles.json`) pointed at files never uploaded to `ruvnet/wifi-densepose-pretrained` — only `config.json` existed. Replaced the in-repo card with the content actually live on the Hub (`model.safetensors`, `model-q{2,4,8}.bin`, `node-{1,2}.json`, `presence-head.json`, `csi-embed-v2.*`, honest v1→v2 retraction of the single-class "100%" presence claim) and added a "Using with the Rust sensing server (RVF conversion)" section documenting the `--convert-model`/`--convert-out` and `--model` auto-convert paths that neither card previously mentioned.
 - **`--convert-model` failed on the published `model.safetensors`: NUL-padded safetensors header rejected by strict JSON parse (issue #1480, #894 follow-up).** The reference safetensors format pads its JSON header to an 8-byte boundary with trailing NUL bytes; `safetensors_to_rvf` (`wifi-densepose-sensing-server/src/model_format.rs`) fed the full declared-length header slice straight to `serde_json::from_slice`, which rejects the padding as "trailing characters." Since the only published full-precision weight file exercises this padding, `--convert-model` could not convert it at all. Fixed by trimming trailing NUL/whitespace bytes before parsing. Pinned by `safetensors_nul_padded_header_converts` (a header padded to the 8-byte boundary, matching the real HF file, converts and round-trips its weights through `ProgressiveLoader`).
@@ -726,6 +820,24 @@ Model release (no new firmware binary). Firmware remains at v0.6.0-esp32.
 
 ### Verified
 - Real hardware: ESP32-S3 (COM7) WiFi CSI + ESP32-C6/MR60BHA2 (COM4) 60 GHz mmWave running concurrently. HR=75 bpm, BR=25/min at 52 cm range. All 11 QEMU CI jobs green.
+
+## [0.8.16-esp32] - 2026-10-26
+
+- Keep the container entrypoint on LF in Windows checkouts so the built Linux
+  image can start successfully.
+- Restrict MR60BHA2 probe identification to its heart-rate, distance, and
+  presence frame types. Ambiguous LD6002B/LD6004 work-mode, low-power, and
+  target headers no longer establish an MR60BHA2 identity (#2136).
+- Generate test ES256 keys with the existing Ring backend, removing the
+  obsolete test-only curve dependency. Update constant-time arithmetic and
+  Tokio to patched releases. Checksum-verified ZIP and Wasmtime cache compatibility
+  patches retain upstream source code and use Zstandard 0.14.3. The existing
+  audit policy is unchanged; the new upstream archive/cache test gates
+  exercise the patched dependencies.
+- Host tests and firmware builds validate the probe change. A live MR60BHA2
+  kit was read through its existing ESPHome API; that checks the network
+  integration, not the new firmware image or sensing accuracy. Firmware
+  bundles remain prerelease builds without new physical-board qualification.
 
 ## [0.8.15-esp32] - 2026-10-21
 

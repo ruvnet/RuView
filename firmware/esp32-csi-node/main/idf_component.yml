@@ -1,17 +1,29 @@
 ## ESP-IDF Managed Component Dependencies (ADR-045)
 dependencies:
   ## LVGL graphics library
-  lvgl/lvgl: "~8.3"
+  lvgl/lvgl:
+    version: "~8.3"
+    rules:
+      - if: "target != esp32c5"
 
   ## CST816S capacitive touch driver
-  espressif/esp_lcd_touch_cst816s: "^1.0"
+  espressif/esp_lcd_touch_cst816s:
+    version: "^1.0"
+    rules:
+      - if: "target != esp32c5"
 
   ## LCD touch abstraction
-  espressif/esp_lcd_touch: "^1.0"
+  espressif/esp_lcd_touch:
+    version: "^1.0"
+    rules:
+      - if: "target != esp32c5"
 
   ## Onboard WS2812 LED Disabling
   # 3.1.0 needs the IDF >= 5.5 API rmt_tx_switch_gpio; stay on 3.0.x for IDF 5.4
   espressif/led_strip: "~3.0.3"
+
+  ## mDNS responder for node discovery (node_mdns.c). Out of tree since IDF 5.0.
+  espressif/mdns: "^1.8.0"
 
   ## cJSON for config_api.c.
   ## Bundled as the `json` component up to ESP-IDF 5.x and moved out to the

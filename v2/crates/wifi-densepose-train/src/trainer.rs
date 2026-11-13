@@ -364,11 +364,43 @@ impl Trainer {
     /// Runs inference (no gradient) over the full dataset using the configured
     /// batch size.
     pub fn evaluate(&self, dataset: &dyn CsiDataset) -> Result<MetricsResult, TrainError> {
+        self.evaluate_inner(dataset, None)
+    }
+
+    /// Evaluate exactly like [`Trainer::evaluate`] (same loop, same metric),
+    /// additionally writing per-sample predicted + ground-truth keypoints as
+    /// JSONL to `dump_path`.
+    ///
+    /// Each line is `{"idx":N,"pred":[[x,y],..],"gt":[[x,y],..],"vis":[..]}`
+    /// in dataset order (evaluation never shuffles), so `idx` is the dataset
+    /// window index. Used by `train --eval-only --dump-preds`.
+    pub fn evaluate_with_dump(
+        &self,
+        dataset: &dyn CsiDataset,
+        dump_path: &Path,
+    ) -> Result<MetricsResult, TrainError> {
+        let file = std::fs::File::create(dump_path)
+            .map_err(|e| TrainError::training_step(format!("create dump file: {e}")))?;
+        let mut sink = std::io::BufWriter::new(file);
+        let result = self.evaluate_inner(dataset, Some(&mut sink))?;
+        sink.flush()
+            .map_err(|e| TrainError::training_step(format!("flush dump file: {e}")))?;
+        Ok(result)
+    }
+
+    /// Shared evaluation loop behind [`Trainer::evaluate`] and
+    /// [`Trainer::evaluate_with_dump`].
+    fn evaluate_inner(
+        &self,
+        dataset: &dyn CsiDataset,
+        mut dump: Option<&mut dyn IoWrite>,
+    ) -> Result<MetricsResult, TrainError> {
         if dataset.is_empty() {
             return Err(TrainError::EmptyDataset);
         }
 
         let mut acc = MetricsAccumulator::default_threshold();
+        let mut global_idx: usize = 0;
 
         let batches = make_batches(
             dataset,
@@ -393,6 +425,25 @@ impl Trainer {
                 let vis_np = extract_vis_ndarray(vis_batch, b);
 
                 acc.update(&pred_kp_np, &gt_kp_np, &vis_np);
+
+                if let Some(sink) = dump.as_deref_mut() {
+                    let pred_v: Vec<[f32; 2]> = pred_kp_np
+                        .rows()
+                        .into_iter()
+                        .map(|r| [r[0], r[1]])
+                        .collect();
+                    let gt_v: Vec<[f32; 2]> =
+                        gt_kp_np.rows().into_iter().map(|r| [r[0], r[1]]).collect();
+                    let line = serde_json::json!({
+                        "idx": global_idx,
+                        "pred": pred_v,
+                        "gt": gt_v,
+                        "vis": vis_np.to_vec(),
+                    });
+                    writeln!(sink, "{line}")
+                        .map_err(|e| TrainError::training_step(format!("write dump line: {e}")))?;
+                }
+                global_idx += 1;
             }
         }
 

@@ -20,6 +20,8 @@ set(SRCS
     "c6_sync_espnow.c"
     # ADR-110 B1/B2 unblock — soft-AP HE/TWT (C6-only when enabled)
     "c6_softap_he.c"
+    # Node discovery over mDNS (runtime-gated by CONFIG_CSI_NODE_MDNS)
+    "node_mdns.c"
 )
 
 # ESP-IDF v6+: headers must resolve via explicit REQUIRES (no implicit deps).
@@ -46,11 +48,15 @@ set(REQUIRES
     mbedtls
     efuse
     led_strip
+    mdns                  # node_mdns.c (espressif/mdns managed component)
 )
 
-# ADR-110: C6-only components — pulled in when building for esp32c6.
-# Note: CONFIG_* symbols are not available in main CMakeLists.txt evaluation —
-# we use the IDF_TARGET variable that idf.py sets from sdkconfig.defaults / set-target.
+if(IDF_TARGET STREQUAL "esp32c5" AND
+   "${IDF_VERSION_MAJOR}.${IDF_VERSION_MINOR}.${IDF_VERSION_PATCH}" VERSION_LESS "5.5.2")
+    message(FATAL_ERROR "RuView ESP32-C5 requires ESP-IDF >= 5.5.2")
+endif()
+
+# ADR-110: C6-only components. Use IDF_TARGET during dependency discovery.
 if(IDF_TARGET STREQUAL "esp32c6")
     list(APPEND REQUIRES ieee802154 ulp esp_hw_support)
 endif()

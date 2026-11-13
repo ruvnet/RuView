@@ -14,6 +14,9 @@
 #include "esp_err.h"
 #include "esp_http_server.h"  /* httpd_req_t, for ota_auth_check() */
 
+/** HTTP port of the OTA/control server (also advertised over mDNS). */
+#define OTA_UPDATE_PORT 8032
+
 /**
  * Initialize the OTA update HTTP server.
  * Starts a lightweight HTTP server on port 8032 that accepts

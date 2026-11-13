@@ -17,6 +17,7 @@
 #include "edge_processing.h"
 #include "c6_timesync.h"  /* ADR-110: 802.15.4 epoch for cross-node alignment */
 #include "c6_sync_espnow.h" /* ADR-110 §A0.11: mesh-aligned epoch for sync packet */
+#include "csi_he_gate.h"     /* ADR-423 D1: HE-LTF validity gate */
 
 #include <string.h>
 #include "esp_log.h"
@@ -74,7 +75,7 @@ static uint32_t s_rate_skip = 0;
 #define CSI_SELF_PING_INTERVAL_MS (1000U / CONFIG_CSI_SELF_PING_HZ)
 
 #ifndef CONFIG_EDGE_DSP_SAMPLE_HZ
-#if CONFIG_IDF_TARGET_ESP32C6
+#if CONFIG_IDF_TARGET_ESP32C6 || CONFIG_IDF_TARGET_ESP32C5
 #define CONFIG_EDGE_DSP_SAMPLE_HZ 8
 #else
 #define CONFIG_EDGE_DSP_SAMPLE_HZ 20
@@ -118,6 +119,19 @@ static int64_t s_last_process_us = 0;
  * yet", which no real bucket can collide with. */
 static uint64_t s_last_gate_bucket = UINT64_MAX;
 static uint32_t s_early_drop = 0;
+
+/* ADR-423 D1: HE-LTF validity gate. Counted for every HE PPDU the driver
+ * delivers (before the rate gate), so the reported ratio is the radio's, not
+ * the post-gate sample's. */
+#if defined(CONFIG_CSI_HE_INVALID_POLICY_TAG)
+#define CSI_HE_POLICY CSI_HE_POLICY_TAG
+#elif defined(CONFIG_CSI_HE_INVALID_POLICY_PASS)
+#define CSI_HE_POLICY CSI_HE_POLICY_PASS
+#else
+#define CSI_HE_POLICY CSI_HE_POLICY_DROP
+#endif
+static uint32_t s_he_valid = 0;
+static uint32_t s_he_invalid = 0;
 
 /* ---- ADR-029: Channel-hop state ---- */
 
@@ -287,6 +301,42 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
 {
     (void)ctx;
 
+    /* ADR-060: MAC address filtering — MOVED ABOVE the rate gate.
+     *
+     * The gate below stamps s_last_process_us before this filter ran, so a
+     * frame from any foreign transmitter claimed the 20 ms window and was then
+     * discarded here — starving the filtered stream. Measured on an ESP32-C6
+     * locked to its associated AP: 1.7 CSI/s instead of ~20 Hz. Filtering
+     * first preserves the gate's crash protection (processing is still capped
+     * at 50 Hz) while letting the matched transmitter actually fill the slots.
+     * With no filter configured the behaviour is byte-for-byte unchanged.
+     *
+     * Uses defensively-copied s_filter_mac instead of g_nvs_config (which can
+     * be corrupted by wifi_init_sta — same root cause as the node_id clobber). */
+    if (s_filter_mac_set) {
+        if (memcmp(info->mac, s_filter_mac, 6) != 0) {
+            return;  /* Source MAC doesn't match filter — skip frame. */
+        }
+    }
+
+    /* ADR-423 D1: decide on HE estimate validity BEFORE the rate gate, so an
+     * invalid frame cannot claim the 20 ms slot that a valid one would fill
+     * (the same starvation the ADR-060 move above fixed for MAC filtering). */
+    csi_he_action_t he_action = CSI_HE_ACTION_ACCEPT;
+#if CONFIG_SOC_WIFI_HE_SUPPORT
+    {
+        unsigned bb = info->rx_ctrl.cur_bb_format;
+        bool vld = info->rx_ctrl.rx_channel_estimate_info_vld;
+        if (bb >= CSI_BB_FORMAT_HE_MIN) {
+            if (vld) { s_he_valid++; } else { s_he_invalid++; }
+        }
+        he_action = csi_he_gate_action(bb, vld, CSI_HE_POLICY);
+        if (he_action == CSI_HE_ACTION_DROP) {
+            return;
+        }
+    }
+#endif
+
     /* Early rate gate: drop excess callbacks to ~50 Hz to prevent
      * SPI flash cache crash in WiFi ISR (wDev_ProcessFiq).
      *
@@ -340,15 +390,6 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
     }
     s_last_process_us = now_us;
 
-    /* ADR-060: MAC address filtering — drop frames from non-matching sources.
-     * Uses defensively-copied s_filter_mac instead of g_nvs_config (which can
-     * be corrupted by wifi_init_sta — same root cause as the node_id clobber). */
-    if (s_filter_mac_set) {
-        if (memcmp(info->mac, s_filter_mac, 6) != 0) {
-            return;  /* Source MAC doesn't match filter — skip frame. */
-        }
-    }
-
     s_cb_count++;
 
     if (s_cb_count <= 3 || (s_cb_count % 100) == 0) {
@@ -356,9 +397,18 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
                  (unsigned long)s_cb_count, info->len,
                  info->rx_ctrl.rssi, info->rx_ctrl.channel);
     }
+#if CONFIG_SOC_WIFI_HE_SUPPORT
+    if ((s_cb_count % 1000) == 0) {
+        ESP_LOGI(TAG, "ADR-423 HE estimate: valid=%lu invalid=%lu policy=%d",
+                 (unsigned long)s_he_valid, (unsigned long)s_he_invalid, (int)CSI_HE_POLICY);
+    }
+#endif
 
     uint8_t frame_buf[CSI_MAX_FRAME_SIZE];
     size_t frame_len = csi_serialize_frame(info, frame_buf, sizeof(frame_buf));
+    if (he_action == CSI_HE_ACTION_TAG && frame_len > 19) {
+        frame_buf[19] |= CSI_FRAME_FLAG_HE_ESTIMATE_INVALID;  /* ADR-423 D1 */
+    }
 
     if (frame_len > 0) {
         /* Rate-limit UDP sends to avoid ENOMEM from lwIP pbuf exhaustion.
@@ -385,7 +435,9 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
      * while the on-device Tier 1/2 pipeline receives a uniform, sustainable
      * stream. Enqueuing every burst frame overloaded the unicore C6 DSP and
      * turned 30-40 callback pps into an irregular approximately 8 Hz subset. */
-    if (frame_len > CSI_HEADER_SIZE) {
+    /* ADR-423 D1: a tagged (invalid-estimate) frame is streamed for study but
+     * never reaches presence/vitals/top-K. */
+    if (frame_len > CSI_HEADER_SIZE && he_action != CSI_HE_ACTION_TAG) {
         if (s_next_edge_enqueue_us == 0) {
             s_next_edge_enqueue_us = now_us;
         }
@@ -928,4 +980,10 @@ esp_err_t csi_inject_ndp_frame(void)
     }
 
     return err;
+}
+
+void csi_collector_get_he_validity(uint32_t *valid, uint32_t *invalid)
+{
+    if (valid)   *valid = s_he_valid;
+    if (invalid) *invalid = s_he_invalid;
 }

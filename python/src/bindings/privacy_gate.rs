@@ -24,7 +24,7 @@ use wifi_densepose_bfld::PrivacyClass;
 /// Python-facing wrapper for [`wifi_densepose_bfld::PrivacyClass`].
 ///
 /// Repr matches the Rust enum byte values 0..=3.
-#[pyclass(eq, eq_int, hash, frozen, name = "PrivacyClass", module = "wifi_densepose")]
+#[pyclass(from_py_object, eq, eq_int, hash, frozen, name = "PrivacyClass", module = "wifi_densepose")]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum PyPrivacyClass {
     Raw = 0,

@@ -37,6 +37,16 @@ int main(void)
 {
     uint8_t buf[256];
 
+    /* 0x0Axx is not an identity: Hi-Link LD6002B/LD6004 use overlapping
+     * frame structure, with these IDs assigned to work-mode/low-power/targets. */
+    CHECK(!mmwave_mr60_identifying_type(0x0A14), "ambiguous LD6002B work-mode type rejected (#2136)");
+    CHECK(!mmwave_mr60_identifying_type(0x0A13), "ambiguous LD6002B low-power type rejected (#2136)");
+    CHECK(!mmwave_mr60_identifying_type(0x0A04), "ambiguous LD6002B target type rejected (#2136)");
+    CHECK(!mmwave_mr60_identifying_type(0x0A99), "unknown 0x0A family type rejected");
+    CHECK(mmwave_mr60_identifying_type(0x0A15), "MR60BHA2 heart-rate type identifies sensor");
+    CHECK(mmwave_mr60_identifying_type(0x0A16), "MR60BHA2 distance type identifies sensor");
+    CHECK(mmwave_mr60_identifying_type(0x0F09), "MR60BHA2 presence type identifies sensor");
+
     /* 1. A real basic-report frame (data len 13) validates. */
     int n = make_frame(buf, 13);
     CHECK(mmwave_ld2410_valid_at(buf, 0, n), "valid basic frame (len=13) accepted");

@@ -33,7 +33,7 @@ use wifi_densepose_core::{Confidence, Keypoint, KeypointType};
 // `hash` makes the enum hashable in Python (usable as dict keys + set
 // members) — derived from `Hash` on the Rust side. `frozen` is a
 // hard requirement for `hash` per pyo3 contract.
-#[pyclass(eq, eq_int, hash, frozen, name = "KeypointType")]
+#[pyclass(from_py_object, eq, eq_int, hash, frozen, name = "KeypointType")]
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PyKeypointType {
     Nose = 0,
@@ -177,7 +177,7 @@ impl PyKeypoint {
 /// kp_3d = Keypoint(KeypointType.LeftWrist, 0.2, 0.4, 0.8, z=0.1)
 /// print(kp_3d.position_3d)  # (0.2, 0.4, 0.1)
 /// ```
-#[pyclass(frozen, name = "Keypoint")]
+#[pyclass(from_py_object, frozen, name = "Keypoint")]
 #[derive(Clone)]
 pub struct PyKeypoint {
     inner: Keypoint,

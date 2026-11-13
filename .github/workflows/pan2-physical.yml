@@ -1,0 +1,30 @@
+name: RuView PAN2 physical integration
+on:
+  pull_request:
+    paths:
+      - 'v2/crates/wifi-densepose-engine/**'
+      - 'v2/crates/worldgraph'
+      - 'v2/Cargo.lock'
+      - '.github/workflows/pan2-physical.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'v2/crates/wifi-densepose-engine/**'
+      - 'v2/crates/worldgraph'
+      - 'v2/Cargo.lock'
+permissions:
+  contents: read
+jobs:
+  engine-physical-forecast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Initialize exact workspace dependency pins
+        run: git submodule update --init --depth 1 v2/crates/worldgraph v2/crates/ruview-swarm v2/crates/ruforecast vendor/rufield
+      - uses: dtolnay/rust-toolchain@1.89
+      - name: Optional physical forecast integration
+        working-directory: v2
+        run: cargo test -p wifi-densepose-engine --no-default-features --features pan2-physical --locked
+      - name: Default-off engine regression
+        working-directory: v2
+        run: cargo test -p wifi-densepose-engine --no-default-features --locked

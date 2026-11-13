@@ -9,7 +9,7 @@ test('SDK exposes every registry tool and typed helpers', async () => {
   const ruview = createRuView();
   assert.equal(ruview.tools().length, Object.keys(TOOLS).length);
   assert.ok(Object.isFrozen(ruview) && Object.isFrozen(ruview.firmware) && Object.isFrozen(ruview.training));
-  assert.deepEqual(Object.keys(FIRMWARE_VARIANTS), ['s3-8mb', 's3-4mb', 'c6']);
+  assert.deepEqual(Object.keys(FIRMWARE_VARIANTS), ['s3-8mb', 's3-4mb', 'c6', 'c5']);
   const claim = await ruview.claimCheck('We achieve 100% accuracy.');
   assert.equal(claim.ok, false);
   const gate = await ruview.training.gate({ model_score: 0.7, baseline_score: 0.5, split: 'blocked-gap', train_end: '2026-01-01', test_start: '2026-01-05', n_test: 200 });

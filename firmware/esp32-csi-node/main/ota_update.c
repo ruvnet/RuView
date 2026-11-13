@@ -24,7 +24,7 @@
 static const char *TAG = "ota_update";
 
 /** OTA HTTP server port. */
-#define OTA_PORT 8032
+#define OTA_PORT OTA_UPDATE_PORT
 
 /** NVS namespace and key for the OTA pre-shared key. */
 #define OTA_NVS_NAMESPACE "security"
