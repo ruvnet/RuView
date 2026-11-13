@@ -1,0 +1,20 @@
+{
+    "version": 4,
+    "configurations": [
+        {
+            "name": "ESP32-S3 (ESP-IDF)",
+            "compilerPath": "/Users/jiweilu/.espressif/tools/xtensa-esp-elf/esp-14.2.0_20241119/xtensa-esp-elf/bin/xtensa-esp-elf-gcc",
+            "compileCommands": "${workspaceFolder}/firmware/esp32-csi-node/build/compile_commands.json",
+            "includePath": [
+                "${workspaceFolder}/firmware/esp32-csi-node/main/**",
+                "${workspaceFolder}/firmware/esp32-csi-node/components/**",
+                "${workspaceFolder}/firmware/esp32-csi-node/build/config",
+                "/Users/jiweilu/workspace/esp/esp-idf/components/**"
+            ],
+            "defines": [],
+            "cStandard": "c11",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "gcc-x64"
+        }
+    ]
+}

@@ -11,12 +11,14 @@
 pub mod bearer_auth;
 pub mod bootstrap_baseline;
 pub mod browser_session;
+pub mod explicit_calibration;
 pub mod ws_ticket;
 pub mod cli;
 pub mod dataset;
 pub mod discovery;
 pub mod edge_registry;
 pub mod error_response;
+pub mod fall_detection;
 pub mod host_validation;
 /// #864/ADR-296: refuse a routable HTTP bind with API auth off.
 pub mod http_bind;
