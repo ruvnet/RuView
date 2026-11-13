@@ -29,8 +29,9 @@ ml = ["dep:wifi-densepose-nn"]
 # `cfg_attr(feature = "serde", ...)` derives on domain types are actually
 # active when the API is on (review finding 5: `api = ["dep:serde"]` enabled
 # the dependency but left every `feature = "serde"` cfg dead).
-# The REST surface exposes ML status (`ml_ready`), so `api` implies `ml`.
-api = ["ml", "serde", "dep:axum", "dep:futures-util"]
+# API-only hosts expose an honest unavailable ML status without bundling ONNX.
+# The default feature set still enables ML for existing full MAT deployments.
+api = ["serde", "dep:axum", "dep:futures-util"]
 # Real ESP32 serial CSI ingest. Pulls the native `serialport` crate (libudev on
 # Linux) only when enabled, so the default/no-default appliance build stays free
 # of native serial deps. With the feature OFF, the ESP32 serial *parser* still

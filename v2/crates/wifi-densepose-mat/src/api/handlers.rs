@@ -1048,7 +1048,7 @@ pub async fn pipeline_status(
     Ok(Json(PipelineStatusResponse {
         scanning: state.is_scanning(),
         buffer_duration_secs: 0.0,
-        ml_enabled: config.enable_ml,
+        ml_enabled: cfg!(feature = "ml") && config.enable_ml,
         ml_ready: pipeline.ml_ready(),
         sample_rate: config.sample_rate,
         heartbeat_enabled: config.enable_heartbeat,
