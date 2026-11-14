@@ -390,6 +390,30 @@ mod tests {
     }
 
     #[test]
+    fn content_representation_excludes_the_geometry_term() {
+        // z = g ⊙ gate + Wg·geo + bg; encode_content returns g ⊙ gate with the
+        // window-mean token features and no additive room offset. This is the
+        // complement of stale_windows_are_gated_toward_geometry_prior, which
+        // pins that z *does* move with geometry: together they are the
+        // factorization the pose head relies on. Exercised against the real
+        // encoder, so wiring geometry into the content path fails here.
+        let e = RfEncoder::new(EncoderConfig::default(), 7);
+        let tokens = toy_tokens(8);
+        let room_a =
+            TokenizedWindow { tokens: tokens.clone(), age_s: 0.25, geometry: [0.2; 6] };
+        let room_b = TokenizedWindow { tokens, age_s: 0.25, geometry: [0.9; 6] };
+
+        // The fused representation separates the two rooms.
+        assert_ne!(
+            e.forward(&room_a.tokens, &[], WindowContext::from(&room_a)).z,
+            e.forward(&room_b.tokens, &[], WindowContext::from(&room_b)).z
+        );
+        // The content representation cannot tell them apart.
+        assert_eq!(e.encode_content(&room_a), e.encode_content(&room_b));
+        assert_eq!(e.encode_content(&room_a).len(), e.content_dim());
+    }
+
+    #[test]
     fn masking_excludes_tokens_from_context() {
         let e = RfEncoder::new(EncoderConfig::default(), 5);
         let tokens = toy_tokens(8);
