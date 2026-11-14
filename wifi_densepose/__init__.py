@@ -18,8 +18,13 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Allow importing the v1 src package when installed from the repo
-_v1_src = os.path.join(os.path.dirname(os.path.dirname(__file__)), "v1")
+# Allow importing the v1 src package when installed from the repo.
+# v1 moved to archive/v1 in the repo reorg (f49c7227); keep both locations
+# so older checkouts and the shipped wheel both resolve.
+_here = os.path.dirname(os.path.abspath(__file__))
+_v1_src = os.path.join(os.path.dirname(_here), "v1")
+if not os.path.isdir(_v1_src):
+    _v1_src = os.path.join(os.path.dirname(_here), "archive", "v1")
 if os.path.isdir(_v1_src) and _v1_src not in sys.path:
     sys.path.insert(0, _v1_src)
 
@@ -65,11 +70,9 @@ class WiFiDensePose:
             logger.info("WiFiDensePose system started on %s:%s", self.host, self.port)
         except ImportError:
             raise ImportError(
-                "Core dependencies not found. Make sure you installed "
-                "from the repository root:\n"
-                "  cd wifi-densepose && pip install -e .\n"
-                "Or install the v1 package:\n"
-                "  cd wifi-densepose/v1 && pip install -e ."
+                "Core dependencies not found. Install from the repository root:\n"
+                "  git clone https://github.com/ruvnet/RuView && cd RuView\n"
+                "  pip install -e ."
             )
 
     def stop(self):
@@ -83,24 +86,31 @@ class WiFiDensePose:
             logger.info("WiFiDensePose system stopped")
 
     def get_latest_poses(self):
-        """Return the most recent list of detected pose dicts."""
+        """Return the most recent list of detected pose dicts.
+
+        Returns [] only when there is genuinely no pose data yet; an
+        error is logged (never swallowed silently) before returning [].
+        """
         if self._orchestrator is None:
             return []
-        try:
-            import asyncio
+        import asyncio
 
-            loop = _get_or_create_event_loop()
+        loop = _get_or_create_event_loop()
+        try:
             return loop.run_until_complete(self._fetch_poses())
         except Exception:
+            logger.warning(
+                "get_latest_poses failed (orchestrator may be unhealthy)",
+                exc_info=True,
+            )
             return []
 
     async def _fetch_poses(self):
-        try:
-            pose_svc = self._orchestrator.pose_service
-            if pose_svc and hasattr(pose_svc, "get_latest"):
-                return await pose_svc.get_latest()
-        except Exception:
-            pass
+        if self._orchestrator is None:
+            return []
+        pose_svc = self._orchestrator.pose_service
+        if pose_svc and hasattr(pose_svc, "get_latest"):
+            return await pose_svc.get_latest()
         return []
 
     # ------------------------------------------------------------------
