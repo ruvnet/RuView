@@ -127,6 +127,16 @@ jobs:
       with:
         workspaces: v2
 
+    # Check core by itself: workspace feature unification can re-enable std.
+    - name: Test core without default features
+      working-directory: v2
+      env:
+        CARGO_PROFILE_DEV_DEBUG: "0"
+        CARGO_PROFILE_TEST_DEBUG: "0"
+      run: |
+        cargo test -p wifi-densepose-core --no-default-features
+        cargo test -p wifi-densepose-core --no-default-features --features serde,async
+
     # The 38-crate workspace debug build exhausts the runner's disk when built
     # with full debuginfo (observed: "final link failed: No space left on
     # device" once the engine/benchmark crates landed; the same tree's local
