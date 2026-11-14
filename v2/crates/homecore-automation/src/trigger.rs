@@ -129,25 +129,14 @@ impl Trigger {
                 if !eid_match {
                     return false;
                 }
-                let value: f64 = ctx
-                    .to_state
-                    .as_ref()
-                    .and_then(|s| s.state.parse().ok())
-                    .unwrap_or(f64::NAN);
-                if value.is_nan() {
-                    return false;
-                }
-                if let Some(a) = above {
-                    if value <= *a {
-                        return false;
-                    }
-                }
-                if let Some(b) = below {
-                    if value >= *b {
-                        return false;
-                    }
-                }
-                true
+                // Fire on the crossing only, as in Home Assistant: the new
+                // value is within the bounds and the previous one was not
+                // (or was missing / not numeric). A value that moves around
+                // inside the bounds does not fire again.
+                let in_range = |state: Option<&Arc<State>>| {
+                    numeric_in_range(state, *above, *below)
+                };
+                in_range(ctx.to_state.as_ref()) && !in_range(ctx.from_state.as_ref())
             }
             Trigger::Time { .. } => {
                 // Time triggers are wall-clock based and have no state-change
@@ -163,6 +152,18 @@ impl Trigger {
             }
         }
     }
+}
+
+/// Whether `state` holds a number strictly between the given bounds.
+/// A missing state, a non-numeric state and NaN are never in range.
+fn numeric_in_range(state: Option<&Arc<State>>, above: Option<f64>, below: Option<f64>) -> bool {
+    let Some(value) = state.and_then(|s| s.state.parse::<f64>().ok()) else {
+        return false;
+    };
+    if value.is_nan() {
+        return false;
+    }
+    above.is_none_or(|a| value > a) && below.is_none_or(|b| value < b)
 }
 
 #[async_trait]
@@ -273,6 +274,46 @@ mod tests {
         };
         let mut ctx = state_ctx("sensor.humidity", "20", "50");
         ctx.to_state = Some(make_state("sensor.humidity", "50"));
+        assert!(trigger.matches_sync(&ctx));
+    }
+
+    #[test]
+    fn numeric_trigger_staying_above_threshold_does_not_fire_again() {
+        let trigger = Trigger::NumericState {
+            entity_id: EntityId::parse("sensor.temperature").unwrap(),
+            above: Some(25.0),
+            below: None,
+        };
+        let ctx = state_ctx("sensor.temperature", "26", "27");
+        assert!(!trigger.matches_sync(&ctx));
+    }
+
+    #[test]
+    fn numeric_trigger_leaving_range_does_not_fire() {
+        let trigger = Trigger::NumericState {
+            entity_id: EntityId::parse("sensor.humidity").unwrap(),
+            above: Some(30.0),
+            below: Some(80.0),
+        };
+        let ctx = state_ctx("sensor.humidity", "50", "85");
+        assert!(!trigger.matches_sync(&ctx));
+    }
+
+    #[test]
+    fn numeric_trigger_from_non_numeric_or_missing_state_fires() {
+        let trigger = Trigger::NumericState {
+            entity_id: EntityId::parse("sensor.temperature").unwrap(),
+            above: Some(25.0),
+            below: None,
+        };
+        let ctx = state_ctx("sensor.temperature", "unavailable", "26");
+        assert!(trigger.matches_sync(&ctx));
+
+        let ctx = TriggerContext::state_changed(
+            EntityId::parse("sensor.temperature").unwrap(),
+            None,
+            Some(make_state("sensor.temperature", "26")),
+        );
         assert!(trigger.matches_sync(&ctx));
     }
 
