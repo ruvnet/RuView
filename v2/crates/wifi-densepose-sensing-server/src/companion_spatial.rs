@@ -49,6 +49,24 @@ struct Node {
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct SpatialObject {
+    id: String,
+    category: String,
+    confidence: String,
+    dimensions_m: [f64; 3],
+    transform: [f64; 16],
+}
+// Missing is v1; a present field must be an array, never null/coerced away.
+fn object_records<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<Vec<SpatialObject>>, D::Error> {
+    Vec::<SpatialObject>::deserialize(d).map(Some)
+}
+fn room_identity<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    String::deserialize(d).map(Some)
+}
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct Geometry {
     schema: String,
     installation_id: String,
@@ -62,10 +80,48 @@ struct Geometry {
     calibration_digest: Option<String>,
     surfaces: Vec<Surface>,
     nodes: Vec<Node>,
+    #[serde(
+        default,
+        deserialize_with = "object_records",
+        skip_serializing_if = "Option::is_none"
+    )]
+    objects: Option<Vec<SpatialObject>>,
+    #[serde(
+        default,
+        deserialize_with = "room_identity",
+        skip_serializing_if = "Option::is_none"
+    )]
+    room_id: Option<String>,
 }
 impl Geometry {
     fn valid(&self, time: u64) -> bool {
-        self.schema == "ruview.companion.spatial-artifact.v1"
+        ((self.schema == "ruview.companion.spatial-artifact.v1"
+            && self.objects.is_none()
+            && self.room_id.is_none())
+            || (self.schema == "ruview.companion.spatial-artifact.v2"
+                && self.objects.is_some()
+                && self.room_id.as_deref().is_some_and(id)))
+            && self.objects.as_ref().is_none_or(|objects| {
+                objects.len() <= 128
+                    && objects.iter().all(|o| {
+                        id(&o.id)
+                            && id(&o.category)
+                            && id(&o.confidence)
+                            && o.dimensions_m
+                                .iter()
+                                .all(|v| v.is_finite() && *v >= 0. && *v <= 1000.)
+                            && o.transform
+                                .iter()
+                                .all(|v| v.is_finite() && v.abs() <= 1000.)
+                            && rigid(&o.transform)
+                    })
+                    && objects
+                        .iter()
+                        .map(|o| &o.id)
+                        .collect::<std::collections::HashSet<_>>()
+                        .len()
+                        == objects.len()
+            })
             && id(&self.installation_id)
             && self.room_revision > 0
             && self.room_revision <= 9_007_199_254_740_991
@@ -170,6 +226,60 @@ pub struct SpatialStore {
     inner: Mutex<Inner>,
 }
 type Shared = Arc<SpatialStore>;
+fn read_archive(
+    path: &Path,
+    scope: &str,
+    installation: &str,
+    schema: &str,
+) -> std::io::Result<Option<Saved>> {
+    let meta = match fs::symlink_metadata(path) {
+        Ok(meta) => meta,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    if !meta.is_file() || meta.file_type().is_symlink() || meta.len() > 2 * 1024 * 1024 {
+        return Err(std::io::Error::other("invalid spatial history file"));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if meta.permissions().mode() & 0o077 != 0 {
+            return Err(std::io::Error::other(
+                "spatial history permissions are not private",
+            ));
+        }
+    }
+    let bytes = fs::read(path)?;
+    if bytes.len() > 2 * 1024 * 1024 {
+        return Err(std::io::Error::other("spatial history too large"));
+    }
+    let saved: Saved = serde_json::from_slice(&bytes)?;
+    if saved.schema != schema
+        || saved.owner_scope != scope
+        || saved.installation_id != installation
+        || saved.accepted.len() > 32
+        || saved.accepted.iter().any(|a| {
+            a.payload.len() > MAX_PAYLOAD
+                || hash(&a.payload) != a.digest
+                || a.accepted_at_unix_ms.is_none()
+        })
+    {
+        return Err(std::io::Error::other(
+            "invalid spatial history ownership or digest",
+        ));
+    }
+    for a in &saved.accepted {
+        let geometry: Geometry = serde_json::from_str(&a.payload)?;
+        if !geometry.valid(geometry.exported_at_unix_ms)
+            || geometry.installation_id != installation
+            || (schema == "ruview.companion.spatial-history.v1"
+                && geometry.schema != "ruview.companion.spatial-artifact.v1")
+        {
+            return Err(std::io::Error::other("invalid spatial geometry"));
+        }
+    }
+    Ok(Some(saved))
+}
 impl SpatialStore {
     pub fn load(
         dir: &Path,
@@ -183,58 +293,38 @@ impl SpatialStore {
                 "spatial handoff requires account ownership",
             ));
         }
-        let path = dir.join("accepted-spatial-artifacts.json");
-        let saved = match (|| -> std::io::Result<Vec<u8>> {
-            let meta = fs::symlink_metadata(&path)?;
-            if !meta.is_file() || meta.file_type().is_symlink() || meta.len() > 2 * 1024 * 1024 {
-                return Err(std::io::Error::other("invalid spatial history file"));
-            }
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                if meta.permissions().mode() & 0o077 != 0 {
-                    return Err(std::io::Error::other(
-                        "spatial history permissions are not private",
-                    ));
+        // Separate v2 storage keeps rollback-readable v1 bytes untouched.
+        let path = dir.join("accepted-spatial-artifacts-v2.json");
+        let mut saved = read_archive(
+            &path,
+            scope,
+            installation,
+            "ruview.companion.spatial-history.v2",
+        )?
+        .unwrap_or(Saved {
+            schema: "ruview.companion.spatial-history.v2".into(),
+            owner_scope: scope.into(),
+            installation_id: installation.into(),
+            accepted: vec![],
+        });
+        // A rollback may accept additional v1 scans. Reconcile those by digest
+        // on the next upgrade, without rewriting either original payload.
+        if let Some(legacy) = read_archive(
+            &dir.join("accepted-spatial-artifacts.json"),
+            scope,
+            installation,
+            "ruview.companion.spatial-history.v1",
+        )? {
+            for artifact in legacy.accepted {
+                if !saved.accepted.iter().any(|a| a.digest == artifact.digest) {
+                    saved.accepted.push(artifact);
                 }
             }
-            fs::read(&path)
-        })() {
-            Ok(bytes) => {
-                if bytes.len() > 2 * 1024 * 1024 {
-                    return Err(std::io::Error::other("spatial history too large"));
-                }
-                let s: Saved = serde_json::from_slice(&bytes)?;
-                if s.schema != "ruview.companion.spatial-history.v1"
-                    || s.owner_scope != scope
-                    || s.installation_id != installation
-                    || s.accepted.len() > 32
-                    || s.accepted.iter().any(|a| {
-                        a.payload.len() > MAX_PAYLOAD
-                            || hash(&a.payload) != a.digest
-                            || a.accepted_at_unix_ms.is_none()
-                    })
-                {
-                    return Err(std::io::Error::other(
-                        "invalid spatial history ownership or digest",
-                    ));
-                }
-                for a in &s.accepted {
-                    let g: Geometry = serde_json::from_str(&a.payload)?;
-                    if !g.valid(g.exported_at_unix_ms) || g.installation_id != installation {
-                        return Err(std::io::Error::other("invalid spatial geometry"));
-                    }
-                }
-                s
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Saved {
-                schema: "ruview.companion.spatial-history.v1".into(),
-                owner_scope: scope.into(),
-                installation_id: installation.into(),
-                accepted: vec![],
-            },
-            Err(e) => return Err(e),
-        };
+        }
+        saved
+            .accepted
+            .sort_by_key(|a| std::cmp::Reverse(a.accepted_at_unix_ms));
+        saved.accepted.truncate(32);
         Ok(Arc::new(Self {
             fault: AtomicBool::new(false),
             path,
@@ -265,6 +355,13 @@ impl SpatialStore {
         let r = self.room.snapshot();
         r.is_some_and(|r| {
             r.installation_id == g.installation_id
+                && g.room_id.as_deref().is_none_or(|room_id| {
+                    r.room
+                        .as_ref()
+                        .and_then(|room| room.get("id"))
+                        .and_then(serde_json::Value::as_str)
+                        == Some(room_id)
+                })
                 && r.revision == g.room_revision
                 && r.binding_digest.as_deref() == Some(&g.room_binding_digest)
         })
@@ -333,7 +430,9 @@ async fn ticket(
         .get(&g.device_id)
         .filter(|r| active(r, t) && r.pending.is_none())
         .ok_or(StatusCode::FORBIDDEN)?;
-    Ok(Json(serde_json::json!({"nonce":r.nonce,"until":r.until})))
+    Ok(Json(
+        serde_json::json!({"nonce":r.nonce,"until":r.until,"supportedArtifactSchemas":["ruview.companion.spatial-artifact.v1","ruview.companion.spatial-artifact.v2"]}),
+    ))
 }
 async fn upload(
     State(s): State<Shared>,
@@ -512,6 +611,243 @@ mod tests {
     }
     fn payload(s: &Shared) -> String {
         json!({"schema":"ruview.companion.spatial-artifact.v1","installationId":"test","roomRevision":1,"roomBindingDigest":s.room.snapshot().unwrap().binding_digest,"coordinateFrameId":"frame","sourceScanId":"scan","capturedAtUnixMs":1,"exportedAtUnixMs":now(),"provenance":"historical_geometry_only","calibrationDigest":null,"surfaces":[{"id":"wall-1","kind":"wall","dimensionsM":[2.5,2.4,0.1],"transform":[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]}],"nodes":[]}).to_string()
+    }
+    #[test]
+    fn app_server_v2_golden_fixture_is_byte_identical() {
+        let payload = include_str!("../tests/fixtures/companion-spatial-v2.json");
+        assert_eq!(
+            hash(payload),
+            "d18f7bfa408b78f45dca4b3a751bc9f7139e29cc9f0cde97603bc5618bd0bd26"
+        );
+        let g: Geometry = serde_json::from_str(payload).unwrap();
+        assert!(g.valid(2000));
+        assert_eq!(g.objects.unwrap()[0].category, "chair");
+    }
+    #[tokio::test]
+    async fn migration_preserves_legacy_bytes_for_rollback_and_restarts_from_v2() {
+        let (d, s, g) = setup().await;
+        let legacy_payload = payload(&s);
+        let legacy = Saved {
+            schema: "ruview.companion.spatial-history.v1".into(),
+            owner_scope: "a".repeat(64),
+            installation_id: "test".into(),
+            accepted: vec![Artifact {
+                digest: hash(&legacy_payload),
+                payload: legacy_payload,
+                publisher_device_id: "phone".into(),
+                received_at_unix_ms: now(),
+                accepted_at_unix_ms: Some(now()),
+            }],
+        };
+        let legacy_path = d.path().join("accepted-spatial-artifacts.json");
+        let bytes = serde_json::to_vec(&legacy).unwrap();
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        options
+            .open(&legacy_path)
+            .unwrap()
+            .write_all(&bytes)
+            .unwrap();
+        let upgraded = SpatialStore::load(
+            d.path(),
+            &"a".repeat(64),
+            "test",
+            s.service.clone(),
+            s.room.clone(),
+        )
+        .unwrap();
+        assert_eq!(
+            snapshot(State(upgraded.clone())).await.unwrap().0["accepted"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        let nonce = allow(&upgraded, &g).await;
+        let p = object_payload(&upgraded);
+        let digest = hash(&p);
+        let _ = upload(
+            State(upgraded.clone()),
+            Extension(g),
+            Json(Upload {
+                nonce,
+                digest: digest.clone(),
+                payload: p,
+            }),
+        )
+        .await
+        .unwrap();
+        let _ = action(State(upgraded.clone()), Json(Action::Accept { digest }))
+            .await
+            .unwrap();
+        assert_eq!(fs::read(&legacy_path).unwrap(), bytes);
+        assert!(d
+            .path()
+            .join("accepted-spatial-artifacts-v2.json")
+            .is_file());
+        let mut rollback: Saved = serde_json::from_slice(&bytes).unwrap();
+        let mut later: serde_json::Value = serde_json::from_str(&payload(&s)).unwrap();
+        later["sourceScanId"] = json!("after-rollback");
+        let later_payload = later.to_string();
+        rollback.accepted.push(Artifact {
+            digest: hash(&later_payload),
+            payload: later_payload,
+            publisher_device_id: "phone".into(),
+            received_at_unix_ms: now(),
+            accepted_at_unix_ms: Some(now()),
+        });
+        fs::write(&legacy_path, serde_json::to_vec(&rollback).unwrap()).unwrap();
+        let restored = SpatialStore::load(
+            d.path(),
+            &"a".repeat(64),
+            "test",
+            s.service.clone(),
+            s.room.clone(),
+        )
+        .unwrap();
+        assert_eq!(
+            snapshot(State(restored)).await.unwrap().0["accepted"]
+                .as_array()
+                .unwrap()
+                .len(),
+            3
+        );
+    }
+    #[tokio::test]
+    async fn v2_room_identity_cannot_relabel_the_published_binding() {
+        let (_d, s, g) = setup().await;
+        let nonce = allow(&s, &g).await;
+        let mut v: serde_json::Value = serde_json::from_str(&object_payload(&s)).unwrap();
+        v["roomId"] = json!("different-room");
+        let p = v.to_string();
+        assert!(upload(
+            State(s.clone()),
+            Extension(g.clone()),
+            Json(Upload {
+                nonce: nonce.clone(),
+                digest: hash(&p),
+                payload: p
+            })
+        )
+        .await
+        .is_err());
+        let valid = object_payload(&s);
+        assert!(upload(
+            State(s),
+            Extension(g),
+            Json(Upload {
+                nonce,
+                digest: hash(&valid),
+                payload: valid
+            })
+        )
+        .await
+        .is_ok());
+    }
+    fn object_payload(s: &Shared) -> String {
+        let mut value: serde_json::Value = serde_json::from_str(&payload(s)).unwrap();
+        value["schema"] = json!("ruview.companion.spatial-artifact.v2");
+        value["roomId"] = json!("room-1");
+        value["objects"] = json!([{"id":"chair-1","category":"chair","confidence":"high","dimensionsM":[0.5,0.8,0.5],"transform":[1,0,0,0,0,1,0,0,0,0,1,0,1,0,1,1]}]);
+        value.to_string()
+    }
+    #[tokio::test]
+    async fn object_schema_is_strict_and_v1_remains_unchanged() {
+        let (_d, s, _g) = setup().await;
+        let original = payload(&s);
+        let legacy: Geometry = serde_json::from_str(&original).unwrap();
+        assert!(legacy.valid(now()));
+        assert!(legacy.objects.is_none());
+        let valid = object_payload(&s);
+        let geometry: Geometry = serde_json::from_str(&valid).unwrap();
+        assert!(geometry.valid(now()));
+        assert_eq!(geometry.objects.as_ref().unwrap().len(), 1);
+        for mutation in [
+            "v1_objects",
+            "missing",
+            "null",
+            "duplicate",
+            "unknown",
+            "oversize",
+            "negative",
+            "nonrigid",
+        ] {
+            let mut v: serde_json::Value = serde_json::from_str(&valid).unwrap();
+            match mutation {
+                "v1_objects" => v["schema"] = json!("ruview.companion.spatial-artifact.v1"),
+                "missing" => {
+                    v.as_object_mut().unwrap().remove("objects");
+                }
+                "null" => v["objects"] = serde_json::Value::Null,
+                "duplicate" => {
+                    let o = v["objects"][0].clone();
+                    v["objects"].as_array_mut().unwrap().push(o);
+                }
+                "unknown" => v["objects"][0]["cameraImage"] = json!("not allowed"),
+                "oversize" => v["objects"] = json!(vec![v["objects"][0].clone(); 129]),
+                "negative" => v["objects"][0]["dimensionsM"][0] = json!(-1),
+                "nonrigid" => v["objects"][0]["transform"][0] = json!(2),
+                _ => unreachable!(),
+            }
+            assert!(
+                !serde_json::from_value::<Geometry>(v).is_ok_and(|g| g.valid(now())),
+                "{mutation}"
+            );
+        }
+        assert!(!serde_json::to_value(&legacy)
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .contains_key("objects"));
+    }
+    #[tokio::test]
+    async fn v2_objects_round_trip_original_bytes_only_after_explicit_review() {
+        let (d, s, g) = setup().await;
+        let nonce = allow(&s, &g).await;
+        let capabilities = ticket(State(s.clone()), Extension(g.clone()))
+            .await
+            .unwrap()
+            .0;
+        assert!(capabilities["supportedArtifactSchemas"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v == "ruview.companion.spatial-artifact.v2"));
+        let p = object_payload(&s);
+        let digest = hash(&p);
+        let _ = upload(
+            State(s.clone()),
+            Extension(g),
+            Json(Upload {
+                nonce,
+                digest: digest.clone(),
+                payload: p.clone(),
+            }),
+        )
+        .await
+        .unwrap();
+        assert!(!s.path.exists());
+        let _ = action(
+            State(s.clone()),
+            Json(Action::Accept {
+                digest: digest.clone(),
+            }),
+        )
+        .await
+        .unwrap();
+        let restored = SpatialStore::load(
+            d.path(),
+            &"a".repeat(64),
+            "test",
+            s.service.clone(),
+            s.room.clone(),
+        )
+        .unwrap();
+        let history = snapshot(State(restored)).await.unwrap().0;
+        assert_eq!(history["accepted"][0]["payload"], p);
+        assert_eq!(history["accepted"][0]["digest"], digest);
     }
     async fn allow(s: &Shared, g: &Grant) -> String {
         let _ = action(
