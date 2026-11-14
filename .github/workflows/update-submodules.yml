@@ -38,16 +38,26 @@ jobs:
           git submodule sync --recursive
           git submodule update --remote --recursive
 
+      # Scope both the change check and the later `git add` to every path in
+      # .gitmodules. Four submodules live under v2/crates/, so a vendor/-only
+      # view reports changes it cannot stage.
+      - name: Collect submodule paths
+        id: paths
+        run: |
+          PATHS="$(git config --file .gitmodules --get-regexp '^submodule\..*\.path$' | awk '{print $2}' | sort | tr '\n' ' ')"
+          echo "Submodule paths: $PATHS"
+          echo "paths=$PATHS" >> "$GITHUB_OUTPUT"
+
       - name: Check for changes
         id: check
         run: |
-          if git diff --quiet; then
+          if git diff --quiet -- ${{ steps.paths.outputs.paths }}; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
             echo "--- submodule pointer changes ---"
             git submodule status --recursive || true
-            git diff --submodule=log -- vendor/ || true
+            git diff --submodule=log -- ${{ steps.paths.outputs.paths }} || true
           fi
 
       - name: Create PR with updates
@@ -55,7 +65,7 @@ jobs:
         run: |
           BRANCH="chore/update-submodules-$(date +%Y%m%d-%H%M%S)"
           git checkout -b "$BRANCH"
-          git add vendor/
+          git add -- ${{ steps.paths.outputs.paths }}
           git commit -m "chore: update vendor submodules to latest upstream"
           git push origin "$BRANCH"
           gh pr create \
