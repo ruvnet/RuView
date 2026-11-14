@@ -85,7 +85,7 @@ def test_calibration_end_to_end():
         with np.load(frames) as fz:
             frames_x = fz["X"][:]
         net = PoseNet()
-        net.load_state_dict(torch.load(base, map_location="cpu"), strict=False)
+        net.load_state_dict(torch.load(base, map_location="cpu", weights_only=True), strict=False)
         net.eval()
         x = standardize(torch.tensor(frames_x))
         with torch.no_grad():
