@@ -58,11 +58,12 @@ FUZZ_JOBS     ?= 1
         test_thermal run_thermal test_csi_sanitize run_csi_sanitize \
         test_c6_antenna run_c6_antenna test_serial_onboarding run_serial_onboarding \
         test_config_rules run_config_rules \
+        test_mmwave_pins run_mmwave_pins \
         run_delivery_contract test_ota_health run_ota_health run_onboarding_identity run_onboarding_console
 
 all: fuzz_serialize fuzz_edge fuzz_nvs test_adr110 test_vitals test_mmwave_detect \
      test_thermal test_csi_sanitize test_c6_antenna test_serial_onboarding \
-     test_ota_health test_config_rules
+     test_ota_health test_config_rules test_mmwave_pins
 
 # --- XIAO ESP32-C6 RF switch selection ---
 # Host-side truth table for the GPIO14 antenna selector. GPIO3 is always driven

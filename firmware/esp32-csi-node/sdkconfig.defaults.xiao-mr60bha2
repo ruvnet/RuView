@@ -1,0 +1,6 @@
+# Seeed XIAO ESP32-C6 on the assembled MR60BHA2 carrier.
+# The carrier uses UART TX GPIO16 and RX GPIO17. Native USB Serial/JTAG remains
+# the onboarding console. The photographed kit uses its external U.FL antenna.
+CONFIG_C6_XIAO_MR60BHA2=y
+CONFIG_C6_XIAO_ANTENNA_SELECT=y
+CONFIG_C6_XIAO_ANTENNA_EXTERNAL=y

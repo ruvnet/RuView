@@ -14,7 +14,10 @@
 //! breathing rate and pose keypoints. Presence, motion, person count, zone
 //! and the coarse posture label are kept, as they are on MQTT. Keys are
 //! removed, not nulled, so a client can't tell a suppressed value from one
-//! the server never had.
+//! the server never had. MAT alert messages are also removed because their
+//! generated prose embeds literal breathing and heart rates. Structured alert
+//! identity, status, triage and recommended action remain available. MAT
+//! domain-event Debug details are withheld for the same reason; type/time stay.
 //!
 //! The filter fails closed: a frame or JSON body that can't be parsed is
 //! dropped (WebSocket, recording) or replaced with a 500 (REST) rather than
@@ -37,6 +40,7 @@ pub const BIOMETRIC_KEYS: &[&str] = &[
     // confidences; the leaf keys cover edge vitals, fused vitals and the
     // mmWave block.
     "vital_signs",
+    "vital_evidence",
     "breathing_rate_bpm",
     "heart_rate_bpm",
     "heartrate_bpm",
@@ -72,6 +76,20 @@ impl PrivacyFilter {
 pub fn redact_value(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Object(map) => {
+            // MAT's generated alert prose embeds literal HR/BR values. It is
+            // not safe merely to remove the structured vital_signs object.
+            // Match the alert DTO shape so ordinary error messages survive.
+            if map.contains_key("survivor_id")
+                && map.contains_key("priority")
+                && map.contains_key("triage_status")
+            {
+                map.remove("message");
+            }
+            // MAT's domain-event DTO is a Debug snapshot, including the full
+            // vital reading as text. Keep its event type/time, withhold prose.
+            if map.contains_key("event_type") && map.contains_key("timestamp") {
+                map.remove("details");
+            }
             map.retain(|key, _| !BIOMETRIC_KEYS.contains(&key.as_str()));
             for child in map.values_mut() {
                 redact_value(child);
@@ -195,6 +213,21 @@ mod tests {
         }
         assert_eq!(v["presence"], true);
         assert_eq!(v["mmwave"]["present"], true);
+    }
+
+    #[test]
+    fn redact_mat_alert_prose_at_any_depth_without_hiding_errors() {
+        let mut value = json!({
+            "alerts": [{"survivor_id": "fixture", "priority": "High",
+                "triage_status": "Delayed", "message": "Breathing: 16.0 BPM",
+                "title": "Survivor Detected", "status": "Pending"}],
+            "error": {"code": "fixture", "message": "ordinary error"}
+        });
+        redact_value(&mut value);
+        assert!(value["alerts"][0].get("message").is_none());
+        assert_eq!(value["alerts"][0]["status"], "Pending");
+        assert_eq!(value["alerts"][0]["title"], "Survivor Detected");
+        assert_eq!(value["error"]["message"], "ordinary error");
     }
 
     #[test]

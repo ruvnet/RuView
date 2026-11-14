@@ -13605,20 +13605,26 @@ dependencies = [
  "criterion",
  "futures-util",
  "hmac",
+ "hyper",
+ "hyper-util",
  "jsonwebtoken",
  "mdns-sd",
  "midstreamer-attractor",
  "midstreamer-temporal-compare",
+ "num-complex",
  "opentelemetry-appender-tracing",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
  "proptest",
  "rand 0.8.5",
+ "rcgen",
  "ring",
  "rumqttc-v4-next",
+ "rustls",
  "ruvector-mincut",
  "ruview-auth",
  "ruview-fann-head",
+ "ruview-unified",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -13626,6 +13632,7 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-rustls",
  "tokio-tungstenite",
  "tower 0.4.13",
  "tower-http",
@@ -13638,6 +13645,7 @@ dependencies = [
  "wifi-densepose-engine",
  "wifi-densepose-geo",
  "wifi-densepose-hardware",
+ "wifi-densepose-mat",
  "wifi-densepose-physics",
  "wifi-densepose-rufield",
  "wifi-densepose-signal",
@@ -14843,8 +14851,6 @@ dependencies = [
 [[package]]
 name = "zip"
 version = "7.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c42e33efc22a0650c311c2ef19115ce232583abbe80850bc8b66509ebef02de0"
 dependencies = [
  "crc32fast",
  "indexmap 2.13.0",
