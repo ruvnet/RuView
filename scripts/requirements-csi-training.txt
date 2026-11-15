@@ -1,0 +1,5 @@
+# Replayed CPU integration environment. Install the appropriate CPU/CUDA torch
+# wheel using an explicit index URL; actual versions are recorded in each run.
+numpy==2.4.4
+torch==2.11.0
+safetensors==0.8.0
