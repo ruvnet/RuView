@@ -24,7 +24,9 @@
 //!
 //! macOS only. Gated behind `#[cfg(target_os = "macos")]` at the module level.
 
-use std::process::{Command, Stdio};
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::domain::bssid::{BandType, BssidId, BssidObservation, RadioType};
@@ -34,32 +36,82 @@ use crate::error::WifiScanError;
 // MacosCoreWlanScanner
 // ---------------------------------------------------------------------------
 
+/// How the Swift helper is launched.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Launch {
+    /// Plain CLI helper (on `$PATH` or an explicit path). macOS treats the
+    /// terminal as the responsible app, so SSID/BSSID come back redacted.
+    Helper(String),
+    /// `MacWifi.app` launched through LaunchServices (`open`), so the bundle is
+    /// its own responsible process and can hold a Location Services grant
+    /// (ADR-025 Amendment 2). Gives the real SSID/BSSID once authorized.
+    AppBundle(PathBuf),
+}
+
 /// Synchronous WiFi scanner that shells out to the `mac_wifi` Swift helper.
 ///
-/// The helper binary must be compiled from `archive/v1/src/sensing/mac_wifi.swift` and
-/// placed on `$PATH` or at a known location. The scanner invokes it with a
-/// `--scan-once` flag (single-shot mode) and parses the JSON output.
+/// Preferred: the `MacWifi.app` bundle built by `tools/mac-wifi-helper/build.sh`,
+/// found via `RUVIEW_MAC_WIFI_APP`, `~/Applications/MacWifi.app` or
+/// `/Applications/MacWifi.app`. Fallback: the CLI helper compiled from
+/// `archive/v1/src/sensing/mac_wifi.swift` on `$PATH` (redacted connected link
+/// only). The helper is invoked with `--scan-once` and its JSON is parsed.
 ///
 /// If the helper is not found, [`scan_sync`](Self::scan_sync) returns a
 /// [`WifiScanError::ProcessError`].
 pub struct MacosCoreWlanScanner {
-    /// Path to the `mac_wifi` helper binary. Defaults to `"mac_wifi"` (on PATH).
-    helper_path: String,
+    launch: Launch,
+}
+
+/// Environment variable naming an explicit `MacWifi.app` bundle path.
+/// Set it to an empty string to disable bundle discovery.
+pub const MAC_WIFI_APP_ENV: &str = "RUVIEW_MAC_WIFI_APP";
+
+/// Locate an installed `MacWifi.app` bundle, if any.
+fn find_app_bundle() -> Option<PathBuf> {
+    let candidates: Vec<PathBuf> = match std::env::var(MAC_WIFI_APP_ENV) {
+        Ok(explicit) if explicit.trim().is_empty() => return None,
+        Ok(explicit) => vec![PathBuf::from(explicit)],
+        Err(_) => {
+            let mut v = Vec::new();
+            if let Some(home) = std::env::var_os("HOME") {
+                v.push(PathBuf::from(home).join("Applications/MacWifi.app"));
+            }
+            v.push(PathBuf::from("/Applications/MacWifi.app"));
+            v
+        }
+    };
+    candidates
+        .into_iter()
+        .find(|app| app.join("Contents/MacOS/mac_wifi").is_file())
 }
 
 impl MacosCoreWlanScanner {
-    /// Create a scanner that looks for `mac_wifi` on `$PATH`.
+    /// Use an installed `MacWifi.app` if present, else `mac_wifi` on `$PATH`.
     pub fn new() -> Self {
+        let launch = match find_app_bundle() {
+            Some(app) => Launch::AppBundle(app),
+            None => Launch::Helper("mac_wifi".to_owned()),
+        };
+        Self { launch }
+    }
+
+    /// Create a scanner with an explicit path to the CLI helper binary.
+    pub fn with_path(path: impl Into<String>) -> Self {
         Self {
-            helper_path: "mac_wifi".to_owned(),
+            launch: Launch::Helper(path.into()),
         }
     }
 
-    /// Create a scanner with an explicit path to the Swift helper binary.
-    pub fn with_path(path: impl Into<String>) -> Self {
+    /// Create a scanner that launches an explicit `MacWifi.app` bundle.
+    pub fn with_app_bundle(path: impl Into<PathBuf>) -> Self {
         Self {
-            helper_path: path.into(),
+            launch: Launch::AppBundle(path.into()),
         }
+    }
+
+    /// True when scans go through the `MacWifi.app` bundle.
+    pub fn uses_app_bundle(&self) -> bool {
+        matches!(self.launch, Launch::AppBundle(_))
     }
 
     /// Run the Swift helper and parse the output synchronously.
@@ -67,51 +119,109 @@ impl MacosCoreWlanScanner {
     /// Returns one [`BssidObservation`] for the connected link.
     /// Helpers that fail to exit within five seconds are killed and reaped.
     pub fn scan_sync(&self) -> Result<Vec<BssidObservation>, WifiScanError> {
-        let mut child = Command::new(&self.helper_path)
-            .arg("--scan-once")
-            .stdout(Stdio::piped())
+        match &self.launch {
+            Launch::Helper(path) => scan_with_helper(path),
+            Launch::AppBundle(app) => scan_with_app_bundle(app),
+        }
+    }
+}
+
+/// Wait for `child` with the five-second bound shared by both launch modes.
+/// Older helpers ignore --scan-once and stream forever; bound the wait so an
+/// outdated installation cannot hang capture or auto-detect.
+fn wait_bounded(child: &mut Child) -> Result<(), WifiScanError> {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return Ok(()),
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            status => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(WifiScanError::ProcessError(match status {
+                    Err(e) => format!("failed to wait for mac_wifi: {e}"),
+                    _ => "mac_wifi --scan-once timed out; rebuild the Swift helper".into(),
+                }));
+            }
+        }
+    }
+}
+
+fn scan_with_helper(path: &str) -> Result<Vec<BssidObservation>, WifiScanError> {
+    let mut child = Command::new(path)
+        .arg("--scan-once")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| {
+            WifiScanError::ProcessError(format!("failed to run mac_wifi helper ({path}): {e}"))
+        })?;
+    wait_bounded(&mut child)?;
+    let output = child.wait_with_output().map_err(|e| {
+        WifiScanError::ProcessError(format!("failed to read mac_wifi output: {e}"))
+    })?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(WifiScanError::ScanFailed {
+            reason: format!("mac_wifi exited with {}: {}", output.status, stderr.trim()),
+        });
+    }
+    parse_macos_scan_output(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// Launch `MacWifi.app` through LaunchServices so it is its own responsible
+/// process. `open --stdout` appends, so every scan gets fresh temp files.
+fn scan_with_app_bundle(app: &Path) -> Result<Vec<BssidObservation>, WifiScanError> {
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let n = SEQ.fetch_add(1, Ordering::Relaxed);
+    let base = std::env::temp_dir().join(format!("ruview-macwifi-{}-{n}", std::process::id()));
+    let out = base.with_extension("json");
+    let err = base.with_extension("err");
+    for f in [&out, &err] {
+        let _ = std::fs::remove_file(f);
+    }
+
+    let result = (|| {
+        let mut child = Command::new("/usr/bin/open")
+            .args(["-W", "-g", "-n", "--stdout"])
+            .arg(&out)
+            .arg("--stderr")
+            .arg(&err)
+            .arg(app)
+            .args(["--args", "--scan-once"])
+            .stdout(Stdio::null())
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| {
                 WifiScanError::ProcessError(format!(
                     "failed to run mac_wifi helper ({}): {e}",
-                    self.helper_path
+                    app.display()
                 ))
             })?;
-
-        // Older helpers ignore --scan-once and stream forever. Bound the
-        // wait so an outdated installation cannot hang capture or auto-detect.
-        let deadline = Instant::now() + Duration::from_secs(5);
-        loop {
-            match child.try_wait() {
-                Ok(Some(_)) => break,
-                Ok(None) if Instant::now() < deadline => {
-                    std::thread::sleep(Duration::from_millis(10));
-                }
-                status => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(WifiScanError::ProcessError(match status {
-                        Err(e) => format!("failed to wait for mac_wifi: {e}"),
-                        _ => "mac_wifi --scan-once timed out; rebuild the Swift helper".into(),
-                    }));
-                }
-            }
-        }
-        let output = child.wait_with_output().map_err(|e| {
-            WifiScanError::ProcessError(format!("failed to read mac_wifi output: {e}"))
+        wait_bounded(&mut child)?;
+        let status = child.wait().map_err(|e| {
+            WifiScanError::ProcessError(format!("failed to wait for open: {e}"))
         })?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = std::fs::read_to_string(&out).unwrap_or_default();
+        if !status.success() || stdout.trim().is_empty() {
+            let stderr = std::fs::read_to_string(&err).unwrap_or_default();
             return Err(WifiScanError::ScanFailed {
-                reason: format!("mac_wifi exited with {}: {}", output.status, stderr.trim()),
+                reason: format!(
+                    "MacWifi.app ({}) exited with {status}: {}",
+                    app.display(),
+                    stderr.trim()
+                ),
             });
         }
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
         parse_macos_scan_output(&stdout)
+    })();
+
+    for f in [&out, &err] {
+        let _ = std::fs::remove_file(f);
     }
+    result
 }
 
 impl Default for MacosCoreWlanScanner {
@@ -342,6 +452,35 @@ mod tests {
             MacosCoreWlanScanner::with_path("/dev/null/mac_wifi").scan_sync(),
             Err(WifiScanError::ProcessError(_))
         ));
+    }
+
+    #[test]
+    fn app_bundle_discovery_honours_env() {
+        // Empty value disables discovery; a path without the executable is skipped.
+        let dir = std::env::temp_dir().join(format!("macwifi-app-{}", std::process::id()));
+        let exe = dir.join("MacWifi.app/Contents/MacOS");
+        std::fs::create_dir_all(&exe).unwrap();
+        let app = dir.join("MacWifi.app");
+
+        std::env::set_var(MAC_WIFI_APP_ENV, "");
+        assert_eq!(find_app_bundle(), None);
+        assert!(!MacosCoreWlanScanner::new().uses_app_bundle());
+
+        std::env::set_var(MAC_WIFI_APP_ENV, &app);
+        assert_eq!(find_app_bundle(), None, "bundle without executable is ignored");
+
+        std::fs::write(exe.join("mac_wifi"), b"").unwrap();
+        assert_eq!(find_app_bundle(), Some(app.clone()));
+        assert!(MacosCoreWlanScanner::new().uses_app_bundle());
+
+        std::env::remove_var(MAC_WIFI_APP_ENV);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn missing_app_bundle_is_a_scan_error() {
+        let r = MacosCoreWlanScanner::with_app_bundle("/nonexistent/MacWifi.app").scan_sync();
+        assert!(r.is_err());
     }
 
     #[test]
