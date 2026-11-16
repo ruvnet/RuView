@@ -16817,6 +16817,7 @@ async fn main() {
         // Per-node health endpoint
         .route("/api/v1/nodes", get(nodes_endpoint))
         .route("/api/v1/worldgraph/snapshot", get(managed_worldgraph::snapshot))
+        .route("/api/v1/worldgraph/engine", get(managed_worldgraph::engine_snapshot))
         // ADR-110 iter 29 — per-node mesh sync state for HTTP clients.
         .route("/api/v1/nodes/:id/sync", get(node_sync_endpoint))
         .route("/api/v1/mesh", get(mesh_endpoint))

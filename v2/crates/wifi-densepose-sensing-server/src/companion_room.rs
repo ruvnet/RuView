@@ -250,6 +250,12 @@ impl SharedRoomStore {
         self.worldgraph_cursor.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?.project(&room, privacy_denied)
     }
 
+    /// Same locking order as `worldgraph_snapshot`; shares its cursor.
+    pub fn worldgraph_engine_snapshot(&self, privacy_denied: bool) -> Result<Value, StatusCode> {
+        let room = self.current.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        self.worldgraph_cursor.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?.project_engine(&room, privacy_denied)
+    }
+
     pub fn snapshot(&self) -> Option<Envelope> { self.current.lock().ok().map(|v| v.clone()) }
     pub fn matches_binding(&self, binding: &str, node_ids: &[u8]) -> bool {
         let Ok(e) = self.current.lock() else {
