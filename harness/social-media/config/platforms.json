@@ -1,0 +1,845 @@
+{
+  "schema": "SocialPlatformRegistryV1",
+  "version": 1,
+  "reviewed_at": "2026-08-29",
+  "review_expires_at": "2026-09-28",
+  "evidence_mode": "OFFICIAL_SOURCE_URLS_WITHOUT_ARCHIVE_DIGEST",
+  "platforms": {
+    "whatsapp": {
+      "identity_status": "BUSINESS_PLATFORM_ONLY",
+      "platform_constraints": [
+        "BUSINESS_PLATFORM_ONLY",
+        "NO_BROWSER_FALLBACK"
+      ],
+      "prerequisites": [
+        "Meta business portfolio, WhatsApp Business Account, and registered business phone number",
+        "System user token referenced from an external secret manager",
+        "whatsapp_business_management and whatsapp_business_messaging permissions",
+        "Recipient opt in and an approved template for business initiated messaging",
+        "Live messaging tier, quality state, WhatsApp Manager state, and response usage headers are runtime authority; advisory throughput values never grant capacity"
+      ],
+      "official_sources": [
+        "https://www.postman.com/meta/whatsapp-business-platform/collection/wlk6lh4/whatsapp-cloud-api",
+        "https://business.whatsapp.com/policy",
+        "https://developers.facebook.com/docs/whatsapp/cloud-api/overview",
+        "https://developers.facebook.com/docs/whatsapp/cloud-api/calling"
+      ],
+      "operations": {
+        "business_asset_setup": {
+          "route": "ATTENDED_MANUAL",
+          "approval_required": true,
+          "conditions": [
+            "Business owner completes asset ownership, phone registration, template, and scope review on Meta",
+            "The metaharness never receives credentials"
+          ],
+          "policy_source": "https://www.postman.com/meta/whatsapp-business-platform/collection/wlk6lh4/whatsapp-cloud-api"
+        },
+        "receive_business_webhook": {
+          "route": "API_ALLOWED",
+          "approval_required": false,
+          "conditions": [
+            "Connection was approved",
+            "Webhook signature, WABA, phone number, event type, and replay state validate"
+          ],
+          "policy_source": "https://developers.facebook.com/docs/whatsapp/cloud-api/webhooks"
+        },
+        "read_business_stats": {
+          "route": "API_ALLOWED",
+          "approval_required": false,
+          "conditions": [
+            "Read only use remains within the approved business purpose",
+            "Stats are limited to supported WABA aggregates and sent, delivered, read, failed, or deleted message states",
+            "No unrestricted personal chat analytics are inferred"
+          ],
+          "policy_source": "https://www.postman.com/meta/whatsapp-business-platform/folder/r6b0bp9/analytics"
+        },
+        "send_approved_template": {
+          "route": "API_ALLOWED",
+          "approval_required": true,
+          "conditions": [
+            "Recipient opted in",
+            "Template, account, audience, locale, content parameters, schedule, and expiry match the approval",
+            "Live messaging tier, quality state, and rate headers allow the action"
+          ],
+          "policy_source": "https://business.whatsapp.com/policy"
+        },
+        "reply_within_customer_service_window": {
+          "route": "API_ALLOWED",
+          "approval_required": true,
+          "conditions": [
+            "The customer initiated the conversation",
+            "The current 24 hour customer service window is open",
+            "Automation exposes a clear human escalation route",
+            "An exact action or registered support workflow authorizes the reply"
+          ],
+          "policy_source": "https://business.whatsapp.com/policy"
+        },
+        "business_call": {
+          "route": "API_ALLOWED",
+          "approval_required": true,
+          "conditions": [
+            "The official Calling API is used",
+            "The exact call is approved",
+            "Recording, transcription, or voice cloning has separate explicit consent"
+          ],
+          "policy_source": "https://developers.facebook.com/docs/whatsapp/cloud-api/calling"
+        },
+        "personal_account_or_whatsapp_web_automation": {
+          "route": "DENY",
+          "approval_required": false,
+          "conditions": [
+            "The registry supports the WhatsApp Business Platform only",
+            "Computer use cannot replace a missing Business Platform capability"
+          ],
+          "policy_source": "https://www.postman.com/meta/whatsapp-business-platform/collection/wlk6lh4/whatsapp-cloud-api"
+        },
+        "free_form_outbound_outside_service_window_or_without_opt_in": {
+          "route": "DENY",
+          "approval_required": false,
+          "conditions": [
+            "A business initiated message requires recipient opt in and an eligible approved template",
+            "No browser, alternate account, or manual token fallback is permitted"
+          ],
+          "policy_source": "https://business.whatsapp.com/policy"
+        }
+      }
+    },
+    "discord": {
+      "identity_status": "BOT_ACCOUNT_ONLY",
+      "platform_constraints": [
+        "BOT_ONLY",
+        "NO_SELF_BOT",
+        "NO_BROWSER_FALLBACK"
+      ],
+      "prerequisites": [
+        "Registered Discord application and bot user",
+        "OAuth installation approved by an authorized server member",
+        "Least privilege server permissions and approved privileged Gateway intents when required",
+        "Bot token referenced from an external secret manager",
+        "Per route headers, global state, retry_after, invalid request state, and Gateway close codes are runtime authority"
+      ],
+      "official_sources": [
+        "https://docs.discord.com/developers/platform/oauth2-and-permissions",
+        "https://docs.discord.com/developers/events/gateway",
+        "https://docs.discord.com/developers/topics/rate-limits",
+        "https://docs.discord.com/developers/topics/voice-connections"
+      ],
+      "operations": {
+        "bot_installation_and_scope_consent": {
+          "route": "ATTENDED_MANUAL",
+          "approval_required": true,
+          "conditions": [
+            "An authorized server member reviews scopes, permissions, channels, and intents",
+            "The human completes provider authentication"
+          ],
+          "policy_source": "https://docs.discord.com/developers/platform/oauth2-and-permissions"
+        },
+        "receive_gateway_events": {
+          "route": "API_ALLOWED",
+          "approval_required": false,
+          "conditions": [
+            "Only approved intents and bot visible resources are consumed",
+            "Message content is absent unless Discord and the installation authorize the privileged intent",
+            "Gateway session and reconnect rules are honored"
+          ],
+          "policy_source": "https://docs.discord.com/developers/events/gateway"
+        },
+        "read_bot_visible_stats": {
+          "route": "API_ALLOWED",
+          "approval_required": false,
+          "conditions": [
+            "Metrics are derived only from events and resources the bot may receive",
+            "No general organic server analytics API is assumed",
+            "Missing message content is reported as missing rather than inferred"
+          ],
+          "policy_source": "https://docs.discord.com/developers/events/gateway"
+        },
+        "send_bot_message_or_moderate": {
+          "route": "API_ALLOWED",
+          "approval_required": true,
+          "conditions": [
+            "Server, channel, target, content digest, bot permission, and action class match approval",
+            "Current per route and global limits allow the action",
+            "Moderation requires an exact target and high risk approval"
+          ],
+          "policy_source": "https://docs.discord.com/developers/topics/rate-limits"
+        },
+        "connect_record_or_transcribe_voice": {
+          "route": "API_ALLOWED",
+          "approval_required": true,
+          "conditions": [
+            "The official Voice API is used and session material is not reused",
+            "Connecting requires exact session approval",
+            "Recording or transcription requires explicit participant notice and consent plus bounded retention"
+          ],
+          "policy_source": "https://docs.discord.com/developers/topics/voice-connections"
+        },
+        "self_bot_or_user_token_automation": {
+          "route": "DENY",
+          "approval_required": false,
+          "conditions": [
+            "Automating a normal Discord user account is prohibited",
+            "A user token must never enter the metaharness"
+          ],
+          "policy_source": "https://support.discord.com/hc/en-us/articles/115002192352-Automated-User-Accounts-Self-Bots"
+        },
+        "discord_ui_or_unapproved_intent_bypass": {
+          "route": "DENY",
+          "approval_required": false,
+          "conditions": [
+            "Missing bot permission or privileged intent approval cannot be bypassed",
+            "No browser fallback is permitted"
+          ],
+          "policy_source": "https://docs.discord.com/developers/events/gateway"
+        }
+      }
+    },
+    "linkedin": {
+      "identity_status": "APPROVED_MEMBER_OR_ORGANIZATION_OAUTH_REQUIRED",
+      "platform_constraints": [
+        "APPROVED_OAUTH_ONLY",
+        "NO_BROWSER_AUTOMATION"
+      ],
+      "prerequisites": [
+        "LinkedIn developer application and three legged OAuth member consent",
+        "Approved Community Management API product access where required",
+        "w_member_social for member writes or w_organization_social plus an eligible organization role for organization writes",
+        "Current Linkedin-Version and X-Restli-Protocol-Version headers",
+        "Application tier, developer portal state, response state, roles, and current monthly API version are runtime authority"
+      ],
+      "official_sources": [
+        "https://learn.microsoft.com/en-us/linkedin/shared/authentication/authorization-code-flow",
+        "https://learn.microsoft.com/en-us/linkedin/marketing/increasing-access?view=li-lms-2026-08",
+        "https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/posts-api?view=li-lms-2026-08",
+        "https://learn.microsoft.com/en-us/linkedin/marketing/community-management/members/post-statistics?view=li-lms-2026-06",
+        "https://www.linkedin.com/help/linkedin/answer/a1340567/automated-activity-on-linkedin"
+      ],
+      "operations": {
+        "oauth_consent_and_product_access": {
+          "route": "ATTENDED_MANUAL",
+          "approval_required": true,
+          "conditions": [
+            "The member reviews scopes",
+            "LinkedIn approves any restricted product",
+            "Organization actions use an eligible organization role"
+          ],
+          "policy_source": "https://learn.microsoft.com/en-us/linkedin/marketing/increasing-access?view=li-lms-2026-08"
+        },
+        "read_authorized_member_organization_or_stats": {
+          "route": "API_ALLOWED",
+          "approval_required": false,
+          "conditions": [
+            "Granted product, OAuth scope, role, and current API version authorize the resource",
+            "Member analytics use the approved analytics permission",
+            "Organization analytics remain administrator and endpoint constrained",
+            "Metric definitions and time ranges are preserved as platform specific"
+          ],
+          "policy_source": "https://learn.microsoft.com/en-us/linkedin/marketing/community-management/members/post-statistics?view=li-lms-2026-06"
+        },
+        "publish_member_or_organization_post": {
+          "route": "API_ALLOWED",
+          "approval_required": true,
+          "conditions": [
+            "Required product, scope, role, and API version are current",
+            "Member or organization, content digest, audience, schedule, and expiry match approval",
+            "Live application and member limits allow the action"
+          ],
+          "policy_source": "https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/posts-api?view=li-lms-2026-08"
+        },
+        "comment_or_react_through_approved_api": {
+          "route": "API_ALLOWED",
+          "approval_required": true,
+          "conditions": [
+            "The approved Community Management product and scope expose the operation",
+            "Each target and engagement action has exact approval"
+          ],
+          "policy_source": "https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/posts-api?view=li-lms-2026-08"
+        },
+        "linkedin_browser_automation_or_scraping": {
+          "route": "DENY",
+          "approval_required": false,
+          "conditions": [
+            "LinkedIn prohibits software that automates website posting, messaging, liking, sharing, or data collection",
+            "Attended OAuth does not authorize later UI automation"
+          ],
+          "policy_source": "https://www.linkedin.com/help/linkedin/answer/a1340567/automated-activity-on-linkedin"
+        },
+        "write_without_product_scope_role_or_current_version": {
+          "route": "DENY",
+          "approval_required": false,
+          "conditions": [
+            "Missing API authority cannot be supplied by computer use, an access token alone, or an operator approval"
+          ],
+          "policy_source": "https://learn.microsoft.com/en-us/linkedin/marketing/increasing-access?view=li-lms-2026-08"
+        }
+      }
+    },
+    "x": {
+      "identity_status": "HUMAN_LINKED_AUTOMATED_ACCOUNT_WHERE_APPLICABLE",
+      "platform_constraints": [
+        "APPROVED_API_ONLY",
+        "DYNAMIC_AI_REPLY_REQUIRES_WRITTEN_APPROVAL",
+        "NO_BROWSER_FALLBACK"
+      ],
+      "prerequisites": [
+        "X developer project, application, and current paid or approved API access",
+        "OAuth 2.0 Authorization Code with PKCE for user actions",
+        "Minimal tweet.write, users.read, offline.access, dm.write, or other required scopes",
+        "Automated account disclosure and linkage where applicable",
+        "Developer console credits, endpoint headers, post caps, account limits, and current automation policy are runtime authority"
+      ],
+      "official_sources": [
+        "https://docs.x.com/fundamentals/authentication/oauth-2-0/authorization-code",
+        "https://docs.x.com/x-api/posts/manage-tweets/introduction",
+        "https://docs.x.com/x-api/fundamentals/rate-limits",
+        "https://docs.x.com/x-api/fundamentals/metrics",
+        "https://help.x.com/en/rules-and-policies/x-automation",
+        "https://help.x.com/en/using-x/automated-account-labels"
+      ],
+      "operations": {
+        "oauth_consent_and_automated_account_linkage": {
+          "route": "ATTENDED_MANUAL",
+          "approval_required": true,
+          "conditions": [
+            "The account owner reviews scopes and links any automated account to the human run account",
+            "The owner completes provider authentication"
+          ],
+          "policy_source": "https://help.x.com/en/using-x/automated-account-labels"
+        },
+        "read_authorized_posts_or_stats": {
+          "route": "API_ALLOWED",
+          "approval_required": false,
+          "conditions": [
+            "The authentication context permits the endpoint",
+            "Public versus nonpublic metric authority is preserved",
+            "Private metrics are requested only within their current 30 day eligibility window",
+            "Credits and endpoint limits allow the read"
+          ],
+          "policy_source": "https://docs.x.com/x-api/fundamentals/metrics"
+        },
+        "publish_post_or_reply": {
+          "route": "API_ALLOWED",
+          "approval_required": true,
+          "conditions": [
+            "Account, target, content digest, audience, schedule, expiry, and current reply rules match approval",
+            "Developer console credits and live endpoint limits allow the action",
+            "The content is not duplicative, unsolicited, or artificial engagement"
+          ],
+          "policy_source": "https://docs.x.com/x-api/posts/manage-tweets/introduction"
+        },
+        "send_direct_message": {
+          "route": "API_ALLOWED",
+          "approval_required": true,
+          "conditions": [
+            "Recipient intent is demonstrated",
+            "The message and recipient match exact approval",
+            "An easy opt out is provided"
+          ],
+          "policy_source": "https://help.x.com/en/rules-and-policies/x-automation"
+        },
+        "delete_owned_post": {
+          "route": "API_ALLOWED",
+          "approval_required": true,
+          "conditions": [
+            "The exact owned post and current state match a high risk approval",
+            "A witnessed terminal receipt is produced"
+          ],
+          "policy_source": "https://docs.x.com/x-api/posts/manage-tweets/introduction"
+        },
+        "dynamic_ai_generated_replies_without_written_x_approval": {
+          "route": "DENY",
+          "approval_required": true,
+          "conditions": [
+            "Prior written X approval is absent",
+            "Written approval alone does not enable execution until a reviewed registry and ADR change"
+          ],
+          "policy_source": "https://help.x.com/en/rules-and-policies/x-automation"
+        },
+        "automated_like_reply_hiding_bulk_spam_or_artificial_engagement": {
+          "route": "DENY",
+          "approval_required": false,
+          "conditions": [
+            "The X automation rules prohibit or restrict these behaviors",
+            "Optimization cannot select them as objectives"
+          ],
+          "policy_source": "https://help.x.com/en/rules-and-policies/x-automation"
+        },
+        "x_website_scripting_or_browser_fallback": {
+          "route": "DENY",
+          "approval_required": false,
+          "conditions": [
+            "Non API website automation can result in suspension",
+            "API rejection, rate limiting, or missing scope cannot be bypassed"
+          ],
+          "policy_source": "https://help.x.com/en/rules-and-policies/x-automation"
+        }
+      }
+    },
+    "reddit": {
+      "identity_status": "DISABLED_PENDING_EXPLICIT_REDDIT_APPROVAL",
+      "platform_constraints": [
+        "EXPLICIT_REDDIT_APPROVAL_REQUIRED",
+        "NO_SCRAPING",
+        "NO_BROWSER_AUTOMATION"
+      ],
+      "prerequisites": [
+        "Written Reddit approval for the precise use case before any automated data access",
+        "Devvit evaluation as the preferred official route",
+        "Separate written approval for commercial use",
+        "OAuth client and unique Reddit user agent if Data API access is granted",
+        "Approval terms, OAuth headers, Developer Platform controls, and current subreddit rules are runtime authority"
+      ],
+      "official_sources": [
+        "https://support.reddithelp.com/hc/en-us/articles/42728983564564-Responsible-Builder-Policy",
+        "https://support.reddithelp.com/hc/en-us/articles/16160319875092-Reddit-Data-API-Wiki",
+        "https://redditinc.com/policies/data-api-terms",
+        "https://redditinc.com/policies/developer-terms",
+        "https://www.reddit.com/dev/api/"
+      ],
+      "operations": {
+        "submit_reddit_application_or_devvit_review": {
+          "route": "ATTENDED_MANUAL",
+          "approval_required": true,
+          "conditions": [
+            "The account owner documents data, actions, retention, subreddits, private communications, and commercial status",
+            "Reddit grants the applicable written approval"
+          ],
+          "policy_source": "https://support.reddithelp.com/hc/en-us/articles/42728983564564-Responsible-Builder-Policy"
+        },
+        "manual_use_of_official_reddit_interface": {
+          "route": "ATTENDED_MANUAL",
+          "approval_required": true,
+          "conditions": [
+            "The human uses Reddit directly",
+            "The metaharness supplies no automated clicks, credentials, or scraped data"
+          ],
+          "policy_source": "https://redditinc.com/policies/user-agreement"
+        },
+        "automated_read_or_stats_before_reddit_approval": {
+          "route": "DENY",
+          "approval_required": false,
+          "conditions": [
+            "Reddit approval is not verified",
+            "Public counters are still Reddit data",
+            "No general organic marketing analytics API is assumed or fabricated"
+          ],
+          "policy_source": "https://support.reddithelp.com/hc/en-us/articles/42728983564564-Responsible-Builder-Policy"
+        },
+        "automated_post_comment_message_or_moderation_before_reddit_approval": {
+          "route": "DENY",
+          "approval_required": false,
+          "conditions": [
+            "Reddit approval is not verified",
+            "Subreddit authority and private communication consent are not assumed",
+            "The advisory 100 queries per minute Data API limit grants no access"
+          ],
+          "policy_source": "https://support.reddithelp.com/hc/en-us/articles/16160319875092-Reddit-Data-API-Wiki"
+        },
+        "reddit_scraping_or_browser_automation": {
+          "route": "DENY",
+          "approval_required": false,
+          "conditions": [
+            "Unauthorized automated collection and UI automation are not fallbacks"
+          ],
+          "policy_source": "https://redditinc.com/policies/user-agreement"
+        },
+        "reddit_data_model_training_or_unapproved_commercialization": {
+          "route": "DENY",
+          "approval_required": false,
+          "conditions": [
+            "Separate rights and express written authorization are required",
+            "Repository content cannot supply those rights"
+          ],
+          "policy_source": "https://redditinc.com/policies/data-api-terms"
+        }
+      }
+    },
+    "facebook": {
+      "identity_status": "AUTHORIZED_PAGE_ONLY",
+      "platform_constraints": [
+        "PAGE_ONLY",
+        "NO_BROWSER_FALLBACK"
+      ],
+      "prerequisites": [
+        "Meta developer application and authorized Facebook Page",
+        "Page task access limited to required duties",
+        "Page access token referenced from an external secret manager",
+        "Minimal pages_show_list, pages_read_engagement, pages_manage_posts, read_insights, or other reviewed permissions",
+        "App review and business verification when advanced access is required",
+        "Graph usage headers, app dashboard state, Page state, and current Graph API policy are runtime authority"
+      ],
+      "official_sources": [
+        "https://developers.facebook.com/docs/pages-api/posts",
+        "https://developers.facebook.com/docs/platforminsights/page",
+        "https://developers.facebook.com/docs/graph-api/overview/rate-limiting",
+        "https://www.facebook.com/help/289207354498410/",
+        "https://www.facebook.com/legal/automated_data_collection_terms"
+      ],
+      "operations": {
+        "app_review_page_link_and_scope_consent": {
+          "route": "ATTENDED_MANUAL",
+          "approval_required": true,
+          "conditions": [
+            "A Page owner reviews Page selection, task access, and permissions",
+            "Meta approves any advanced access",
+            "Full Page control is not granted when narrow task access works"
+          ],
+          "policy_source": "https://www.facebook.com/help/289207354498410/"
+        },
+        "read_page_content_or_stats": {
+          "route": "API_ALLOWED",
+          "approval_required": false,
+          "conditions": [
+            "The Page and permission grant authorize the resource",
+            "Stats cover authorized Pages and Page content only",
+            "Metric permissions, region, and retention constraints are preserved",
+            "Live Graph usage headers allow the read"
+          ],
+          "policy_source": "https://developers.facebook.com/docs/platforminsights/page"
+        },
+        "publish_reply_message_or_delete_page_content": {
+          "route": "API_ALLOWED",
+          "approval_required": true,
+          "conditions": [
+            "The Page, object, content digest, audience, schedule, and current state match approval",
+            "Deletion and permission sensitive actions require exact high risk approval",
+            "Live Graph usage headers and Page state allow the action"
+          ],
+          "policy_source": "https://developers.facebook.com/docs/pages-api/posts"
+        },
+        "personal_facebook_profile_write": {
+          "route": "DENY",
+          "approval_required": false,
+          "conditions": [
+            "Programmatic personal profile publishing is unavailable",
+            "Computer use cannot emulate the removed capability"
+          ],
+          "policy_source": "https://developers.facebook.com/docs/pages-api/posts"
+        },
+        "facebook_group_api_write": {
+          "route": "DENY",
+          "approval_required": false,
+          "conditions": [
+            "The Groups API publishing route has been removed",
+            "No browser fallback is permitted"
+          ],
+          "policy_source": "https://developers.facebook.com/blog/post/2024/01/23/introducing-facebook-graph-and-marketing-api-v19/"
+        },
+        "facebook_scraping_ui_automation_or_unnecessary_full_page_control": {
+          "route": "DENY",
+          "approval_required": false,
+          "conditions": [
+            "Automated collection and UI automation outside sanctioned APIs are prohibited fallbacks",
+            "Full control can remove managers or delete a Page and is outside the connector authority"
+          ],
+          "policy_source": "https://www.facebook.com/legal/automated_data_collection_terms"
+        }
+      }
+    },
+    "threads": {
+      "identity_status": "THREADS_USER_OAUTH_REQUIRED",
+      "platform_constraints": [
+        "APPROVED_OAUTH_ONLY",
+        "NO_BROWSER_FALLBACK"
+      ],
+      "prerequisites": [
+        "Meta developer application with the Threads use case",
+        "Threads OAuth user consent",
+        "Minimal Threads permissions for publishing, insights, replies, mentions, or keyword search",
+        "Token referenced from an external secret manager",
+        "GET /me/threads_publishing_limit, Graph usage headers, app state, and account state are runtime authority"
+      ],
+      "official_sources": [
+        "https://www.postman.com/meta/threads/overview",
+        "https://www.postman.com/meta/threads/documentation/dht3nzz/threads-api",
+        "https://www.postman.com/meta/threads/request/34203612-f4590341-9bee-44f5-901b-606078a03c96"
+      ],
+      "operations": {
+        "oauth_and_scope_consent": {
+          "route": "ATTENDED_MANUAL",
+          "approval_required": true,
+          "conditions": [
+            "The owner reviews exact Threads account and permissions",
+            "The human completes provider authentication"
+          ],
+          "policy_source": "https://www.postman.com/meta/threads/documentation/dht3nzz/threads-api"
+        },
+        "read_authorized_content_or_insights": {
+          "route": "API_ALLOWED",
+          "approval_required": false,
+          "conditions": [
+            "Approved account, media, reply, mention, search, and insights scopes bound the read",
+            "Threads metric definitions remain distinct from Instagram metrics",
+            "Live usage state allows the read"
+          ],
+          "policy_source": "https://www.postman.com/meta/threads/documentation/dht3nzz/threads-api"
+        },
+        "publish_thread_reply_or_delete": {
+          "route": "API_ALLOWED",
+          "approval_required": true,
+          "conditions": [
+            "Account, content container, target, content digest, schedule, and expiry match approval",
+            "GET /me/threads_publishing_limit authorizes current capacity",
+            "Deletion requires exact high risk approval"
+          ],
+          "policy_source": "https://www.postman.com/meta/threads/documentation/dht3nzz/threads-api"
+        },
+        "threads_ui_automation_or_browser_fallback": {
+          "route": "DENY",
+          "approval_required": false,
+          "conditions": [
+            "The official Threads API is the automation path",
+            "Missing API capability cannot be supplied by computer use"
+          ],
+          "policy_source": "https://www.postman.com/meta/threads/overview"
+        },
+        "threads_quota_bypass": {
+          "route": "DENY",
+          "approval_required": false,
+          "conditions": [
+            "No account rotation, UI fallback, or duplicate action may bypass the live publishing limit"
+          ],
+          "policy_source": "https://www.postman.com/meta/threads/request/34203612-f4590341-9bee-44f5-901b-606078a03c96"
+        }
+      }
+    },
+    "instagram": {
+      "identity_status": "PROFESSIONAL_ACCOUNT_ONLY",
+      "platform_constraints": [
+        "PROFESSIONAL_ACCOUNT_ONLY",
+        "NO_BROWSER_FALLBACK"
+      ],
+      "prerequisites": [
+        "Instagram Business or Creator account",
+        "Meta application using a supported Facebook Login or Instagram Login route",
+        "Linked Facebook Page when required by the selected login route",
+        "Minimal approved publishing, insights, comments, or messaging scopes",
+        "GET /content_publishing_limit, Graph usage headers, account eligibility, and app state are runtime authority"
+      ],
+      "official_sources": [
+        "https://www.postman.com/meta/instagram/documentation/6yqw8pt/instagram-api",
+        "https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/content-publishing",
+        "https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/messaging-api"
+      ],
+      "operations": {
+        "account_link_app_review_and_oauth": {
+          "route": "ATTENDED_MANUAL",
+          "approval_required": true,
+          "conditions": [
+            "The owner selects the professional account, login route, linked Page when required, and exact permissions",
+            "Meta approves any reviewed permission"
+          ],
+          "policy_source": "https://www.postman.com/meta/instagram/documentation/6yqw8pt/instagram-api"
+        },
+        "read_professional_content_or_insights": {
+          "route": "API_ALLOWED",
+          "approval_required": false,
+          "conditions": [
+            "The authorized professional account and insight permission expose the metric",
+            "Metric media type, account type, region, and retention constraints are preserved",
+            "Consumer insights are reported unavailable rather than inferred"
+          ],
+          "policy_source": "https://www.postman.com/meta/instagram/documentation/6yqw8pt/instagram-api"
+        },
+        "publish_professional_media": {
+          "route": "API_ALLOWED",
+          "approval_required": true,
+          "conditions": [
+            "The account is an eligible Business or Creator account",
+            "Media type, container state, account, content digest, audience, schedule, and expiry match approval",
+            "GET /content_publishing_limit authorizes current capacity"
+          ],
+          "policy_source": "https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/content-publishing"
+        },
+        "reply_to_comment_or_user_initiated_message": {
+          "route": "API_ALLOWED",
+          "approval_required": true,
+          "conditions": [
+            "The user initiated the professional account conversation",
+            "The current response window and granted scopes allow the reply",
+            "An exact action or registered support workflow authorizes it"
+          ],
+          "policy_source": "https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/messaging-api"
+        },
+        "consumer_instagram_account_write": {
+          "route": "DENY",
+          "approval_required": false,
+          "conditions": [
+            "The publishing connector supports professional accounts only",
+            "Consumer writes cannot be emulated through computer use"
+          ],
+          "policy_source": "https://www.postman.com/meta/instagram/documentation/6yqw8pt/instagram-api"
+        },
+        "instagram_browser_automation": {
+          "route": "DENY",
+          "approval_required": false,
+          "conditions": [
+            "Automated posting, following, liking, or messaging through the consumer interface is not an API fallback"
+          ],
+          "policy_source": "https://www.facebook.com/legal/automated_data_collection_terms"
+        },
+        "business_initiated_message_without_user_conversation": {
+          "route": "DENY",
+          "approval_required": false,
+          "conditions": [
+            "The Instagram messaging conversation must be initiated by the user"
+          ],
+          "policy_source": "https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/messaging-api"
+        }
+      }
+    },
+    "github": {
+      "identity_status": "GITHUB_APP_INSTALLATION_PREFERRED",
+      "platform_constraints": [
+        "GITHUB_APP_PREFERRED",
+        "NO_BROWSER_FALLBACK"
+      ],
+      "prerequisites": [
+        "GitHub App registered with no permissions by default",
+        "Installation approved for explicit repositories or organization resources",
+        "Minimal metadata, contents, issues, pull requests, discussions, administration, or workflow permissions",
+        "Short lived installation token minted through external key custody",
+        "X-RateLimit headers, secondary limit responses, installation scaling, abuse detection, branch protection, and repository rules are runtime authority"
+      ],
+      "official_sources": [
+        "https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/about-authentication-with-a-github-app",
+        "https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/choosing-permissions-for-a-github-app",
+        "https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api",
+        "https://docs.github.com/en/rest/metrics/traffic",
+        "https://docs.github.com/en/site-policy/acceptable-use-policies/github-acceptable-use-policies"
+      ],
+      "operations": {
+        "github_app_installation": {
+          "route": "ATTENDED_MANUAL",
+          "approval_required": true,
+          "conditions": [
+            "A repository or organization owner reviews repository selection and exact permissions",
+            "The human completes provider authentication"
+          ],
+          "policy_source": "https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/choosing-permissions-for-a-github-app"
+        },
+        "read_authorized_repository_data_or_stats": {
+          "route": "API_ALLOWED",
+          "approval_required": false,
+          "conditions": [
+            "The installation and repository permission authorize the resource",
+            "Repository traffic metrics cover only the previous 14 days",
+            "Traffic access has the required repository authority",
+            "Primary and secondary live limits allow the read"
+          ],
+          "policy_source": "https://docs.github.com/en/rest/metrics/traffic"
+        },
+        "create_issue_comment_release_discussion_or_repository_content": {
+          "route": "API_ALLOWED",
+          "approval_required": true,
+          "conditions": [
+            "Repository, branch or object, content digest, visibility, and schedule match approval",
+            "Repository rules and current live limits allow the action",
+            "Every public artifact is treated as external publication"
+          ],
+          "policy_source": "https://docs.github.com/en/rest"
+        },
+        "merge_or_delete_repository_resource": {
+          "route": "API_ALLOWED",
+          "approval_required": true,
+          "conditions": [
+            "Exact high risk approval binds the repository, target, current state, and commit or resource digest",
+            "Terminal checks and repository rules are green",
+            "A witnessed receipt is produced"
+          ],
+          "policy_source": "https://docs.github.com/en/rest/pulls/pulls"
+        },
+        "artificial_stars_follows_or_spam": {
+          "route": "DENY",
+          "approval_required": false,
+          "conditions": [
+            "GitHub prohibits inauthentic engagement and automated spam"
+          ],
+          "policy_source": "https://docs.github.com/en/site-policy/acceptable-use-policies/github-acceptable-use-policies"
+        },
+        "browser_fallback_or_repository_rule_bypass": {
+          "route": "DENY",
+          "approval_required": false,
+          "conditions": [
+            "API or permission failure cannot be bypassed through computer use",
+            "Branch protection and repository rules remain authoritative"
+          ],
+          "policy_source": "https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches"
+        }
+      }
+    },
+    "gist": {
+      "identity_status": "GITHUB_USER_GIST_SCOPE_REQUIRED",
+      "platform_constraints": [
+        "GIST_SCOPE_REQUIRED",
+        "NO_BROWSER_FALLBACK"
+      ],
+      "prerequisites": [
+        "GitHub user authorization with the gist OAuth scope or Gists write permission",
+        "Token referenced from an external secret manager",
+        "Content classification confirming no secret, personal data, raw transcript, or private index",
+        "GitHub primary and secondary rate limit responses, token state, and current Gist content behavior are runtime authority"
+      ],
+      "official_sources": [
+        "https://docs.github.com/en/rest/gists/gists",
+        "https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api",
+        "https://docs.github.com/en/site-policy/acceptable-use-policies/github-acceptable-use-policies"
+      ],
+      "operations": {
+        "gist_scope_consent": {
+          "route": "ATTENDED_MANUAL",
+          "approval_required": true,
+          "conditions": [
+            "The account owner reviews the broad Gist write permission",
+            "The human completes provider authentication"
+          ],
+          "policy_source": "https://docs.github.com/en/rest/gists/gists"
+        },
+        "read_public_or_authorized_gist": {
+          "route": "API_ALLOWED",
+          "approval_required": false,
+          "conditions": [
+            "Public versus authorized visibility is honored",
+            "Large file truncation and current rate limits are handled explicitly"
+          ],
+          "policy_source": "https://docs.github.com/en/rest/gists/gists"
+        },
+        "create_update_or_delete_gist": {
+          "route": "API_ALLOWED",
+          "approval_required": true,
+          "conditions": [
+            "Exact files, visibility, content digest, account, and action match approval",
+            "A secret and personal data scan passes",
+            "Deletion requires exact high risk approval"
+          ],
+          "policy_source": "https://docs.github.com/en/rest/gists/gists"
+        },
+        "read_gist_traffic_analytics": {
+          "route": "DENY",
+          "approval_required": false,
+          "conditions": [
+            "No supported Gist traffic analytics API is registered",
+            "Public metadata is not fabricated into reach or conversion"
+          ],
+          "policy_source": "https://docs.github.com/en/rest/gists/gists"
+        },
+        "publish_secret_personal_data_raw_transcript_or_private_index": {
+          "route": "DENY",
+          "approval_required": false,
+          "conditions": [
+            "Gist is not an approved credential, personal data, transcript, or private index store"
+          ],
+          "policy_source": "https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement"
+        },
+        "gist_browser_fallback": {
+          "route": "DENY",
+          "approval_required": false,
+          "conditions": [
+            "Missing scope, API capability, or rate capacity cannot be bypassed through computer use"
+          ],
+          "policy_source": "https://docs.github.com/en/rest/gists/gists"
+        }
+      }
+    }
+  }
+}

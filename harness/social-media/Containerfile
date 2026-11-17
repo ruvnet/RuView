@@ -1,0 +1,16 @@
+ARG NODE_IMAGE
+FROM ${NODE_IMAGE}
+
+WORKDIR /app
+COPY package.json ./
+COPY .harness ./.harness
+COPY bin ./bin
+COPY config ./config
+COPY research ./research
+COPY src ./src
+
+ENV NODE_ENV=production
+ENV PORT=8080
+USER node
+EXPOSE 8080
+CMD ["node", "./bin/cli.js", "serve"]

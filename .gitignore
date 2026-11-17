@@ -299,6 +299,7 @@ harness/**/*.tgz
 harness/**/package-lock.json
 !harness/ruview/package-lock.json
 !harness/homecore/package-lock.json
+!harness/social-media/package-lock.json
 harness/**/.claude-flow/
 harness/**/.metaharness/
 harness/**/ruvector.db
@@ -313,6 +314,7 @@ v2/crates/wifi-densepose-sensing-server/data/
 # The server also writes this secret when launched from v2/. Keep the rule
 # file-specific so tracked datasets below v2/data remain visible.
 /v2/data/session-secret
+/data/session-secret
 *.proptest-regressions
 
 # ADR-324: wasm-bindgen output for ruview-offaxis is generated locally
