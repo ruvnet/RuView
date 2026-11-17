@@ -50,18 +50,26 @@ jobs:
             git diff --submodule=log -- vendor/ || true
           fi
 
-      - name: Create PR with updates
+      # One rolling branch and at most one open PR. The branch is rebuilt from
+      # main on every run and force-pushed, so an open PR always shows the
+      # latest pointers instead of a new PR piling up every six hours.
+      - name: Create or refresh the update PR
         if: steps.check.outputs.changed == 'true'
         run: |
-          BRANCH="chore/update-submodules-$(date +%Y%m%d-%H%M%S)"
-          git checkout -b "$BRANCH"
+          BRANCH="chore/update-submodules"
+          git checkout -B "$BRANCH"
           git add vendor/
           git commit -m "chore: update vendor submodules to latest upstream"
-          git push origin "$BRANCH"
-          gh pr create \
-            --title "chore: update vendor submodules" \
-            --body "Automated submodule update to the latest upstream commit on each submodule's tracked branch (see \`.gitmodules\`). Review the pointer diff before merging." \
-            --base main \
-            --head "$BRANCH"
+          git push --force origin "$BRANCH"
+          OPEN=$(gh pr list --base main --head "$BRANCH" --state open --json number --jq '.[0].number')
+          if [ -n "$OPEN" ]; then
+            echo "Refreshed existing PR #$OPEN"
+          else
+            gh pr create \
+              --title "chore: update vendor submodules" \
+              --body "Automated submodule update to the latest upstream commit on each submodule's tracked branch (see \`.gitmodules\`). This PR is refreshed in place on every scheduled run. Review the pointer diff before merging." \
+              --base main \
+              --head "$BRANCH"
+          fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
