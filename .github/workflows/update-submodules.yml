@@ -1,9 +1,20 @@
 name: Update vendor submodules
 
+# One pull request per submodule, each carrying a receipt: the old and the
+# new commit, the comparison link, whether the target is reachable from the
+# configured tracked branch, and the upstream's own verdict on that exact
+# commit. A bundled multi-submodule branch-tip sweep cannot be attributed
+# and carries no upstream evidence, which is what RuView#1743 reports.
+
 on:
   schedule:
     - cron: '0 */6 * * *'  # Every 6 hours
-  workflow_dispatch:        # Manual trigger
+  workflow_dispatch:
+    inputs:
+      submodule:
+        description: 'Restrict the run to one submodule path (default: every tracked submodule)'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -28,40 +39,18 @@ jobs:
           git config --global user.name  "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      # Use a plain `--remote` checkout (detached HEAD at each submodule's
-      # configured `branch` tip from .gitmodules) rather than `--merge`. We only
-      # want to bump the superproject's gitlink to the latest upstream commit;
-      # there's no reason to create merge commits inside the vendored repos, and
-      # `--merge` breaks whenever the current pin has diverged from that branch.
-      - name: Update submodules to latest tracked branch
-        run: |
-          git submodule sync --recursive
-          git submodule update --remote --recursive
+      - name: Report the tracked submodule set
+        run: python3 scripts/submodule_bump.py --list-tracked
 
-      - name: Check for changes
-        id: check
-        run: |
-          if git diff --quiet; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "--- submodule pointer changes ---"
-            git submodule status --recursive || true
-            git diff --submodule=log -- vendor/ || true
-          fi
-
-      - name: Create PR with updates
-        if: steps.check.outputs.changed == 'true'
-        run: |
-          BRANCH="chore/update-submodules-$(date +%Y%m%d-%H%M%S)"
-          git checkout -b "$BRANCH"
-          git add vendor/
-          git commit -m "chore: update vendor submodules to latest upstream"
-          git push origin "$BRANCH"
-          gh pr create \
-            --title "chore: update vendor submodules" \
-            --body "Automated submodule update to the latest upstream commit on each submodule's tracked branch (see \`.gitmodules\`). Review the pointer diff before merging." \
-            --base main \
-            --head "$BRANCH"
+      # The script resolves each tracked submodule's branch tip, checks that
+      # the tip is reachable from that branch, reads the upstream's check runs
+      # and combined status for that exact commit, and opens one pull request
+      # per submodule that moved. A submodule whose target is not reachable,
+      # or whose upstream has no clean verdict, is reported and left alone.
+      - name: Open one pull request per submodule
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SUBMODULE: ${{ inputs.submodule }}
+          RUN_TIMESTAMP: ${{ github.run_id }}
+        run: python3 scripts/submodule_bump.py --apply
