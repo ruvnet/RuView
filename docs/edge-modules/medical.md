@@ -145,6 +145,22 @@ println!("AHI: {:.1}", detector.ahi());
 
 6. **Limitations**: WiFi-based breathing detection works best when the subject is relatively still (sleeping). Tossing and turning may cause momentary breathing detection loss, which could either mask or falsely trigger apnea events. A single-night study should always be confirmed with clinical polysomnography.
 
+#### Research Extension: PSG/EEG Co-Validation
+
+For sleep-medicine research, the sleep-apnea module should be validated against a reference sleep study rather than interpreted in isolation. A practical co-validation design is:
+
+1. **Reference channel**: collect polysomnography (PSG) or an approved sleep-study export with EEG, EOG, EMG, airflow, respiratory effort, pulse oximetry, body position, and scored sleep stages where available.
+2. **RuView channel**: record time-synchronized CSI-derived breathing rate, motion energy, presence confidence, apnea start/end events, and AHI updates from the same overnight window.
+3. **Clock alignment**: align both systems with a shared start marker, wall-clock timestamp, or manually annotated synchronization event before comparing epochs.
+4. **Epoch-level comparison**: compare RuView apnea candidates against scored respiratory events in 30-second windows, and stratify false positives by sleep stage, body position, and motion artifact.
+5. **Clinical review loop**: have a sleep-trained clinician review discordant epochs before changing thresholds, because EEG arousals, wake-after-sleep-onset, REM/NREM stage, and movement artifact can explain apparent disagreement.
+
+This approach keeps RuView in its intended role: an experimental, contactless sensing layer that can be studied against PSG/EEG-derived ground truth. It should not replace PSG, HSAT, clinician scoring, or regulated monitoring equipment.
+
+Related references:
+- AASM Scoring Manual overview: https://learn.aasm.org/AssetListing/The-AASM-Manual-for-the-Scoring-of-Sleep-and-Associated-Events-4265/The-AASM-Manual-for-the-Scoring-of-Sleep-and-Associated-Events-6697
+- AASM Practice Standards: https://aasm.org/clinical-resources/practice-standards/
+
 ---
 
 ### Cardiac Arrhythmia Detection (`med_cardiac_arrhythmia.rs`)
