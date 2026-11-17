@@ -1,0 +1,89 @@
+{
+  "schema_version": "ruview.sensing-claim-policy/v1",
+  "policy_id": "ruview-sensing-claims-2026-08-v1",
+  "registered_manifest_sha256": {},
+  "trusted_evaluators": ["ruview-ci"],
+  "trusted_independent_reviewers": ["independent-lab"],
+  "allowed_reproducer_argv": [],
+  "allowed_confidence_methods": ["bootstrap-percentile-95", "wilson-score-95"],
+  "claim_classes": {
+    "research": {
+      "enabled": true,
+      "allow_non_hardware": true,
+      "require_hardware_evidence": false,
+      "min_test_samples": 30,
+      "min_test_environments": 1,
+      "min_samples_per_environment": 0,
+      "require_held_out_environment": false,
+      "require_subject_disjoint": false,
+      "require_reproducer": false,
+      "require_independent_validation": false,
+      "capabilities": {
+        "*": {
+          "require_binary_class_counts": false,
+          "min_positive_samples": 0,
+          "min_negative_samples": 0,
+          "min_positive_samples_per_environment": 0,
+          "min_negative_samples_per_environment": 0,
+          "metrics": {}
+        }
+      }
+    },
+    "production": {
+      "enabled": false,
+      "allow_non_hardware": false,
+      "require_hardware_evidence": true,
+      "min_test_samples": 300,
+      "min_test_environments": 2,
+      "min_samples_per_environment": 100,
+      "require_held_out_environment": true,
+      "require_subject_disjoint": false,
+      "require_reproducer": true,
+      "require_independent_validation": true,
+      "capabilities": {
+        "presence": {
+          "require_binary_class_counts": true,
+          "min_positive_samples": 60,
+          "min_negative_samples": 60,
+          "min_positive_samples_per_environment": 20,
+          "min_negative_samples_per_environment": 20,
+          "metrics": {
+            "roc_auc": {
+              "minimum": 0.9,
+              "maximum": null,
+              "statistic": "lower_confidence_bound"
+            },
+            "sensitivity": {
+              "minimum": 0.9,
+              "maximum": null,
+              "statistic": "lower_confidence_bound"
+            },
+            "specificity": {
+              "minimum": 0.9,
+              "maximum": null,
+              "statistic": "lower_confidence_bound"
+            },
+            "false_positive_rate": {
+              "minimum": null,
+              "maximum": 0.1,
+              "statistic": "upper_confidence_bound"
+            }
+          }
+        }
+      }
+    },
+    "safety_critical": {
+      "enabled": false,
+      "allow_non_hardware": false,
+      "require_hardware_evidence": true,
+      "min_test_samples": 1000,
+      "min_test_environments": 3,
+      "min_samples_per_environment": 250,
+      "require_held_out_environment": true,
+      "require_subject_disjoint": true,
+      "require_reproducer": true,
+      "require_independent_validation": true,
+      "capabilities": {}
+    }
+  }
+}
