@@ -157,6 +157,19 @@ fn sanitize_edge_person_count(presence: bool, raw: u8) -> (u8, bool) {
 
 // ── ESP32 UDP frame parsers ─────────────────────────────────────────────────
 
+/// `SENSING_CFO_SFO_DETREND=1|true` enables per-antenna phase unwrap +
+/// CFO/SFO linear de-trend on every parsed CSI frame (ADR-014 sanitization,
+/// SpotFi §3.1) before the phases reach feature extraction and broadcast.
+/// Off by default: legacy behaviour is bit-identical unless opted in.
+fn cfo_sfo_detrend_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("SENSING_CFO_SFO_DETREND")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+    })
+}
+
 /// Parse a 32-byte edge vitals packet (magic 0xC511_0002).
 pub fn parse_esp32_vitals(buf: &[u8]) -> Option<Esp32VitalsPacket> {
     if buf.len() < 32 {
@@ -318,6 +331,15 @@ pub fn parse_esp32_frame(buf: &[u8]) -> Option<Esp32Frame> {
         let q_val = buf[iq_start + k * 2 + 1] as i8 as f64;
         amplitudes.push((i_val * i_val + q_val * q_val).sqrt());
         phases.push(q_val.atan2(i_val));
+    }
+
+    // Opt-in CFO/SFO sanitization: unwrap + linear de-trend each antenna's
+    // subcarrier row before the phases reach features/broadcast.
+    if cfo_sfo_detrend_enabled() && n_antennas > 0 {
+        wifi_densepose_signal::phase_sanitizer::unwrap_and_detrend_rows(
+            &mut phases,
+            n_antennas as usize,
+        );
     }
 
     Some(Esp32Frame {

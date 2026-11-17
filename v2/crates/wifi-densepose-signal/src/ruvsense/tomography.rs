@@ -326,6 +326,90 @@ impl RfTomographer {
         })
     }
 
+    /// Reconstruct occupancy via Tikhonov (ridge) regularization.
+    ///
+    /// Solves `min ‖Wx − y‖² + λ‖x‖²` exactly via the normal equations
+    /// `(WᵀW + λI)x = Wᵀy`, using a pure-Rust Cholesky factorization — the
+    /// ridge normal matrix is symmetric positive-definite by construction for
+    /// any `λ > 0`, even when `W` is rank-deficient. Unlike the iterative
+    /// ISTA-L1 [`Self::reconstruct`], this is a direct one-shot solve with no
+    /// convergence dependence on iteration count, so successive frames of a
+    /// live link stream produce a temporally stable voxel field (no
+    /// iteration-truncation flicker).
+    ///
+    /// Trade-off (validated numerically before porting): with more links than
+    /// voxels the recovery is near-exact; in the typical underdetermined RTI
+    /// regime the ridge solution is *blurrier* than L1 but still localizes the
+    /// occupied support. It smooths rather than sparsifies — pick L1 for sharp
+    /// sparse targets, ridge for stable dense fields.
+    ///
+    /// Densities are clamped to `>= 0` (physical attenuation) after the solve;
+    /// the reported residual is computed with the clamped solution.
+    pub fn reconstruct_tikhonov(
+        &self,
+        attenuations: &[f64],
+        lambda: f64,
+    ) -> Result<OccupancyVolume, TomographyError> {
+        if attenuations.len() != self.weight_matrix.len() {
+            return Err(TomographyError::ObservationMismatch {
+                expected: self.weight_matrix.len(),
+                got: attenuations.len(),
+            });
+        }
+        if !(lambda > 0.0) {
+            return Err(TomographyError::InvalidGrid(
+                "Tikhonov lambda must be > 0".into(),
+            ));
+        }
+
+        let nv = self.n_voxels;
+        // Normal matrix A = WᵀW + λI and rhs = Wᵀy, accumulated from the
+        // sparse per-link weight rows.
+        let mut a = vec![0.0_f64; nv * nv];
+        let mut rhs = vec![0.0_f64; nv];
+        for (link_idx, weights) in self.weight_matrix.iter().enumerate() {
+            let y = attenuations[link_idx];
+            for &(i, wi) in weights {
+                rhs[i] += wi * y;
+                for &(j, wj) in weights {
+                    a[i * nv + j] += wi * wj;
+                }
+            }
+        }
+        for i in 0..nv {
+            a[i * nv + i] += lambda;
+        }
+
+        let x_raw = cholesky_solve(&mut a, &rhs, nv).ok_or_else(|| {
+            TomographyError::InvalidGrid("ridge normal matrix not SPD (numerical breakdown)".into())
+        })?;
+        let x: Vec<f64> = x_raw.into_iter().map(|v| v.max(0.0)).collect();
+
+        // RMS residual of the clamped solution.
+        let n_links = attenuations.len();
+        let mut residual = 0.0_f64;
+        for (link_idx, weights) in self.weight_matrix.iter().enumerate() {
+            let predicted: f64 = weights.iter().map(|&(idx, w)| w * x[idx]).sum();
+            let diff = predicted - attenuations[link_idx];
+            residual += diff * diff;
+        }
+        residual = (residual / n_links as f64).sqrt();
+
+        let occupied_count = x.iter().filter(|&&d| d > 0.01).count();
+
+        Ok(OccupancyVolume {
+            densities: x,
+            nx: self.config.nx,
+            ny: self.config.ny,
+            nz: self.config.nz,
+            bounds: self.config.bounds,
+            occupied_count,
+            total_voxels: nv,
+            residual,
+            iterations: 1,
+        })
+    }
+
     /// Number of links in this tomographer.
     pub fn n_links(&self) -> usize {
         self.weight_matrix.len()
@@ -335,6 +419,49 @@ impl RfTomographer {
     pub fn n_voxels(&self) -> usize {
         self.n_voxels
     }
+}
+
+/// Solve `A x = b` for symmetric positive-definite `A` (flat row-major,
+/// `n × n`, destroyed in place) via lower Cholesky factorization + forward /
+/// back substitution. Returns `None` if `A` is not SPD (non-positive pivot).
+/// Validated numerically against `numpy.linalg.solve` before porting.
+pub(crate) fn cholesky_solve(a: &mut [f64], b: &[f64], n: usize) -> Option<Vec<f64>> {
+    // In-place lower-triangular factor L (strict upper left stale, unused).
+    for i in 0..n {
+        for j in 0..=i {
+            let mut sum = a[i * n + j];
+            for k in 0..j {
+                sum -= a[i * n + k] * a[j * n + k];
+            }
+            if i == j {
+                if sum <= 0.0 {
+                    return None;
+                }
+                a[i * n + i] = sum.sqrt();
+            } else {
+                a[i * n + j] = sum / a[j * n + j];
+            }
+        }
+    }
+    // Forward substitution: L y = b
+    let mut y = vec![0.0_f64; n];
+    for i in 0..n {
+        let mut sum = b[i];
+        for k in 0..i {
+            sum -= a[i * n + k] * y[k];
+        }
+        y[i] = sum / a[i * n + i];
+    }
+    // Back substitution: Lᵀ x = y
+    let mut x = vec![0.0_f64; n];
+    for i in (0..n).rev() {
+        let mut sum = y[i];
+        for k in (i + 1)..n {
+            sum -= a[k * n + i] * x[k];
+        }
+        x[i] = sum / a[i * n + i];
+    }
+    Some(x)
 }
 
 // ---------------------------------------------------------------------------
@@ -751,5 +878,103 @@ mod tests {
 
         assert!(volume.residual.is_finite());
         assert!(volume.iterations > 0);
+    }
+
+    #[test]
+    fn test_cholesky_solve_known_system() {
+        // A = [[4, 2], [2, 3]] (SPD), b = [10, 8] → x = [1.75, 1.5]
+        let mut a = vec![4.0, 2.0, 2.0, 3.0];
+        let x = cholesky_solve(&mut a, &[10.0, 8.0], 2).unwrap();
+        assert!((x[0] - 1.75).abs() < 1e-12 && (x[1] - 1.5).abs() < 1e-12);
+
+        // Non-SPD (negative diagonal) must be refused.
+        let mut bad = vec![-1.0, 0.0, 0.0, 1.0];
+        assert!(cholesky_solve(&mut bad, &[1.0, 1.0], 2).is_none());
+    }
+
+    #[test]
+    fn test_tikhonov_forward_model_recovery() {
+        // Ground truth: obstruct one voxel region, synthesize y = W·x_true
+        // through the tomographer's own weight matrix, recover with ridge.
+        let links = make_square_links();
+        let config = TomographyConfig {
+            nx: 4,
+            ny: 4,
+            nz: 1,
+            bounds: [0.0, 0.0, 0.0, 6.0, 6.0, 3.0],
+            min_links: 8,
+            ..Default::default()
+        };
+        let tomo = RfTomographer::new(config, &links).unwrap();
+
+        let mut x_true = vec![0.0_f64; tomo.n_voxels()];
+        x_true[5] = 1.0; // one interior voxel occupied
+        let attenuations: Vec<f64> = tomo
+            .weight_matrix
+            .iter()
+            .map(|w| w.iter().map(|&(i, wi)| wi * x_true[i]).sum())
+            .collect();
+
+        let vol = tomo.reconstruct_tikhonov(&attenuations, 1e-3).unwrap();
+        // The true voxel is the strongest in the reconstruction.
+        let argmax = vol
+            .densities
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .unwrap()
+            .0;
+        assert_eq!(argmax, 5, "densities: {:?}", vol.densities);
+        assert!(vol.residual < 0.1, "residual {}", vol.residual);
+        assert_eq!(vol.iterations, 1);
+        assert!(vol.densities.iter().all(|&d| d >= 0.0));
+    }
+
+    #[test]
+    fn test_tikhonov_lambda_shrinks_solution() {
+        let links = make_square_links();
+        let config = TomographyConfig {
+            nx: 4,
+            ny: 4,
+            nz: 1,
+            min_links: 8,
+            ..Default::default()
+        };
+        let tomo = RfTomographer::new(config, &links).unwrap();
+        let attenuations: Vec<f64> = (0..tomo.n_links())
+            .map(|i| 0.3 * (i as f64 * 0.7).sin().abs())
+            .collect();
+
+        let norm = |lam: f64| -> f64 {
+            let v = tomo.reconstruct_tikhonov(&attenuations, lam).unwrap();
+            v.densities.iter().map(|d| d * d).sum::<f64>().sqrt()
+        };
+        let (n_small, n_big) = (norm(0.01), norm(10.0));
+        assert!(
+            n_big < n_small,
+            "lambda shrinkage violated: {n_big} !< {n_small}"
+        );
+    }
+
+    #[test]
+    fn test_tikhonov_input_validation() {
+        let links = make_square_links();
+        let tomo = RfTomographer::new(
+            TomographyConfig {
+                min_links: 8,
+                ..Default::default()
+            },
+            &links,
+        )
+        .unwrap();
+        // Wrong observation length
+        assert!(matches!(
+            tomo.reconstruct_tikhonov(&[0.0; 3], 0.1),
+            Err(TomographyError::ObservationMismatch { .. })
+        ));
+        // Non-positive lambda
+        let y = vec![0.0; tomo.n_links()];
+        assert!(tomo.reconstruct_tikhonov(&y, 0.0).is_err());
+        assert!(tomo.reconstruct_tikhonov(&y, -1.0).is_err());
     }
 }
