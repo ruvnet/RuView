@@ -105,8 +105,15 @@ try:
         '__copyright__',
     ]
 
-except ImportError as e:
-    # Handle import errors gracefully during package installation
+except (ImportError, OSError) as e:
+    # Handle import errors gracefully during package installation.
+    #
+    # OSError belongs here too: an optional dependency that is installed but
+    # cannot load its own libraries (a torch wheel that cannot resolve
+    # torch_python.dll, for instance) raises OSError, not ImportError. With
+    # only ImportError caught, that error escaped the guard and took the
+    # whole package down with it, including the modules that never touch
+    # torch -- the RSSI collector and the deterministic proof replay.
     import warnings
     warnings.warn(
         f"Some components could not be imported: {e}. "
