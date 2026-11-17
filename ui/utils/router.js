@@ -4,7 +4,7 @@
 export class Router {
   constructor(app) {
     this.app = app;
-    this.validTabs = ['dashboard', 'hardware', 'demo', 'architecture', 'performance', 'applications', 'sensing', 'training'];
+    this.validTabs = ['dashboard', 'hardware', 'demo', 'architecture', 'performance', 'applications', 'sensing', 'training', 'debug'];
   }
 
   init() {
