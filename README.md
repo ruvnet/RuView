@@ -1,4 +1,4 @@
-# π RuView
+docs/integrations/home-assistant.md# π RuView
 
 <p align="center">
   <a href="https://cognitum.one/seed">
