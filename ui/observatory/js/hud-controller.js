@@ -381,10 +381,12 @@ export class HudController {
 
     // Sync scenario dropdown
     const quickSel = document.getElementById('scenario-quick-select');
+    const live = this._obs.settings.dataSource === 'ws';
     const cur = demoData._autoMode ? 'auto' : demoData.currentScenario;
     if (quickSel && quickSel.value !== cur) quickSel.value = cur;
+    if (quickSel) quickSel.disabled = live;
     const autoIcon = document.getElementById('autoplay-icon');
-    if (autoIcon) autoIcon.className = demoData._autoMode ? '' : 'hidden';
+    if (autoIcon) autoIcon.className = !live && demoData._autoMode ? '' : 'hidden';
 
     const targetHr = vs.heart_rate_bpm || 0;
     const targetBr = vs.breathing_rate_bpm || 0;
@@ -439,11 +441,15 @@ export class HudController {
     if (fallEl) fallEl.style.display = cls.fall_detected ? 'block' : 'none';
 
     // Scenario description and edge modules
-    const scenarioKey = demoData._autoMode ? (demoData.currentScenario || 'auto') : (demoData.currentScenario || 'auto');
+    const scenarioKey = live ? 'live' : (demoData.currentScenario || 'auto');
     if (scenarioKey !== this._currentScenarioKey) {
       this._currentScenarioKey = scenarioKey;
       this._updateScenarioDescription(scenarioKey);
       this._updateEdgeModules(scenarioKey);
+    }
+    if (live) {
+      this._setText('scenario-description', 'Live measurements: ' +
+        (typeof cls.motion_level === 'string' ? cls.motion_level : 'classification unavailable').replaceAll('_', ' '));
     }
   }
 

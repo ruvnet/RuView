@@ -59,6 +59,40 @@ globalThis.WebSocket = FakeWebSocket;
 
 const { SensingService } = await import('./sensing.service.js');
 
+test('source labels distinguish RSSI, ESP32 and unspecified live measurements (#2558)', () => {
+  const service = new SensingService();
+  for (const [source, state, label] of [
+    ['wifi:unnamed', undefined, 'HOST WIFI (RSSI ONLY)'],
+    ['wifi', 'live_unverified', 'HOST WIFI (RSSI ONLY)'],
+    ['esp32', 'live_verified', 'ESP32 HARDWARE'],
+    ['live', undefined, 'SOURCE UNSPECIFIED'],
+    ['unknown', 'live_unverified', 'SOURCE UNSPECIFIED'],
+  ]) {
+    service._applyServerSource(source, state);
+    assert.equal(service.dataSource, 'live');
+    assert.equal(service.liveSourceLabel, label);
+  }
+  for (const state of ['synthetic', 'stale', 'disconnected', 'unknown']) {
+    service._applyServerSource('wifi:home', state);
+    assert.notEqual(service.dataSource, 'live', state);
+  }
+  service._applyServerSource('esp32:offline');
+  assert.notEqual(service.dataSource, 'live');
+});
+
+test('switching live modalities refreshes subscribers, including canonical source state', () => {
+  const service = new SensingService();
+  service._state = 'connected';
+  service._applyServerSource('esp32', 'live_verified');
+  const labels = [];
+  service.onStateChange(() => labels.push(service.liveSourceLabel));
+  service._handleData({ source: 'wifi:unnamed', source_state: 'live_unverified' });
+  assert.equal(service.dataSource, 'live');
+  assert.ok(labels.includes('HOST WIFI (RSSI ONLY)'));
+  service._handleData({ source: 'wifi:unnamed', source_state: 'stale' });
+  assert.notEqual(service.dataSource, 'live');
+});
+
 const settle = (ms = 30) => new Promise((r) => setTimeout(r, ms));
 let svc;
 
