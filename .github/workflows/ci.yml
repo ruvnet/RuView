@@ -144,7 +144,9 @@ jobs:
       env:
         CARGO_PROFILE_DEV_DEBUG: "0"
         CARGO_PROFILE_TEST_DEBUG: "0"
-      run: cargo test --locked -p zip@0.6.6 -p wasmtime-internal-cache -p sqlx-sqlite
+      run: |
+        cargo test --locked -p zip@0.6.6 -p wasmtime-internal-cache -p sqlx-sqlite
+        cargo test --manifest-path vendor/security/zip-candle-compat/Cargo.toml --locked
 
     - name: Run ADR-147 worldmodel tests
       working-directory: v2
