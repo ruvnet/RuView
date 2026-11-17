@@ -10,7 +10,7 @@ use tokio::sync::{broadcast, RwLock};
 use crate::adaptive_classifier;
 use crate::rvf_container::RvfContainerInfo;
 use crate::rvf_pipeline::ProgressiveLoader;
-use crate::vital_signs::{VitalSignDetector, VitalSigns};
+use crate::vital_signs::{CrateVitalsPipeline, VitalSigns};
 
 use wifi_densepose_hardware::PpduType;
 use wifi_densepose_signal::ruvsense::field_model::FieldModel;
@@ -301,7 +301,7 @@ pub struct NodeState {
     pub hr_buffer: VecDeque<f64>,
     pub br_buffer: VecDeque<f64>,
     pub rssi_history: VecDeque<f64>,
-    pub vital_detector: VitalSignDetector,
+    pub vital_detector: CrateVitalsPipeline,
     pub latest_vitals: VitalSigns,
     pub last_frame_time: Option<std::time::Instant>,
     pub edge_vitals: Option<Esp32VitalsPacket>,
@@ -353,7 +353,7 @@ impl NodeState {
             hr_buffer: VecDeque::with_capacity(8),
             br_buffer: VecDeque::with_capacity(8),
             rssi_history: VecDeque::new(),
-            vital_detector: VitalSignDetector::new(10.0),
+            vital_detector: CrateVitalsPipeline::new(10.0, 56),
             latest_vitals: VitalSigns::default(),
             last_frame_time: None,
             edge_vitals: None,
@@ -487,7 +487,7 @@ pub struct AppStateInner {
     pub tx: broadcast::Sender<String>,
     pub total_detections: u64,
     pub start_time: std::time::Instant,
-    pub vital_detector: VitalSignDetector,
+    pub vital_detector: CrateVitalsPipeline,
     pub latest_vitals: VitalSigns,
     pub rvf_info: Option<RvfContainerInfo>,
     pub save_rvf_path: Option<PathBuf>,
