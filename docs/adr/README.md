@@ -135,6 +135,7 @@ Statuses: **Proposed** (under discussion), **Accepted** (approved and/or impleme
 | [ADR-346](ADR-346-fail-closed-edge-occupancy-evidence.md) | Fail closed ESP32 occupancy evidence | Accepted (C6 occupancy integrity qualified) |
 | [ADR-347](ADR-347-rate-aware-esp32-temporal-sensing.md) | Rate aware ESP32 temporal sensing | Accepted (C6 timing and transport qualified) |
 | [ADR-363](ADR-363-native-macos-usb-node-onboarding.md) | Native macOS USB node onboarding with nonce bound discovery and fresh server verification | Accepted and physically qualified on one ESP32 S3; C6 and signed distribution pending |
+| [ADR-419](ADR-419-secure-local-companion-pairing.md) | Secure local Mac–iPhone pairing, canonical room publication and transient sensor preview | Accepted decision; software verified, physical qualification pending |
 | [ADR-115](ADR-115-home-assistant-integration.md) | Home Assistant integration via MQTT auto-discovery + Matter bridge (HA-DISCO + HA-FABRIC + HA-MIND) | Accepted (MQTT track) / Proposed (Matter SDK P8b) |
 | [ADR-169](ADR-169-adam-mode-light-theme.md) | adam-mode — light theme toggle for the three.js realtime demo | Proposed |
 | [ADR-170](ADR-170-yoga-mode-pose-system.md) | yoga-mode — yoga pose detection, classification, and scoring for the three.js realtime demo | Proposed |

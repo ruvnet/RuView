@@ -24,6 +24,8 @@ pub mod http_bind;
 pub mod inference;
 pub mod introspection;
 pub mod matter;
+/// Existing MAT incident API, hosted under the sensing server's security layers.
+pub mod mat_surface;
 pub mod model_format;
 pub mod mqtt;
 pub mod path_safety;
@@ -69,3 +71,8 @@ pub mod vendor_rf;
 // `crate::sona`) and public API (`wifi_densepose_sensing_server::embedding`, …)
 // are unchanged.
 pub use wifi_densepose_aether::{embedding, graph_transformer, sona, sparse_inference};
+
+pub mod companion;
+pub mod companion_tls;
+
+pub mod companion_sensors;
