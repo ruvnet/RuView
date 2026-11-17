@@ -167,15 +167,15 @@ deployment = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/ruvnet/wifi-densepose"
-Documentation = "https://github.com/ruvnet/wifi-densepose#readme"
-Repository = "https://github.com/ruvnet/wifi-densepose.git"
-"Bug Tracker" = "https://github.com/ruvnet/wifi-densepose/issues"
-Changelog = "https://github.com/ruvnet/wifi-densepose/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/ruvnet/RuView"
+Documentation = "https://github.com/ruvnet/RuView#readme"
+Repository = "https://github.com/ruvnet/RuView.git"
+"Bug Tracker" = "https://github.com/ruvnet/RuView/issues"
+Changelog = "https://github.com/ruvnet/RuView/blob/main/CHANGELOG.md"
 
-[project.scripts]
-wifi-densepose = "src.cli:cli"
-wdp = "src.cli:cli"
+# CLI entry points removed: the maintained `wifi-densepose` CLI is the Rust
+# binary in v2/crates/wifi-densepose-cli (cargo install). The old Python
+# `src.cli` module no longer exists at the repo root after the v1 reorg.
 
 [project.entry-points."wifi_densepose.plugins"]
 # Plugin entry points for extensibility
@@ -185,7 +185,7 @@ package-dir = {"" = "."}
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["wifi_densepose*", "src*"]
+include = ["wifi_densepose*"]
 exclude = ["tests*", "docs*", "scripts*"]
 
 [tool.setuptools.package-data]
