@@ -8,7 +8,8 @@
  * regression, and refinement with bone/temporal constraints.
  *
  * Input format (paired JSONL):
- *   {"csi": [[...128 or 8 floats...], ...20 frames], "keypoints": [[x,y],...17], "conf": [c0..c16], "timestamp": ...}
+ *   {"csi": <flat channel-major values>, "csi_shape": [channels, time],
+ *    "keypoints": [[x,y],...17], "conf": [c0..c16], "session_id": ...}
  *
  * Architecture:
  *   TCN (4 dilated causal conv blocks, k=7, dilation 1,2,4,8)
@@ -35,6 +36,7 @@
 const fs = require('fs');
 const path = require('path');
 const { parseArgs } = require('util');
+const { splitBySession, validatePoseDataset } = require('./dataset-split.js');
 
 // ---------------------------------------------------------------------------
 // Resolve ruvllm from vendor tree
@@ -538,8 +540,10 @@ const BONE_LENGTH_PRIORS = [
 
 /**
  * Load paired dataset from JSONL file.
- * Each line: { csi: [[...], ...], keypoints: [[x,y], ...17], conf: [...17], timestamp: ... }
- * csi shape: [subcarriers, timeSteps] or [features, timeSteps]
+ * Each line carries channel-major CSI plus a required session label for
+ * leakage-free evaluation. csi shape: [subcarriers, timeSteps] or
+ * [features, timeSteps]. Presence negatives are retained by alignment but
+ * excluded here because this model has only a pose head.
  */
 function loadPairedData(filePath) {
   if (!fs.existsSync(filePath)) {
@@ -558,7 +562,7 @@ function loadPairedData(filePath) {
 
       const csi = obj.csi;           // 2D array [dim, T] or flat
       const kp  = obj.keypoints || obj.kp;  // [[x,y], ...] or flat [x,y,x,y,...]
-      const conf = obj.conf || null;  // [c0, c1, ...c16] or scalar or null
+      const conf = obj.conf ?? null;  // [c0, c1, ...c16] or scalar or null
       const ts  = obj.timestamp || obj.ts_start || 0;
 
       // Flatten keypoints to [34] = [x0, y0, x1, y1, ...]
@@ -586,9 +590,11 @@ function loadPairedData(filePath) {
       // Flatten CSI to Float32Array [dim * T]
       let csiFlat;
       let csiDim;
+      let timeSteps;
       if (Array.isArray(csi[0])) {
         csiDim = csi.length;
         const T = csi[0].length;
+        timeSteps = T;
         csiFlat = new Float32Array(csiDim * T);
         for (let d = 0; d < csiDim; d++) {
           for (let t = 0; t < T; t++) {
@@ -598,13 +604,27 @@ function loadPairedData(filePath) {
       } else if (obj.csi_shape && obj.csi_shape.length === 2) {
         // Flat array with explicit shape: [dim, T]
         csiDim = obj.csi_shape[0];
+        timeSteps = obj.csi_shape[1];
         csiFlat = new Float32Array(csi);
       } else {
         csiDim = csi.length;
+        timeSteps = CONFIG.timeSteps;
         csiFlat = new Float32Array(csi);
       }
 
-      samples.push({ csi: csiFlat, csiDim, keypoints: kpFlat, conf: confArr, timestamp: ts });
+      samples.push({
+        csi: csiFlat,
+        csiDim,
+        timeSteps,
+        keypoints: kpFlat,
+        conf: confArr,
+        timestamp: ts,
+        sessionId: obj.session_id || null,
+        roomId: obj.room_id || null,
+        subjectId: obj.subject_id || null,
+        nodeId: obj.node_id ?? null,
+        presence: obj.presence ?? null,
+      });
     } catch (_) {
       // Skip malformed lines
     }
@@ -657,6 +677,11 @@ function augmentSample(sample, rng, T) {
     keypoints: sample.keypoints,
     conf: sample.conf,
     timestamp: sample.timestamp,
+    sessionId: sample.sessionId,
+    roomId: sample.roomId,
+    subjectId: sample.subjectId,
+    nodeId: sample.nodeId,
+    presence: sample.presence,
   };
 }
 
@@ -1212,9 +1237,32 @@ async function main() {
   // Step 1: Load paired data
   // -----------------------------------------------------------------------
   console.log('[1/6] Loading paired CSI+keypoint data...');
-  const allSamples = loadPairedData(CONFIG.dataPath);
-  if (allSamples.length === 0) {
+  const loadedSamples = loadPairedData(CONFIG.dataPath);
+  if (loadedSamples.length === 0) {
     console.error('No valid paired samples found in data file.');
+    process.exit(1);
+  }
+  let allSamples;
+  try {
+    allSamples = validatePoseDataset(loadedSamples, CONFIG.timeSteps);
+  } catch (error) {
+    console.error(`Invalid pose dataset: ${error.message}`);
+    process.exit(1);
+  }
+  const negativeCount = loadedSamples.length - allSamples.length;
+  if (negativeCount > 0) {
+    console.log(`  Excluded ${negativeCount} absence samples from pose-only training (no presence head).`);
+  }
+
+  // Split before fitting subcarrier selection or attention. Held-out sessions
+  // must not influence any data-dependent preprocessing.
+  let trainSet;
+  let evalSet;
+  try {
+    ({ trainSet, evalSet } = splitBySession(allSamples, CONFIG.evalSplit));
+  } catch (error) {
+    console.error(`Cannot create leakage-free train/eval split: ${error.message}`);
+    console.error('Collect and combine at least two independently labelled sessions.');
     process.exit(1);
   }
 
@@ -1232,11 +1280,13 @@ async function main() {
   if (inputDim >= 64) {
     const topK = Math.min(56, Math.floor(inputDim * 0.5)); // 50% reduction like ruvector 114→56
     console.log(`  [O6] Selecting top-${topK} subcarriers by variance (ruvector-solver)...`);
-    selectedSubcarriers = selectTopSubcarriers(allSamples, inputDim, T, topK);
+    selectedSubcarriers = selectTopSubcarriers(trainSet, inputDim, T, topK);
     const origDim = inputDim;
     // Reduce all samples
     for (let i = 0; i < allSamples.length; i++) {
-      allSamples[i] = reduceSubcarriers(allSamples[i], selectedSubcarriers, T);
+      const reduced = reduceSubcarriers(allSamples[i], selectedSubcarriers, T);
+      allSamples[i].csi = reduced.csi;
+      allSamples[i].csiDim = reduced.csiDim;
     }
     inputDim = topK;
     console.log(`  [O6] Reduced: ${origDim} → ${inputDim} subcarriers (${((1 - inputDim / origDim) * 100).toFixed(0)}% reduction)`);
@@ -1246,7 +1296,7 @@ async function main() {
   // O7: Subcarrier attention weighting (ruvector-attention inspired)
   // -----------------------------------------------------------------------
   console.log(`  [O7] Computing subcarrier attention weights (ruvector-attention)...`);
-  const subcarrierAttention = computeSubcarrierAttention(allSamples, inputDim, T);
+  const subcarrierAttention = computeSubcarrierAttention(trainSet, inputDim, T);
   // Apply attention to all samples
   for (let i = 0; i < allSamples.length; i++) {
     allSamples[i].csi = applySubcarrierAttention(allSamples[i].csi, subcarrierAttention, inputDim, T);
@@ -1261,7 +1311,7 @@ async function main() {
   // -----------------------------------------------------------------------
   if (inputDim >= 16) {
     console.log(`  [O8] Running Stoer-Wagner min-cut for person separation (ruvector-mincut)...`);
-    const mcSamples = allSamples.slice(0, Math.min(50, allSamples.length)); // subsample for speed
+    const mcSamples = trainSet.slice(0, Math.min(50, trainSet.length)); // subsample for speed
     const mcResult = minCutPersonSeparation(mcSamples, inputDim, T);
     const g0 = mcResult.partition.filter(v => v === 0).length;
     const g1 = mcResult.partition.filter(v => v === 1).length;
@@ -1269,12 +1319,7 @@ async function main() {
     console.log(`  [O8] Person-separable subcarrier groups identified for multi-person training`);
   }
 
-  // Train/eval split
-  const shuffled = shuffleArray(allSamples, 42);
-  const splitIdx = Math.floor(shuffled.length * (1 - CONFIG.evalSplit));
-  const trainSet = shuffled.slice(0, splitIdx);
-  const evalSet  = shuffled.slice(splitIdx);
-  console.log(`  Train: ${trainSet.length}  Eval: ${evalSet.length}`);
+  console.log(`  Train: ${trainSet.length}  Eval: ${evalSet.length} (session-disjoint)`);
   console.log('');
 
   // -----------------------------------------------------------------------
