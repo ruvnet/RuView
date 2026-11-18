@@ -221,38 +221,38 @@ function buildEdges(entries) {
  */
 function bootstrapFromMemoryFiles() {
   const entries = [];
-  const cwd = process.cwd();
-
-  // Search for auto-memory directories
-  const candidates = [
-    // Claude Code auto-memory (project-scoped)
-    path.join(require('os').homedir(), '.claude', 'projects'),
-    // Local project memory
-    path.join(cwd, '.claude-flow', 'memory'),
-    path.join(cwd, '.claude', 'memory'),
-  ];
-
-  // Find MEMORY.md in project-scoped dirs
-  for (const base of candidates) {
-    if (!fs.existsSync(base)) continue;
-
-    // For the projects dir, scan subdirectories for memory/
-    if (base.endsWith('projects')) {
-      try {
-        const projectDirs = fs.readdirSync(base);
-        for (const pdir of projectDirs) {
-          const memDir = path.join(base, pdir, 'memory');
-          if (fs.existsSync(memDir)) {
-            parseMemoryDir(memDir, entries);
-          }
-        }
-      } catch { /* skip */ }
-    } else if (fs.existsSync(base)) {
-      parseMemoryDir(base, entries);
-    }
+  // Never enumerate ~/.claude/projects: its directory names are lossy path
+  // encodings and do not establish this checkout's authority over their data.
+  for (const base of localMemoryDirs()) {
+    parseMemoryDir(base, entries);
   }
 
   return entries;
+}
+
+function isWithin(base, target) {
+  const relative = path.relative(base, target);
+  return relative !== '' && relative !== '..' &&
+    !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative);
+}
+
+function localMemoryDirs() {
+  const root = fs.realpathSync(process.cwd());
+  return ['.claude-flow', '.claude'].flatMap(parent => {
+    try {
+      const dir = fs.realpathSync(path.join(root, parent, 'memory'));
+      return isWithin(root, dir) && fs.statSync(dir).isDirectory() ? [dir] : [];
+    } catch { return []; }
+  });
+}
+
+function isLocalMemoryFile(file) {
+  if (typeof file !== 'string' || !path.isAbsolute(file)) return false;
+  try {
+    const resolved = fs.realpathSync(file);
+    return localMemoryDirs().some(dir => isWithin(dir, resolved)) &&
+      fs.statSync(resolved).isFile();
+  } catch { return false; }
 }
 
 function parseMemoryDir(dir, entries) {
@@ -266,13 +266,14 @@ function parseMemoryDir(dir, entries) {
       
       const filePath = path.join(dir, file);
       // Additional validation: ensure resolved path is within the base directory
-      const resolvedPath = path.resolve(filePath);
-      const resolvedDir = path.resolve(dir);
-      if (!resolvedPath.startsWith(resolvedDir)) {
+      let resolvedPath;
+      try { resolvedPath = fs.realpathSync(filePath); }
+      catch { continue; }
+      if (!isWithin(dir, resolvedPath) || !isLocalMemoryFile(resolvedPath)) {
         continue; // Path traversal attempt detected
       }
       
-      const content = fs.readFileSync(filePath, 'utf-8');
+      const content = fs.readFileSync(resolvedPath, 'utf-8');
       if (!content.trim()) continue;
 
       // Parse markdown sections as separate entries
@@ -310,8 +311,21 @@ function init() {
   ensureDataDir();
 
   // Check if graph-state.json is fresh (within 60s of store)
-  const graphState = readJSON(GRAPH_PATH);
+  let graphState = readJSON(GRAPH_PATH);
   let store = readJSON(STORE_PATH);
+  let purged = false;
+  // Remove entries imported by the old cross-project bootstrap, including
+  // local paths that now resolve outside this checkout through a symlink.
+  if (Array.isArray(store)) {
+    const localStore = store.filter(entry => entry && typeof entry === 'object' &&
+      (!entry.metadata?.bootstrapped || isLocalMemoryFile(entry.metadata.sourceFile)));
+    if (localStore.length !== store.length) {
+      store = localStore;
+      purged = true;
+      graphState = null;
+      writeJSON(STORE_PATH, store);
+    }
+  }
 
   // Bootstrap from MEMORY.md files if store is empty
   if (!store || !Array.isArray(store) || store.length === 0) {
@@ -319,13 +333,16 @@ function init() {
     if (bootstrapped.length > 0) {
       store = bootstrapped;
       writeJSON(STORE_PATH, store);
-    } else {
+    } else if (!purged) {
       return { nodes: 0, edges: 0, message: 'No memory entries to index' };
+    } else {
+      store = [];
     }
   }
 
   // Skip rebuild if graph is fresh and store hasn't changed
-  if (graphState && graphState.nodeCount === store.length) {
+  if (graphState?.version === 2 && graphState.projectRoot === fs.realpathSync(process.cwd()) &&
+      graphState.nodeCount === store.length) {
     const age = Date.now() - (graphState.updatedAt || 0);
     if (age < 60000) {
       return {
@@ -359,7 +376,8 @@ function init() {
 
   // Write graph state
   const graph = {
-    version: 1,
+    version: 2,
+    projectRoot: fs.realpathSync(process.cwd()),
     updatedAt: Date.now(),
     nodeCount: Object.keys(nodes).length,
     nodes,
@@ -391,7 +409,8 @@ function init() {
   });
 
   const ranked = {
-    version: 1,
+    version: 2,
+    projectRoot: fs.realpathSync(process.cwd()),
     computedAt: Date.now(),
     entries: rankedEntries,
   };
@@ -412,7 +431,9 @@ function getContext(prompt) {
   if (!prompt) return null;
 
   const ranked = readJSON(RANKED_PATH);
-  if (!ranked || !ranked.entries || ranked.entries.length === 0) return null;
+  // Old caches lack provenance; do not inject them even before session-restore.
+  if (ranked?.version !== 2 || ranked.projectRoot !== fs.realpathSync(process.cwd()) ||
+      !Array.isArray(ranked.entries) || ranked.entries.length === 0) return null;
 
   const promptWords = tokenize(prompt);
   if (promptWords.length === 0) return null;
@@ -525,6 +546,8 @@ function boostConfidence(ids, amount) {
  * Processes pending insights, rebuilds edges, recomputes PageRank.
  */
 function consolidate() {
+  // Apply the same provenance migration when consolidation runs before restore.
+  init();
   ensureDataDir();
 
   const store = readJSON(STORE_PATH);
@@ -612,7 +635,8 @@ function consolidate() {
 
   // 6. Write updated graph
   writeJSON(GRAPH_PATH, {
-    version: 1,
+    version: 2,
+    projectRoot: fs.realpathSync(process.cwd()),
     updatedAt: Date.now(),
     nodeCount: Object.keys(nodes).length,
     nodes,
@@ -643,7 +667,8 @@ function consolidate() {
   });
 
   writeJSON(RANKED_PATH, {
-    version: 1,
+    version: 2,
+    projectRoot: fs.realpathSync(process.cwd()),
     computedAt: Date.now(),
     entries: rankedEntries,
   });

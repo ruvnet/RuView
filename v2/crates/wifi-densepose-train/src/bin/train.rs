@@ -55,6 +55,29 @@ struct Args {
     #[arg(long, value_name = "DIR")]
     data_dir: Option<PathBuf>,
 
+    /// MM-Fi directory to use as the REAL validation set (e.g. a held-out
+    /// subject or session). Takes precedence over the automatic
+    /// subject-disjoint split of `--data-dir`. Must share no subject with
+    /// `--data-dir` (checked; overlap is refused as a train/val leak).
+    #[arg(long, value_name = "DIR")]
+    val_dir: Option<PathBuf>,
+
+    /// Evaluation-only mode: load `--checkpoint`, run the validation loop over
+    /// `--val-dir` (no training), print PCK@0.2 / OKS and exit. Requires the
+    /// `tch-backend` feature.
+    #[arg(long, default_value_t = false, requires_all = ["checkpoint", "val_dir"])]
+    eval_only: bool,
+
+    /// Checkpoint (tch VarStore `.pt` or `.safetensors`) to load in
+    /// `--eval-only` mode.
+    #[arg(long, value_name = "FILE", requires = "eval_only")]
+    checkpoint: Option<PathBuf>,
+
+    /// In `--eval-only` mode, dump per-sample predicted + GT keypoints as JSONL
+    /// to this path (dataset order, one line per window).
+    #[arg(long, value_name = "FILE", requires = "eval_only")]
+    dump_preds: Option<PathBuf>,
+
     /// Override the checkpoint output directory from the config.
     #[arg(long, value_name = "DIR")]
     checkpoint_dir: Option<PathBuf>,
@@ -138,6 +161,22 @@ fn main() {
     log_config_summary(&config);
 
     // ------------------------------------------------------------------
+    // Eval-only mode: load checkpoint, run the validation loop, exit
+    // ------------------------------------------------------------------
+
+    if args.eval_only {
+        // clap enforces `--checkpoint` and `--val-dir` alongside `--eval-only`.
+        let (Some(ckpt), Some(val_dir)) = (args.checkpoint.as_deref(), args.val_dir.as_deref())
+        else {
+            error!("--eval-only requires --checkpoint <FILE> and --val-dir <DIR>");
+            std::process::exit(2);
+        };
+        let eval_ds = load_mmfi_or_exit(val_dir, &config, "eval");
+        run_eval(config, &eval_ds, ckpt, args.dump_preds.as_deref());
+        return;
+    }
+
+    // ------------------------------------------------------------------
     // Build datasets
     // ------------------------------------------------------------------
 
@@ -203,6 +242,35 @@ fn main() {
         }
 
         info!("Dataset: {} samples", train_ds.len());
+
+        // An explicit held-out validation directory takes precedence over the
+        // automatic split. Refuse any subject overlap with the training set:
+        // that would be exactly the leak ADR-155 §Tier-1.2 forbids.
+        if let Some(val_dir) = args.val_dir.as_deref() {
+            let val_ds = load_mmfi_or_exit(val_dir, &config, "validation");
+            let train_subjects = train_ds.subjects();
+            let shared: Vec<u32> = val_ds
+                .subjects()
+                .into_iter()
+                .filter(|s| train_subjects.contains(s))
+                .collect();
+            if !shared.is_empty() {
+                error!(
+                    "--val-dir shares subject(s) {shared:?} with --data-dir; a \
+                     subject-overlapping validation set leaks (ADR-155 §Tier-1.2). \
+                     Use a held-out subject directory."
+                );
+                std::process::exit(1);
+            }
+            info!(
+                "Using REAL held-out validation set: {} windows (subjects {:?}) from {}",
+                val_ds.len(),
+                val_ds.subjects(),
+                val_dir.display()
+            );
+            run_training(config, &train_ds, &val_ds);
+            return;
+        }
 
         // ADR-155 §Tier-1.2: prefer a REAL, leak-free, subject-disjoint split so
         // any reported PCK/OKS is honest. MM-Fi windows are stride-1 (≈99%
@@ -293,6 +361,83 @@ fn run_training(_config: TrainingConfig, train_ds: &dyn CsiDataset, val_ds: &dyn
          cargo run --features tch-backend --bin train"
     );
     info!("Config and dataset infrastructure: OK");
+}
+
+// ---------------------------------------------------------------------------
+// --val-dir / --eval-only helpers
+// ---------------------------------------------------------------------------
+
+/// Load an MM-Fi directory with the run's window/subcarrier/keypoint shape, or
+/// exit with an error if it cannot be loaded or holds no windows.
+fn load_mmfi_or_exit(dir: &std::path::Path, config: &TrainingConfig, what: &str) -> MmFiDataset {
+    let ds = match MmFiDataset::discover(
+        dir,
+        config.window_frames,
+        config.num_subcarriers,
+        config.num_keypoints,
+    ) {
+        Ok(ds) => ds,
+        Err(e) => {
+            error!("Failed to load {what} dataset from {}: {e}", dir.display());
+            std::process::exit(1);
+        }
+    };
+    if ds.is_empty() {
+        error!("{what} dataset is empty — {}", dir.display());
+        std::process::exit(1);
+    }
+    ds
+}
+
+/// `--eval-only`: load a checkpoint into a fresh model and run the same
+/// validation loop training uses ([`Trainer::evaluate`]).
+#[cfg(feature = "tch-backend")]
+fn run_eval(
+    config: TrainingConfig,
+    ds: &dyn CsiDataset,
+    checkpoint: &std::path::Path,
+    dump: Option<&std::path::Path>,
+) {
+    use wifi_densepose_train::trainer::Trainer;
+
+    let mut trainer = Trainer::new(config);
+    match trainer.load_checkpoint(checkpoint) {
+        Ok(epoch) => info!("Loaded checkpoint {} (epoch {epoch})", checkpoint.display()),
+        Err(e) => {
+            error!("Failed to load checkpoint: {e}");
+            std::process::exit(1);
+        }
+    }
+    info!("Evaluating on {} windows", ds.len());
+
+    let result = match dump {
+        Some(path) => {
+            info!("Dumping per-sample predictions to {}", path.display());
+            trainer.evaluate_with_dump(ds, path)
+        }
+        None => trainer.evaluate(ds),
+    };
+    match result {
+        Ok(m) => info!("EVAL RESULT: {}", m.summary()),
+        Err(e) => {
+            error!("Evaluation failed: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+#[cfg(not(feature = "tch-backend"))]
+fn run_eval(
+    _config: TrainingConfig,
+    _ds: &dyn CsiDataset,
+    _checkpoint: &std::path::Path,
+    _dump: Option<&std::path::Path>,
+) {
+    error!(
+        "--eval-only requires the `tch-backend` feature: \
+         cargo run --features tch-backend --bin train"
+    );
+    std::process::exit(1);
 }
 
 // ---------------------------------------------------------------------------

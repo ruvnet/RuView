@@ -40,8 +40,8 @@ jobs:
         set -o pipefail
         cargo audit --file Cargo.lock --json | tee cargo-audit.json
 
-    - name: Exercise the vendored ZIP symlink allocation guard
-      run: cargo test --manifest-path v2/vendor/security/zip-7.2.0/Cargo.toml --locked --no-default-features --features deflate --test ruview_0429_backport
+    - name: Exercise the active ZIP adapter security guards
+      run: cargo test --manifest-path v2/vendor/security/zip-candle-compat/Cargo.toml --locked
 
     - name: Upload Rust advisory report
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
