@@ -11,6 +11,24 @@ use wifi_densepose_signal::ruvsense::{TrackId, TrackLifecycleState, NUM_KEYPOINT
 
 use super::{BoundingBox, PersonDetection, PoseKeypoint};
 
+/// Pixels per metre for the pixel-space <-> world-space conversion at the
+/// tracker boundary.
+///
+/// `PersonDetection` keypoints are in image pixels (~0..800), but `PoseTracker`
+/// is tuned for world-space metres: `measurement_noise = 0.08 m`, the
+/// Mahalanobis gate, and the Kalman covariances all assume metre-scale inputs.
+/// Feeding raw pixels made the effective association gate ~1.5 px, so the
+/// natural per-frame jitter of a single person (±20 px) never matched its own
+/// track — every frame spawned a fresh track and the stale ones lingered as
+/// confirmed "ghost" skeletons stacked on top of each other (the reported
+/// "Persons: 4" for one real person, all piled at the centre).
+///
+/// Converting on the way in (px -> m) and back out (m -> px) runs the filter in
+/// the metre space it was designed for: a ±20 px jitter becomes 0.2 m (well
+/// inside the gate) while two genuinely distinct people 180 px apart become
+/// 1.8 m (well outside it). 100 px/m ⇒ an 800 px frame maps to an 8 m room.
+const PIXELS_PER_METER: f32 = 100.0;
+
 /// COCO-17 keypoint names in index order.
 const COCO_NAMES: [&str; 17] = [
     "nose",
@@ -44,23 +62,35 @@ fn keypoint_name_to_coco_index(name: &str) -> Option<usize> {
 /// For each person, maps named keypoints to COCO-17 positions. Unmapped slots are
 /// filled with the centroid of the mapped keypoints so the Kalman filter has a
 /// reasonable initial value rather than zeros.
-fn detections_to_tracker_keypoints(persons: &[PersonDetection]) -> Vec<[[f32; 3]; 17]> {
+///
+/// Returns positions **and** per-keypoint confidences. Unmapped (centroid-filled)
+/// slots get confidence `0.0`, which is what marks them as unobserved for bbox
+/// fitting and for the UI renderer — mapped slots carry the detector's real
+/// confidence so the skeleton survives the round-trip through the tracker.
+type TrackerKeypoints = (Vec<[[f32; 3]; 17]>, Vec<[f32; 17]>);
+
+fn detections_to_tracker_keypoints(persons: &[PersonDetection]) -> TrackerKeypoints {
     persons
         .iter()
         .map(|person| {
             let mut kps = [[0.0_f32; 3]; 17];
+            let mut confs = [0.0_f32; 17];
             let mut mapped_count = 0u32;
             let mut cx = 0.0_f32;
             let mut cy = 0.0_f32;
             let mut cz = 0.0_f32;
 
-            // First pass: place mapped keypoints and accumulate centroid
+            // First pass: place mapped keypoints and accumulate centroid.
+            // Pixels -> metres so the metre-tuned Kalman filter/gate behave.
+            let s = 1.0 / PIXELS_PER_METER;
             for kp in &person.keypoints {
                 if let Some(idx) = keypoint_name_to_coco_index(&kp.name) {
-                    kps[idx] = [kp.x as f32, kp.y as f32, kp.z as f32];
-                    cx += kp.x as f32;
-                    cy += kp.y as f32;
-                    cz += kp.z as f32;
+                    let (x, y, z) = (kp.x as f32 * s, kp.y as f32 * s, kp.z as f32 * s);
+                    kps[idx] = [x, y, z];
+                    confs[idx] = kp.confidence as f32;
+                    cx += x;
+                    cy += y;
+                    cz += z;
                     mapped_count += 1;
                 }
             }
@@ -84,12 +114,14 @@ fn detections_to_tracker_keypoints(persons: &[PersonDetection]) -> Vec<[[f32; 3]
             for i in 0..17 {
                 if !mapped[i] {
                     kps[i] = centroid;
+                    // Centroid-filled slot: never observed, so no confidence.
+                    confs[i] = 0.0;
                 }
             }
 
-            kps
+            (kps, confs)
         })
-        .collect()
+        .unzip()
 }
 
 /// Convert confirmed PoseTracker tracks back into server-side PersonDetection values.
@@ -112,15 +144,17 @@ pub fn tracker_to_person_detections(tracker: &PoseTracker) -> Vec<PersonDetectio
                 TrackLifecycleState::Terminated => 0.0,
             };
 
-            // Build keypoints from Kalman state
+            // Build keypoints from Kalman state. Metres -> pixels to undo the
+            // px->m scaling applied on the way into the tracker.
+            let inv = PIXELS_PER_METER as f64;
             let keypoints: Vec<PoseKeypoint> = (0..NUM_KEYPOINTS)
                 .map(|i| {
                     let pos = track.keypoints[i].position();
                     PoseKeypoint {
                         name: COCO_NAMES[i].to_string(),
-                        x: pos[0] as f64,
-                        y: pos[1] as f64,
-                        z: pos[2] as f64,
+                        x: pos[0] as f64 * inv,
+                        y: pos[1] as f64 * inv,
+                        z: pos[2] as f64 * inv,
                         confidence: track.keypoints[i].confidence as f64,
                     }
                 })
@@ -159,14 +193,16 @@ pub fn tracker_to_person_detections(tracker: &PoseTracker) -> Vec<PersonDetectio
                     height: (max_y - min_y).max(0.01),
                 }
             } else {
-                // No observed keypoints — use a default bbox at centroid
+                // No observed keypoints — use a default bbox at centroid.
+                // Pixel-space, human-sized (~100x200 px), matching the keypoint
+                // coordinate space so a fallback never collapses to a point.
                 let cx = keypoints.iter().map(|k| k.x).sum::<f64>() / keypoints.len() as f64;
                 let cy = keypoints.iter().map(|k| k.y).sum::<f64>() / keypoints.len() as f64;
                 BoundingBox {
-                    x: cx - 0.3,
-                    y: cy - 0.5,
-                    width: 0.6,
-                    height: 1.0,
+                    x: cx - 50.0,
+                    y: cy - 100.0,
+                    width: 100.0,
+                    height: 200.0,
                 }
             };
 
@@ -214,8 +250,8 @@ pub fn tracker_update(
         return tracker_to_person_detections(tracker);
     }
 
-    // Convert detections to f32 keypoint arrays
-    let all_keypoints = detections_to_tracker_keypoints(&persons);
+    // Convert detections to f32 keypoint arrays (positions + per-keypoint confidence)
+    let (all_keypoints, all_confidences) = detections_to_tracker_keypoints(&persons);
 
     // Compute centroids for each detection
     let centroids: Vec<[f32; 3]> = all_keypoints
@@ -294,7 +330,13 @@ pub fn tracker_update(
     for (det_idx, track_id_opt) in matched.iter().enumerate() {
         if let Some(track_id) = track_id_opt {
             if let Some(track) = tracker.find_track_mut(*track_id) {
-                track.update_keypoints(&all_keypoints[det_idx], 0.08, 1.0, timestamp_us);
+                track.update_keypoints(
+                    &all_keypoints[det_idx],
+                    &all_confidences[det_idx],
+                    0.08,
+                    1.0,
+                    timestamp_us,
+                );
             }
         }
     }
@@ -302,7 +344,11 @@ pub fn tracker_update(
     // Create new tracks for unmatched detections
     for (det_idx, track_id_opt) in matched.iter().enumerate() {
         if track_id_opt.is_none() {
-            tracker.create_track(&all_keypoints[det_idx], timestamp_us);
+            tracker.create_track(
+                &all_keypoints[det_idx],
+                &all_confidences[det_idx],
+                timestamp_us,
+            );
         }
     }
 
@@ -378,24 +424,36 @@ mod tests {
             ],
         );
 
-        let result = detections_to_tracker_keypoints(&[person]);
-        assert_eq!(result.len(), 1);
+        let (positions, confidences) = detections_to_tracker_keypoints(&[person]);
+        assert_eq!(positions.len(), 1);
+        assert_eq!(confidences.len(), 1);
 
-        let kps = &result[0];
+        let kps = &positions[0];
+        let confs = &confidences[0];
 
-        // Mapped keypoints should have correct values
-        assert!((kps[0][0] - 1.0).abs() < 1e-5); // nose x
-        assert!((kps[0][1] - 2.0).abs() < 1e-5); // nose y
-        assert!((kps[0][2] - 0.5).abs() < 1e-5); // nose z
+        // Positions are scaled px -> m by 1/PIXELS_PER_METER on the way in.
+        let s = 1.0 / PIXELS_PER_METER;
 
-        assert!((kps[5][0] - 0.8).abs() < 1e-5); // left_shoulder x
-        assert!((kps[6][0] - 1.2).abs() < 1e-5); // right_shoulder x
+        // Mapped keypoints should have correct (scaled) values
+        assert!((kps[0][0] - 1.0 * s).abs() < 1e-6); // nose x
+        assert!((kps[0][1] - 2.0 * s).abs() < 1e-6); // nose y
+        assert!((kps[0][2] - 0.5 * s).abs() < 1e-6); // nose z
 
-        // Unmapped keypoints should be at centroid of mapped keypoints
-        // centroid = ((1.0+0.8+1.2)/3, (2.0+2.5+2.5)/3, (0.5+0.4+0.6)/3)
-        let cx = (1.0 + 0.8 + 1.2) / 3.0;
-        let cy = (2.0 + 2.5 + 2.5) / 3.0;
-        let cz = (0.5 + 0.4 + 0.6) / 3.0;
+        assert!((kps[5][0] - 0.8 * s).abs() < 1e-6); // left_shoulder x
+        assert!((kps[6][0] - 1.2 * s).abs() < 1e-6); // right_shoulder x
+
+        // Mapped keypoints carry the detector's confidence (make_keypoint sets
+        // it to 0.9); unmapped/centroid-filled slots must be exactly 0.0.
+        assert!(confs[0] > 0.0, "mapped nose must be observed");
+        assert!(confs[5] > 0.0, "mapped left_shoulder must be observed");
+        assert!(confs[6] > 0.0, "mapped right_shoulder must be observed");
+        assert_eq!(confs[1], 0.0, "unmapped left_eye must be unobserved");
+
+        // Unmapped keypoints should be at centroid of mapped keypoints (scaled)
+        // centroid = ((1.0+0.8+1.2)/3, (2.0+2.5+2.5)/3, (0.5+0.4+0.6)/3) * s
+        let cx = (1.0 + 0.8 + 1.2) / 3.0 * s;
+        let cy = (2.0 + 2.5 + 2.5) / 3.0 * s;
+        let cz = (0.5 + 0.4 + 0.6) / 3.0 * s;
 
         // left_eye (index 1) should be at centroid
         assert!((kps[1][0] - cx).abs() < 1e-4);
@@ -437,6 +495,116 @@ mod tests {
         // All three updates should return the same track ID
         assert_eq!(id1, id2, "Track ID should be stable across updates");
         assert_eq!(id2, id3, "Track ID should be stable across updates");
+    }
+
+    /// Build a full COCO-17 person centered at pixel `cx`, roughly the shape
+    /// `derive_single_person_pose` emits (torso ~100px wide, ~210px tall).
+    fn make_person_at(id: u32, cx: f64) -> PersonDetection {
+        let offsets: [(f64, f64); 17] = [
+            (0.0, -80.0),
+            (-8.0, -88.0),
+            (8.0, -88.0),
+            (-16.0, -82.0),
+            (16.0, -82.0),
+            (-30.0, -50.0),
+            (30.0, -50.0),
+            (-45.0, -15.0),
+            (45.0, -15.0),
+            (-50.0, 20.0),
+            (50.0, 20.0),
+            (-20.0, 20.0),
+            (20.0, 20.0),
+            (-22.0, 70.0),
+            (22.0, 70.0),
+            (-24.0, 120.0),
+            (24.0, 120.0),
+        ];
+        let kps = COCO_NAMES
+            .iter()
+            .zip(offsets.iter())
+            .map(|(name, (dx, dy))| PoseKeypoint {
+                name: name.to_string(),
+                x: cx + dx,
+                y: 240.0 + dy,
+                z: 0.0,
+                confidence: 0.5,
+            })
+            .collect();
+        make_person(id, kps)
+    }
+
+    /// Regression: three people generated far apart in pixel-space must stay
+    /// spatially separated after passing through the tracker across many
+    /// frames. Before the tracker was fed pixel-space centroids through a
+    /// gate/noise model tuned for metres, tracks churned and collapsed toward
+    /// the centre, so the UI drew several skeletons stacked on top of each
+    /// other. See the "tudo em cima de tudo" report.
+    #[test]
+    fn test_multi_person_stay_separated() {
+        let mut tracker = PoseTracker::new();
+        let mut last_instant: Option<Instant> = None;
+
+        let centers = [140.0_f64, 320.0, 500.0];
+        let mut out = vec![];
+        // Run enough frames for tracks to confirm (Active) and settle.
+        for _ in 0..15 {
+            let persons: Vec<PersonDetection> = centers
+                .iter()
+                .enumerate()
+                .map(|(i, &cx)| make_person_at(i as u32, cx))
+                .collect();
+            out = tracker_update(&mut tracker, &mut last_instant, persons);
+        }
+
+        // Each input person must be represented by a distinct tracked skeleton
+        // near its true centre, not merged into a central blob.
+        let centroid_x = |p: &PersonDetection| -> f64 {
+            p.keypoints.iter().map(|k| k.x).sum::<f64>() / p.keypoints.len() as f64
+        };
+        let mut xs: Vec<f64> = out.iter().map(centroid_x).collect();
+        xs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+        assert_eq!(
+            out.len(),
+            3,
+            "expected 3 tracked persons, got {} (churn/merge)",
+            out.len()
+        );
+        // Adjacent centroids should stay ~180px apart; allow drift but reject
+        // collapse (they must not all pile within a narrow band).
+        for w in xs.windows(2) {
+            assert!(
+                w[1] - w[0] > 90.0,
+                "tracked persons collapsed together: centroids {xs:?}"
+            );
+        }
+    }
+
+    /// Regression: a single jittering person must stay ONE track, not spawn a
+    /// pile of ghosts. The simulator emits ~1 person whose pixel centroid
+    /// jitters ±20 px frame-to-frame; with the tracker fed raw pixels the
+    /// association gate was ~1.5 px, so every frame minted a fresh track and
+    /// the UI showed "Persons: 4+" all stacked at the centre. Scaling px->m at
+    /// the boundary keeps the jitter (0.2 m) well inside the gate.
+    #[test]
+    fn test_single_jittering_person_stays_one_track() {
+        let mut tracker = PoseTracker::new();
+        let mut last_instant: Option<Instant> = None;
+
+        // Deterministic pseudo-jitter around x = 300 px, amplitude ~±20 px.
+        let mut out = vec![];
+        for f in 0..30 {
+            let jitter = ((f as f64 * 1.9).sin() * 20.0).round();
+            let person = make_person_at(0, 300.0 + jitter);
+            out = tracker_update(&mut tracker, &mut last_instant, vec![person]);
+        }
+
+        assert_eq!(
+            out.len(),
+            1,
+            "one jittering person must yield exactly one tracked skeleton, got {} ghosts",
+            out.len()
+        );
     }
 
     /// Regression test for #420 (ADR-082): tracks that have transitioned to
