@@ -119,7 +119,7 @@ pub(super) struct TemporalEvaluationIdentityData {
     pub execution_policy_sha256: String,
     pub schedule_sha256: String,
     pub configured_fit_sha256: String,
-    pub source_ids: [u8; 3],
+    pub source_ids: Vec<u8>,
 }
 impl TemporalEvaluationIdentityData {
     fn validate_data(&self) -> Result<(), String> {
@@ -143,6 +143,7 @@ impl TemporalEvaluationIdentityData {
             || self.artifact_kind != MODEL_KIND
             || self.prefix_schema != PREFIX_SCHEMA
             || self.metadata_kind != METADATA_KIND
+            || !(2..=8).contains(&self.source_ids.len())
             || self.source_ids.windows(2).any(|w| w[0] >= w[1])
         {
             return invalid();
@@ -216,7 +217,7 @@ pub(super) struct TemporalTrainProofBodyData {
     pub declared_episodes_per_condition: [u16; 4],
     pub accepted_train_commitment: CommitmentData,
     pub freeze_prepare_receiver_ns: String,
-    pub source_floors: [FrozenSourceFloorData; 3],
+    pub source_floors: Vec<FrozenSourceFloorData>,
     pub claims: DiagnosticClaimsData,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -257,6 +258,7 @@ impl TemporalTrainProofData {
                 .len()
                 != if self.is_operator_eight_step() { 4 } else { 7 }
             || b.train_seal_sha256s.len() != if self.is_operator_eight_step() { 4 } else { 7 }
+            || b.source_floors.len() != b.identity.source_ids.len()
             || b.train_windows != 64
             || b.windows_per_condition != [16; 4]
             || b.declared_episodes_per_condition != if self.is_operator_eight_step() { [1; 4] } else { [1, 2, 2, 2] }
@@ -264,7 +266,7 @@ impl TemporalTrainProofData {
         {
             return invalid();
         }
-        for (floor, id) in b.source_floors.iter().zip(b.identity.source_ids) {
+        for (floor, id) in b.source_floors.iter().zip(b.identity.source_ids.iter().copied()) {
             let ns = decimal(&floor.receiver_ns)?;
             if floor.source_id != id || floor.sequence > u32::MAX as u64 || ns == 0 || ns > cut {
                 return invalid();
@@ -301,7 +303,7 @@ pub(super) struct TemporalHeldOutBodyData {
     pub complete_commitment: CommitmentData,
     pub complete_prepare_receiver_ns: String,
     pub complete_persisted_receiver_ns: String,
-    pub final_source_fences: [FinalSourceFenceData; 3],
+    pub final_source_fences: Vec<FinalSourceFenceData>,
     pub held_out_windows: u16,
     pub windows_per_condition: [u16; 4],
     pub declared_episodes_per_condition: [u16; 4],
@@ -350,6 +352,7 @@ impl TemporalHeldOutEvidenceData {
                 .len()
                 != if self.is_operator_eight_step() { 4 } else { 8 }
             || b.held_out_seal_sha256s.len() != if self.is_operator_eight_step() { 4 } else { 8 }
+            || b.final_source_fences.len() != b.identity.source_ids.len()
             || b.held_out_windows != if self.is_operator_eight_step() { 16 } else { 64 }
             || b.windows_per_condition != if self.is_operator_eight_step() { [4; 4] } else { [16; 4] }
             || b.declared_episodes_per_condition != if self.is_operator_eight_step() { [1; 4] } else { [2; 4] }
@@ -366,7 +369,7 @@ impl TemporalHeldOutEvidenceData {
         {
             return invalid();
         }
-        for (floor, id) in b.final_source_fences.iter().zip(b.identity.source_ids) {
+        for (floor, id) in b.final_source_fences.iter().zip(b.identity.source_ids.iter().copied()) {
             let ns = decimal(&floor.receiver_ns)?;
             let frame = decimal_frame(&floor.native_frame_id)?;
             let expected =

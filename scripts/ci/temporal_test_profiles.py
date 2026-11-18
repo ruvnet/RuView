@@ -7,6 +7,7 @@ C1 = PREFIX + 'tests::full_seven_train_phases_require_fresh_confirmation_and_nev
 C2 = PREFIX + 'tests::c2_all_seven_train_phases_use_actual_async_runtime_and_durable_seals_without_fit'
 # Exact C4C declaration; the author must verify this name in the actual Rust registry.
 C4C = PREFIX + 'public_workflow::acceptance::c4c_default48_public_operator_workflow_native128_and_cold_selection'
+VARIABLE_RETRY = PREFIX + 'tests::variable_retry_after_actual_window_cadence_failure_keeps_sixteen_windows_and_seal'
 BUDGET = [PREFIX + 'tests::legacy_329_actual_runtime_saturation_retires_and_explicit_fresh_train_chains_343', PREFIX + 'tests::fresh_343_actual_runtime_all_128_gaps_seven_terminal_pauses_and_retirement_fit_budget']
 # This initial policy is populated below from reviewed source call sites.
 C3 = ['room_learner::lifecycle::temporal_control::fit_control::tests::c3_actual_native_train_fit_and_same_store_cold_report_keep_whole_model_diagnostic',
@@ -44,6 +45,7 @@ def policy(root):
     if not c_marker.is_file():
         raise ValueError('C4C acceptance source marker is required; missing source is not coverage')
     components += [('C4C', c_marker, [C4C], [(C4C, True, 1)])]
+    components += [('variableRetry', source / 'lifecycle_temporal_tests.rs', [VARIABLE_RETRY], [(VARIABLE_RETRY, True, 1)])]
     active = [item for item in components if item[1].is_file()]
     if not active or active[0][0] != 'C2':
         raise ValueError('C2 classification/source must exist; zero selected tests is not coverage')
@@ -147,6 +149,29 @@ def compile_binary(root, release):
         raise ValueError('Cargo lib-test compilation failed with exit ' + str(result.returncode))
     return validate_cargo_artifacts(root, metadata, artifacts, release)
 
+def execute_batch(command, cwd, log_path):
+    """Forward progress immediately and keep the same output for count checks."""
+    with log_path.open('w', encoding='utf-8') as log:
+        process = subprocess.Popen(command, cwd=cwd, stdout=subprocess.PIPE,
+                                   stderr=subprocess.STDOUT, text=True, bufsize=1)
+        try:
+            for line in process.stdout:
+                log.write(line)
+                log.flush()
+                sys.stdout.write(line)
+                sys.stdout.flush()
+            return process.wait()
+        finally:
+            # A failed log/console sink must not strand the verified child.
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+            process.stdout.close()
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('mode', choices=['debug-check', 'release-run'])
@@ -182,12 +207,11 @@ def main():
             for index, batch in enumerate(batches):
                 verify_selected_executable(selected, binary_sha256)
                 command = [str(binary), batch['selector'], '--nocapture', '--test-threads=1'] + (['--exact'] if batch['exact'] else [])
-                result = subprocess.run(command, cwd=root/'v2', capture_output=True, text=True)
-                output = result.stdout + result.stderr
-                (args.evidence_dir / f'{index}-{batch["component"]}.log').write_text(output)
-                print(output, flush=True)
+                log_path = args.evidence_dir / f'{index}-{batch["component"]}.log'
+                returncode = execute_batch(command, root/'v2', log_path)
+                output = log_path.read_text(encoding='utf-8')
                 counts = re.findall(r'^test result: ok\. (\d+) passed; (\d+) failed; (\d+) ignored;', output, re.M)
-                if result.returncode or not counts or tuple(map(int, counts[-1])) != (len(batch['names']), 0, 0):
+                if returncode or not counts or tuple(map(int, counts[-1])) != (len(batch['names']), 0, 0):
                     raise ValueError('Release batch failed or nonzero/exact-count verification failed: ' + batch['selector'])
                 batch['passed'] = len(batch['names'])
         receipt['status'] = 'passed'

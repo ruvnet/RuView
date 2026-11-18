@@ -389,3 +389,30 @@ fn operator_default_is_explicit_and_rehashed_authority_claims_stay_rejected(){
     let mut forged=plan();forged.body.claims.user_facing_default=true;forged.sha256=hash(&forged.body).unwrap();
     assert!(ManagedScheduleContract::import(&forged.export().unwrap()).is_err());
 }
+
+#[test]
+fn variable_profile_retains_every_source_with_bounded_resources_and_roundtrip() {
+    for count in 2..=8 {
+        let p = ManagedScheduleContract::build(context(count), LeadInPolicy::OperatorVariableSourcesV2).unwrap();
+        assert_eq!(p.context().sources.len(), usize::from(count));
+        assert_eq!(p.profile_id(), OPERATOR_VARIABLE_PROFILE);
+        assert_eq!(p.counts().total_windows, 80);
+        assert_eq!(p.resources().source_views, 80 * usize::from(count));
+        assert!(p.resources().max_numeric_values <= 2_000_000);
+        assert!(p.resources().serialized_upper_bound_bytes <= 64 * 1024 * 1024);
+        let wire = p.export().unwrap();
+        assert_eq!(ManagedScheduleContract::import(&wire).unwrap().export().unwrap(), wire);
+    }
+}
+#[test]
+fn variable_profile_rejects_out_of_range_counts_and_cannot_relabel_old_contract() {
+    for count in [0, 1, 9] {
+        assert!(ManagedScheduleContract::build(context(count), LeadInPolicy::OperatorVariableSourcesV2).is_err());
+    }
+    let old = ManagedScheduleContract::build(context(3), LeadInPolicy::OperatorEightStepV1).unwrap();
+    let new = ManagedScheduleContract::build(context(3), LeadInPolicy::OperatorVariableSourcesV2).unwrap();
+    assert_ne!(old.sha256(), new.sha256());
+    let mut tampered: serde_json::Value = serde_json::from_slice(&old.export().unwrap()).unwrap();
+    tampered["body"]["profile_id"] = OPERATOR_VARIABLE_PROFILE.into();
+    assert!(ManagedScheduleContract::import(&serde_json::to_vec(&tampered).unwrap()).is_err());
+}

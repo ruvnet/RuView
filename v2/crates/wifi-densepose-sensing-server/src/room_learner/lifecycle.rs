@@ -93,6 +93,8 @@ pub struct RoomLearningRuntime {
     recovery_store: Option<std::sync::Arc<super::recovery_store::RecoveryStore>>,
     operator_recovery_store: Option<std::sync::Arc<super::recovery_store::RecoveryStore>>,
     operator_profile_selected: AtomicBool,
+    variable_profile_selected: AtomicBool,
+    variable_recovery_store: Option<Arc<super::recovery_store::RecoveryStore>>,
     operator_profile_initialized: AtomicBool,
     status_reader: Arc<tokio::sync::Semaphore>,
     inner: Mutex<Inner>,
@@ -193,6 +195,7 @@ impl RoomLearningRuntime {
             .try_into()
             .map_err(|_| "receiver clock outside bounds")?;
         let operator_recovery_store = recovery_store.as_ref().map(|store| store.operator_eight_scope()).transpose()?.map(Arc::new);
+        let variable_recovery_store = recovery_store.as_ref().map(|store| store.variable_sources_scope()).transpose()?.map(Arc::new);
         let runtime = Self {
             clock_origin,
             clock_epoch_ns,
@@ -203,6 +206,8 @@ impl RoomLearningRuntime {
             recovery_store: recovery_store.map(std::sync::Arc::new),
             operator_recovery_store,
             operator_profile_selected: AtomicBool::new(false),
+            variable_profile_selected: AtomicBool::new(false),
+            variable_recovery_store,
             operator_profile_initialized: AtomicBool::new(false),
             status_reader: Arc::new(tokio::sync::Semaphore::new(1)),
             #[cfg(test)] reclamation_probe:Mutex::new(None),

@@ -26,6 +26,23 @@ fn context(count: u8) -> CaptureContext {
             .collect(),
     }
 }
+#[test]
+fn c5_claimed_feature_grid_plan_keeps_exact_frequency_and_rejects_unversioned_shapes() {
+    let mut ctx=context(3);
+    for source in &mut ctx.sources {
+        source.grid_id=super::super::native::C5_LLTF8_V1_GRID.into();
+        source.center_frequency_hz=5_560_000_000;
+    }
+    let cadences=[(1,ReceiverCadenceBand::Hz30To36),(2,ReceiverCadenceBand::Hz30To36),(3,ReceiverCadenceBand::Hz30To36)];
+    let p=AcquisitionPlan::build(ctx.clone(),ExperimentalPlanId::Native1000msSlots2,&cadences).unwrap();
+    assert_eq!(p.context,ctx);
+    for mhz in [2437u64,5185,5955] {
+        let mut bad=ctx.clone();bad.sources[0].center_frequency_hz=mhz*1_000_000;
+        assert!(AcquisitionPlan::build(bad,ExperimentalPlanId::Native1000msSlots2,&cadences).is_err());
+    }
+    let mut bad=ctx;bad.sources[0].grid_id="ant1-bins53-ppdu0-usable-drop2-linear-v2".into();
+    assert!(AcquisitionPlan::build(bad,ExperimentalPlanId::Native1000msSlots2,&cadences).is_err());
+}
 fn plan(
     count: u8,
     id: ExperimentalPlanId,

@@ -404,6 +404,146 @@ fn observe_wire_at(inner: &mut AppStateInner, packet: &[u8], at: std::time::Inst
         .observe_raw_grid(CsiGridKey::from_frame(&frame), at);
     observe(inner, &frame, packet, at);
 }
+
+// New producer-format claims are SYNTHETIC metadata, not physical validation.
+fn c5_wire(node:u8, seq:u32, frequency_mhz:u32, with_claim:bool)->Vec<u8> {
+    let mut packet=wire(node,seq);
+    packet[6..8].copy_from_slice(&53u16.to_le_bytes());
+    packet[8..12].copy_from_slice(&frequency_mhz.to_le_bytes());
+    packet.resize(20+106,0);
+    for pair in packet[20..].chunks_exact_mut(2) {pair[0]=node;pair[1]=4;}
+    packet[20..24].fill(0); // Actual invalid-prefix sanitation, two int8 positions.
+    if with_claim {packet.extend([b'C',b'5',b'L',b'8',1,8,1,1,1,1,0,20,1,1,106,0]);}
+    packet
+}
+async fn c5_fixture()->(tempfile::TempDir,SharedState) {
+    let (dir,state)=fixture();let now=std::time::Instant::now();
+    {
+        let mut inner=state.write().await;
+        inner.node_states.clear();inner.room_learning_sources.clear();inner.room_learning_rejections.clear();
+        for row in 0..120 {
+            let at=now-std::time::Duration::from_millis((120-row)as u64*100);
+            for node in [20,21,22] {observe_wire_at(&mut inner,&c5_wire(node,row+1,5180,true),at);}
+        }
+    }
+    (dir,state)
+}
+fn c5_config()->serde_json::Value {
+    serde_json::json!({"binding_digest":"b".repeat(64),"revision":1,
+        "source_node_ids":[20,21,22],"new_training":true})
+}
+fn c5_app(state:SharedState)->Router {
+    let status_route=get(status_dispatch).with_state(state.clone());
+    app(state).route("/native-status",status_route)
+}
+#[tokio::test]
+async fn c5_claimed_datagrams_bind_three_independent_sources_and_enter_actual_capture() {
+    let (_dir,state)=c5_fixture().await;let router=app(state.clone());
+    let configured=json_request(router.clone(),"/configure",Method::POST,c5_config()).await;
+    assert_eq!(configured["success"],true,"{configured}");
+    let sources=configured["status"]["sources"].as_array().unwrap();
+    assert_eq!(sources.len(),3);
+    for (source,node) in sources.iter().zip([20,21,22]) {
+        assert_eq!(source["source_id"],node);assert_eq!(source["device_id"],format!("esp32-node-{node}"));
+        assert_eq!(source["grid_id"],native::C5_LLTF8_V1_GRID);
+        assert_eq!(source["center_frequency_hz"],5_180_000_000u64);
+        assert_eq!(source["feature_count"],56);
+    }
+    let begun=json_request(router.clone(),"/phase",Method::POST,serde_json::json!({
+        "trial_id":"synthetic-c5","session_id":"synthetic-c5","role":"Train",
+        "label":"Empty","duration_ms":12000,"conditions_confirmed":true})).await;
+    assert_eq!(begun["success"],true,"{begun}");
+    for row in 0..8 {
+        for node in [20,21,22] {
+            let packet=c5_wire(node,121+row,5180,true);let frame=parse_esp32_frame(&packet).unwrap();
+            assert_eq!(frame.n_subcarriers,53);assert_eq!(frame.amplitudes.len(),53);
+            observe(&mut *state.write().await,&frame,&packet,std::time::Instant::now());
+        }
+    }
+    let read=json_request_status(router).await;
+    assert_eq!(read["required_source_ids"],serde_json::json!([20,21,22]));
+    for source in read["capture"]["sources"].as_array().unwrap() {
+        assert_eq!(source["admitted_packets"],8);assert_eq!(source["live_buffer_frames"],8);
+    }
+    assert_eq!(read["physically_validated"],false);
+    assert!(state.read().await.field_model.is_none());
+}
+#[tokio::test]
+async fn c5_unclaimed_or_contradictory_packets_cannot_borrow_other_sources_readiness() {
+    for mutant in 0..7 {
+        let (_dir,state)=c5_fixture().await;
+        {
+            let mut inner=state.write().await;
+            inner.room_learning_sources.retain(|key,_|key.node_id!=22);
+            let mut packet=c5_wire(22,121,5180,mutant!=0);
+            match mutant {
+                0=>{},1=>packet[126+5]=12,2=>packet[126+12]=0,
+                3=>packet[126+10]=1,4=>packet[19]|=1,5=>packet[18]=1,
+                _=>packet.push(0),
+            }
+            observe_wire_at(&mut inner,&packet,std::time::Instant::now());
+            assert!(native_candidates(&inner,22,std::time::Instant::now()).is_empty());
+            assert_eq!(inner.room_learning_sources.len(),2);
+        }
+        let router=c5_app(state.clone());
+        let response=json_request(router.clone(),"/configure",Method::POST,c5_config()).await;
+        assert_eq!(response["error_code"],"learner_source_unready","mutant{mutant}: {response}");
+        let read=json_request(router,"/native-status?include_native_diagnostics=1",Method::GET,serde_json::Value::Null).await;
+        let reasons=&read["native_source_diagnostics"]["sources"];
+        assert_eq!(reasons[0]["node_id"],22);assert_eq!(reasons[0]["admission_authority"],false);
+        assert_eq!(reasons[0]["last_rejected_packet"]["code"],"native_format_unverified");
+    }
+}
+#[tokio::test]
+async fn c5_frozen_source_binding_withdraws_on_replaced_frequency_or_grid_without_relabelling() {
+    for change_grid in [false,true] {
+        let (_dir,state)=c5_fixture().await;let router=app(state.clone());
+        let configured=json_request(router.clone(),"/configure",Method::POST,c5_config()).await;
+        assert_eq!(configured["success"],true,"{configured}");
+        let context=state.read().await.room_learning.as_ref().unwrap().context().unwrap();
+        {
+            let mut inner=state.write().await;inner.room_learning_sources.retain(|key,_|key.node_id!=20);
+            let now=std::time::Instant::now();
+            for row in 0..120 {
+                let packet=if change_grid {wire(20,row+121)}else{c5_wire(20,row+121,5200,true)};
+                let at=now-std::time::Duration::from_millis((120-row)as u64*100);
+                observe_wire_at(&mut inner,&packet,at);
+            }
+            assert!(!source_ready(&inner,&context.sources[0],std::time::Instant::now()));
+            assert!(source_ready(&inner,&context.sources[1],std::time::Instant::now()));
+            assert!(source_ready(&inner,&context.sources[2],std::time::Instant::now()));
+            let mut foreign=context.sources[1].clone();foreign.grid_id="ant1-bins64-ppdu0-usable-drop2-linear-v2".into();
+            assert!(!source_ready(&inner,&foreign,std::time::Instant::now()));
+        }
+        let rejected=json_request(router.clone(),"/phase",Method::POST,serde_json::json!({
+            "trial_id":"must-not-start","session_id":"must-not-start","role":"Train",
+            "label":"Empty","duration_ms":12000,"conditions_confirmed":true})).await;
+        assert_eq!(rejected["error_code"],"learner_source_unready","{rejected}");
+        let read=json_request_status(router).await;
+        assert_eq!(read["mutation_guard"],configured["status"]["mutation_guard"]);
+        assert_eq!(read["sources"],configured["status"]["sources"]);
+        assert!(read["capture"]["phase"].is_null());
+    }
+}
+#[tokio::test]
+async fn c5_rejection_diagnostics_are_bounded_expire_and_do_not_invalidate_a_good_cohort() {
+    let (_dir,state)=c5_fixture().await;let now=std::time::Instant::now();
+    {
+        let mut inner=state.write().await;
+        for node in 0u8..=255 {observe_wire_at(&mut inner,&c5_wire(node,121,5180,false),now);}
+        assert_eq!(inner.room_learning_rejections.len(),256);
+        assert_eq!(inner.room_learning_sources.len(),3);
+        for node in [20,21,22] {assert_eq!(native_candidates(&inner,node,now).len(),1);}
+        let expired=ingress::source_rejection_diagnostics(&inner,now+std::time::Duration::from_secs(6));
+        assert_eq!(expired["sources"],serde_json::json!([]));
+    }
+    let read=json_request(c5_app(state),"/native-status?include_native_diagnostics=1",Method::GET,serde_json::Value::Null).await;
+    let data=read["native_source_diagnostics"].to_string();
+    for private in ["native_iq","amplitudes","timestamp_ns","owner_scope","payload"] {assert!(!data.contains(private));}
+    assert_eq!(read["native_source_diagnostics"]["sources"].as_array().unwrap().len(),32);
+    assert_eq!(read["native_source_diagnostics"]["total_sources"],256);
+    assert_eq!(read["native_source_diagnostics"]["truncated"],true);
+}
 #[tokio::test]
 async fn unsupported_class_churn_cannot_exhaust_readiness_for_healthy_nodes() {
     let (_dir, state) = fixture();
@@ -559,3 +699,43 @@ async fn enable_current_recovery_requires_explicit_versioned_consent_and_does_no
 
 #[path = "room_learner_api_temporal_tests.rs"]
 mod temporal_contract_tests;
+
+#[tokio::test]
+async fn c5_cross_node_sync_metadata_reaches_real_ingress_and_readiness_without_clock_upgrade() {
+    let (_dir,state)=fixture();let now=std::time::Instant::now();
+    {
+        let mut inner=state.write().await;
+        inner.node_states.clear();inner.room_learning_sources.clear();inner.room_learning_rejections.clear();
+        for row in 0..120 {
+            let at=now-std::time::Duration::from_millis((120-row)as u64*100);
+            for node in [20,21,22] {
+                let mut packet=c5_wire(node,row+1,5240,true);packet[19]|=0x10;
+                observe_wire_at(&mut inner,&packet,at);
+            }
+        }
+        for node in [20,21,22] {assert_eq!(native_candidates(&inner,node,now).len(),1);}
+        assert!(inner.room_learning_rejections.is_empty());
+    }
+    let router=app(state.clone());
+    let configured=json_request(router.clone(),"/configure",Method::POST,c5_config()).await;
+    assert_eq!(configured["success"],true,"{configured}");
+    for spec in configured["status"]["sources"].as_array().unwrap() {
+        assert_eq!(spec["grid_id"],native::C5_LLTF8_V1_GRID);
+        assert_eq!(spec["center_frequency_hz"],5_240_000_000u64);
+    }
+    let begun=json_request(router.clone(),"/phase",Method::POST,serde_json::json!({
+        "trial_id":"synthetic-c5-sync","session_id":"synthetic-c5-sync","role":"Train",
+        "label":"Empty","duration_ms":12000,"conditions_confirmed":true})).await;
+    assert_eq!(begun["success"],true,"{begun}");
+    for row in 0..8 {for node in [20,21,22] {
+        let mut packet=c5_wire(node,121+row,5240,true);
+        if row%2==0 {packet[19]|=0x10;} // Advisory bit may toggle; source grid is unchanged.
+        let mut inner=state.write().await;observe_wire_at(&mut inner,&packet,std::time::Instant::now());
+    }}
+    let read=json_request_status(router).await;
+    for source in read["capture"]["sources"].as_array().unwrap() {
+        assert_eq!(source["admitted_packets"],8);assert_eq!(source["live_buffer_frames"],8);
+    }
+    assert_eq!(read["physically_validated"],false);
+    assert!(state.read().await.field_model.is_none());
+}

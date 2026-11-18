@@ -159,8 +159,8 @@ class C4CClassificationTests(unittest.TestCase):
                 profiles.policy(root)
     def test_current_policy_registers_exact_c4c_and_preserves_existing_components(self):
         components = profiles.policy(pathlib.Path(__file__).resolve().parents[2])
-        self.assertEqual([c[0] for c in components], ['C2', 'C1', 'C3', 'C4', 'budget343', 'C4B', 'C4C'])
-        current = components[-1]
+        self.assertEqual([c[0] for c in components], ['C2', 'C1', 'C3', 'C4', 'budget343', 'C4B', 'C4C', 'variableRetry'])
+        current = next(c for c in components if c[0] == 'C4C')
         self.assertEqual(current[1].name, 'lifecycle_temporal_public_acceptance_tests.rs')
         self.assertEqual(current[2:], ([profiles.C4C], [(profiles.C4C, True, 1)]))
         self.assertEqual(components[0][3], [(profiles.C2, True, 1)])
@@ -187,5 +187,108 @@ class OperatorEightClassificationTests(unittest.TestCase):
     def test_actual_policy_carries_operator_case_in_cached_c4_batch(self):
         c4=next(c for c in profiles.policy(pathlib.Path(__file__).resolve().parents[2]) if c[0]=='C4')
         self.assertIn(profiles.OPERATOR8,c4[2]);self.assertEqual(c4[3],[(profiles.PREFIX+'full_run_tests::',False,9)])
+
+class VariableRetryClassificationTests(unittest.TestCase):
+    def component(self):
+        root = pathlib.Path(__file__).resolve().parents[2]
+        return [next(c for c in profiles.policy(root) if c[0] == 'variableRetry')]
+
+    def test_current_policy_requires_exact_native_retry_case(self):
+        c = self.component()[0]
+        self.assertEqual(c[1].name, 'lifecycle_temporal_tests.rs')
+        self.assertEqual(c[2:], ([profiles.VARIABLE_RETRY], [(profiles.VARIABLE_RETRY, True, 1)]))
+        self.assertIn('fn variable_retry_after_actual_window_cadence_failure_keeps_sixteen_windows_and_seal()', c[1].read_text())
+
+    def test_debug_keeps_the_case_registered_and_transparently_ignored(self):
+        result = profiles.validate(self.component(), {profiles.VARIABLE_RETRY}, {profiles.VARIABLE_RETRY}, 'debug-check')
+        self.assertEqual(result[0]['names'], [profiles.VARIABLE_RETRY])
+
+    def test_debug_cannot_run_the_native_persistence_case_unclassified(self):
+        with self.assertRaises(ValueError):
+            profiles.validate(self.component(), {profiles.VARIABLE_RETRY}, set(), 'debug-check')
+
+    def test_release_requires_one_active_case_and_does_not_sweep_siblings(self):
+        sibling = profiles.VARIABLE_RETRY + '_manual_performance'
+        result = profiles.validate(self.component(), {profiles.VARIABLE_RETRY, sibling}, {sibling}, 'release-run')
+        self.assertEqual(result, [{'component': 'variableRetry', 'selector': profiles.VARIABLE_RETRY, 'exact': True, 'names': [profiles.VARIABLE_RETRY]}])
+
+    def test_missing_or_lookalike_case_cannot_satisfy_release_coverage(self):
+        for registered in [set(), {profiles.VARIABLE_RETRY + '_lookalike'}]:
+            with self.assertRaises(ValueError):
+                profiles.validate(self.component(), registered, set(), 'release-run')
+
+    def test_ignored_release_case_cannot_be_counted_as_passed(self):
+        with self.assertRaises(ValueError):
+            profiles.validate(self.component(), {profiles.VARIABLE_RETRY}, {profiles.VARIABLE_RETRY}, 'release-run')
+
+    def test_wrong_module_cannot_substitute_the_same_leaf(self):
+        wrong = profiles.VARIABLE_RETRY.replace('tests::', 'wrong_module::')
+        with self.assertRaises(ValueError):
+            profiles.validate(self.component(), {wrong}, set(), 'release-run')
+
+
+class LiveBatchEvidenceTests(unittest.TestCase):
+    def test_stdout_and_stderr_are_retained_and_nonzero_exit_is_not_hidden(self):
+        import contextlib, io, sys, tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            log = root / 'batch.log'
+            console = io.StringIO()
+            command = [sys.executable, '-u', '-c',
+                       'import sys; print("stdout-progress"); print("stderr-progress", file=sys.stderr); sys.exit(7)']
+            with contextlib.redirect_stdout(console):
+                code = profiles.execute_batch(command, root, log)
+            self.assertEqual(code, 7)
+            self.assertEqual(log.read_text(), 'stdout-progress\nstderr-progress\n')
+            self.assertEqual(console.getvalue(), log.read_text())
+
+    def test_progress_is_visible_before_child_exit(self):
+        import concurrent.futures, contextlib, io, sys, tempfile, time
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            log, release = root / 'batch.log', root / 'release'
+            child = ('import pathlib,sys,time; print("still-running", flush=True); '
+                     'release=pathlib.Path(sys.argv[1]); deadline=time.monotonic()+10\n'
+                     'while not release.exists() and time.monotonic()<deadline: time.sleep(0.01)\n'
+                     'sys.exit(0 if release.exists() else 99)')
+            console = io.StringIO()
+            with contextlib.redirect_stdout(console), concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(profiles.execute_batch, [sys.executable, '-u', '-c', child, str(release)], root, log)
+                try:
+                    deadline = time.monotonic() + 5
+                    while time.monotonic() < deadline:
+                        if log.exists() and 'still-running' in log.read_text() and 'still-running' in console.getvalue():
+                            break
+                        time.sleep(0.01)
+                    self.assertTrue(log.exists(), 'progress log must exist before child exit')
+                    self.assertIn('still-running', log.read_text())
+                    self.assertIn('still-running', console.getvalue())
+                    self.assertFalse(future.done(), 'progress must be visible while the child is alive')
+                finally:
+                    release.touch()
+                self.assertEqual(future.result(timeout=5), 0)
+
+    def test_console_failure_reaps_the_started_child_and_keeps_partial_log(self):
+        import contextlib, io, sys, tempfile
+        from unittest import mock
+        class BrokenConsole(io.StringIO):
+            def write(self, value):
+                raise OSError('synthetic console failure')
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            log = root / 'batch.log'
+            child = 'import time; print("before-console-failure", flush=True); time.sleep(10)'
+            original_popen, spawned = profiles.subprocess.Popen, []
+            def record_real_child(*args, **kwargs):
+                process = original_popen(*args, **kwargs)
+                spawned.append(process)
+                return process
+            with contextlib.redirect_stdout(BrokenConsole()), mock.patch.object(profiles.subprocess, 'Popen', side_effect=record_real_child):
+                with self.assertRaisesRegex(OSError, 'synthetic console failure'):
+                    profiles.execute_batch([sys.executable, '-u', '-c', child], root, log)
+            self.assertEqual(log.read_text(), 'before-console-failure\n')
+            self.assertEqual(len(spawned), 1)
+            self.assertIsNotNone(spawned[0].returncode, 'failed output forwarding must reap the actual child')
+
 
 if __name__=='__main__':unittest.main()

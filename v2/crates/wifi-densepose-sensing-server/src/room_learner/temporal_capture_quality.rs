@@ -3,7 +3,7 @@
 //! Seals alone grant no fit authority; the private owner must separately consume
 //! the complete durable producer prefix into its opaque fit-only admission.
 use super::*;
-use crate::room_learner::temporal_acquisition::WindowInputPolicy;
+use crate::room_learner::temporal_acquisition::{ReceiverCadenceBand, WindowInputPolicy};
 use serde_json::{json, Value};
 
 pub(super) const BRIDGE_POLICY: &str = "native-receiver-whole-train-period-v1;all-selected-packets;existing-cadence-gap-arrival-skew;confirmed-durable-seals;no-fit-authority";
@@ -138,8 +138,9 @@ impl QualityPart {
                 // native policy, including its integer interval representation.
                 if s.packets < 2
                     || s.last_ns < end
-                    || intervals < span * u128::from(lo) / 1_000_000_000_000u128
-                    || span < intervals * u128::from(1_000_000_000_000u64 / hi)
+                    || (policy.receiver_cadence != ReceiverCadenceBand::Arrival18To22Burst200MsV1
+                        && (intervals < span * u128::from(lo) / 1_000_000_000_000u128
+                            || span < intervals * u128::from(1_000_000_000_000u64 / hi)))
                 {
                     return Err("temporal_whole_period_cadence".into());
                 }
@@ -445,7 +446,98 @@ pub(super) fn validate_parts_with_frozen(
     if complete.is_some_and(|v| v != frontier) || complete.is_some() && parts.is_empty() {
         return Err("temporal_quality_period_incomplete".into());
     }
+    if native.source_policies().iter().any(|p|p.receiver_cadence==ReceiverCadenceBand::Arrival18To22Burst200MsV1) {
+      let target = schedule.episodes().get(episode).ok_or("temporal_quality_episode")?
+          .target_active_recording_ms.checked_mul(1_000_000).ok_or("temporal_quality_time")?;
+      if complete.is_some() || frontier >= target {
+        for policy in native.source_policies().iter().filter(|p|
+            p.receiver_cadence == ReceiverCadenceBand::Arrival18To22Burst200MsV1)
+        {
+            // A reservation tail can contain a permissible scheduling burst.
+            // Only a complete episode has whole-period rate authority. Resume
+            // gaps contribute neither a packet interval nor receiver span.
+            let mut intervals = 0u128;
+            let mut span = 0u128;
+            for part in parts.iter().filter(|p|p.observed_end_ns > p.mapping.observed_start_ns) {
+                let source = part.sources.iter().find(|s|s.source_id==policy.source_id)
+                    .ok_or("temporal_quality_required_sources")?;
+                intervals = intervals.checked_add(u128::from(source.packets-1)).ok_or("temporal_quality_count")?;
+                span = span.checked_add(u128::from(source.last_ns-source.first_ns)).ok_or("temporal_quality_time")?;
+            }
+            let (lo,hi)=policy.receiver_cadence.rate_bounds_millihz();
+            if intervals==0 || span==0
+                || intervals < span*u128::from(lo)/1_000_000_000_000u128
+                || span < intervals*u128::from(1_000_000_000_000u64/hi)
+            { return Err("temporal_whole_period_cadence".into()); }
+        }
+      }
+    }
     Ok(())
+}
+
+#[cfg(test)]
+mod arrival_quality_regressions {
+    use super::*;
+    use crate::room_learner::managed_schedule_contract::LeadInPolicy;
+    const SECOND:u64=1_000_000_000;
+    fn schedule(variable:bool)->ManagedScheduleContract {
+        let mut context=crate::room_learner::temporal_model_input::managed::tests::context();
+        if variable {
+            let mut extra=context.sources[2].clone();extra.source_id=4;
+            extra.device_id="esp32-node-4".into();extra.link_id="native-4".into();context.sources.push(extra);
+        }
+        ManagedScheduleContract::build(context,if variable {LeadInPolicy::OperatorVariableSourcesV2}else{LeadInPolicy::OperatorEightStepV1}).unwrap()
+    }
+    fn part(schedule:&ManagedScheduleContract,ordinal:u16,start:u64,end:u64,receiver:u64,packets:u64)->QualityPart {
+        let bound=schedule.bind_episode_start("synthetic-rate-parts",0,0,ordinal,None).unwrap();
+        QualityPart {mapping:ObservedSegmentMap{segment_ordinal:ordinal,session_id:bound.session_id().into(),
+            receiver_epoch:format!("synthetic-epoch-{ordinal}"),clock_anchor_ns:receiver,receiver_start_ns:receiver,observed_start_ns:start},
+            observed_end_ns:end,sources:schedule.context().sources.iter().map(|s|SourceQuality {
+                source_id:s.source_id,first_ns:receiver,last_ns:receiver+end-start,
+                first_sequence:1+u64::from(ordinal)*100_000,last_sequence:u64::from(ordinal)*100_000+packets,
+                packets,maximum_gap_ns:200_000_000,minimum_interval_ns:10_000}).collect()}
+    }
+    #[test]
+    fn arrival_partial_tail_burst_is_valid_but_completed_frontier_and_restored_period_enforce_rate() {
+        let schedule=schedule(true);
+        let prefix=part(&schedule,0,0,2_400_000_000,SECOND,58);
+        assert!(validate_parts(&[prefix.clone()],&schedule,"synthetic-rate-parts",0,None,4*SECOND).is_ok());
+        let complete=part(&schedule,0,0,600*SECOND,SECOND,12_001);
+        assert!(validate_parts(&[complete.clone()],&schedule,"synthetic-rate-parts",0,Some(600*SECOND),601*SECOND).is_ok());
+        let mut too_dense=complete.clone();for source in &mut too_dense.sources {source.packets=14_401;source.last_sequence=14_401;}
+        assert_eq!(validate_parts(&[too_dense.clone()],&schedule,"synthetic-rate-parts",0,None,601*SECOND).unwrap_err(),"temporal_whole_period_cadence");
+        let restored:Vec<QualityPart>=serde_json::from_slice(&serde_json::to_vec(&vec![too_dense]).unwrap()).unwrap();
+        assert_eq!(validate_parts(&restored,&schedule,"synthetic-rate-parts",0,Some(600*SECOND),601*SECOND).unwrap_err(),"temporal_whole_period_cadence");
+        for case in 0..4 {
+            let mut invalid=prefix.clone();match case {
+                0=>invalid.sources[0].maximum_gap_ns=200_000_001,
+                1=>invalid.sources[0].last_sequence=0,
+                2=>{invalid.sources.pop();},
+                _=>invalid.sources[0].last_ns-=1,
+            }
+            assert!(validate_parts(&[invalid],&schedule,"synthetic-rate-parts",0,None,4*SECOND).is_err(),"prefix structural control {case}");
+        }
+    }
+    #[test]
+    fn arrival_resumed_period_sums_only_each_positive_parts_intervals_and_span() {
+        let schedule=schedule(true);
+        let high=part(&schedule,0,0,100*SECOND,SECOND,2401);
+        let low=part(&schedule,1,100*SECOND,600*SECOND,1001*SECOND,9601);
+        assert!(validate_parts(&[high,low],&schedule,"synthetic-rate-parts",0,Some(600*SECOND),1501*SECOND).is_ok());
+        let exact0=part(&schedule,0,0,300*SECOND,SECOND,5401);
+        let exact1=part(&schedule,1,300*SECOND,600*SECOND,1001*SECOND,5401);
+        assert!(validate_parts(&[exact0.clone(),exact1.clone()],&schedule,"synthetic-rate-parts",0,Some(600*SECOND),1301*SECOND).is_ok(),"paused gap must not lower the aggregate rate");
+        let mut one_interval_short=exact0;
+        for s in &mut one_interval_short.sources {s.packets-=1;s.last_sequence-=1;}
+        assert_eq!(validate_parts(&[one_interval_short,exact1],&schedule,"synthetic-rate-parts",0,Some(600*SECOND),1301*SECOND).unwrap_err(),"temporal_whole_period_cadence","summing packet counts before subtracting one would incorrectly pass");
+    }
+    #[test]
+    fn old_interval_strict_profile_still_rejects_bad_partial_part_rate() {
+        let schedule=schedule(false);
+        let mut prefix=part(&schedule,0,0,2_400_000_000,SECOND,58);
+        for s in &mut prefix.sources {s.maximum_gap_ns=50_000_000;s.minimum_interval_ns=30_000_000;}
+        assert_eq!(validate_parts(&[prefix],&schedule,"synthetic-rate-parts",0,None,4*SECOND).unwrap_err(),"temporal_whole_period_cadence");
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1220,13 +1312,15 @@ impl TemporalTrainCapture {
             || !self.is_full_run()
             || self.workflow.full_run.as_ref().is_some_and(|m| m.is_frozen() || m.is_complete())
         { return Err("temporal_retry_requires_stopped_capture".into()); }
+        let budget=self.workflow.full_run.as_ref().ok_or("temporal_full_run_required")?
+            .policy.replay_fence_budget(&self.workflow.session.managed.as_ref().ok_or("managed_session_required")?.binding)?;
         let state = FailedRetryState {
             generation:self.public_generation_id.clone(), schedule:self.schedule.sha256().into(),
             created_at_ms:self.workflow.descriptor.created_at_ms, expires_at_ms:self.workflow.descriptor.expires_at_ms,
             durable_windows:self.workflow.durable_windows, seals:self.durable_seals,
             accepted_prefix_sha256:self.workflow.async_state.as_ref().and_then(|state|state.row_prefix_sha256.clone()),
             accepted_seal_digests:self.workflow.bridge.as_ref().map_or_else(Vec::new,|b|b.seals.iter().take(self.durable_seals).map(|seal|seal.sha256.clone()).collect()),
-            fences:self.workflow.session.assembler.fence_checkpoint()?, source_high:self.workflow.source_high.clone(),
+            fences:self.workflow.session.assembler.stopped_retry_fence_checkpoint(&budget)?, source_high:self.workflow.source_high.clone(),
         };
         if self.failure.is_none() { self.invalidate("temporal_retry_stopped_capture"); }
         Ok(state)

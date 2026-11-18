@@ -3,10 +3,20 @@
 use super::*;
 use wifi_densepose_sensing_server::room_learner::temporal_wire::*;
 
+pub(super) fn temporal_profile_source_count_valid(profile: Option<&str>, count: usize) -> bool {
+    if profile == Some(VARIABLE_SOURCE_PROFILE_ID) { (2..=8).contains(&count) } else { count == 3 }
+}
+
 #[derive(Default, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct SchemaQuery {
     schema: Option<String>,
+}
+#[derive(Default, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct NativeStatusQuery {
+    schema: Option<String>,
+    include_native_diagnostics: Option<u8>,
 }
 fn schema_matches(actual: &str, expected: &str) -> Result<(), Json<serde_json::Value>> {
     if actual == expected {
@@ -68,10 +78,14 @@ command!(
 
 pub(crate) async fn status_dispatch(
     State(state): State<SharedState>,
-    Query(query): Query<SchemaQuery>,
+    Query(query): Query<NativeStatusQuery>,
 ) -> Json<serde_json::Value> {
+    let include=match query.include_native_diagnostics {
+        None|Some(0)=>false,Some(1)=>true,
+        _=>return failure("learner_status_query_invalid","include_native_diagnostics must be 0 or 1"),
+    };
     let Some(schema) = query.schema else {
-        return status(State(state)).await;
+        return status_with_native_diagnostics(State(state),include).await;
     };
     if let Err(error) = schema_matches(&schema, STATUS_SCHEMA) {
         return error;
@@ -80,8 +94,8 @@ pub(crate) async fn status_dispatch(
         Ok(rt) => rt,
         Err(e) => return e,
     };
-    if let Err(e)=rt.temporal_default_operator_profile_v2(){return failure("learner_profile_unavailable",e);}
-    temporal_status(&state, &rt).await
+    if let Err(e)=rt.temporal_default_operator_profile_v2(now_ns(&rt)){return failure("learner_profile_unavailable",e);}
+    temporal_status_with_reader_options(&state,&rt,|reader,now|reader.temporal_status_snapshot_v2(now),include).await
 }
 fn temporal_selection(
     state: &AppStateInner,
@@ -125,6 +139,12 @@ pub(super) async fn temporal_status_with_reader<F>(
 where
     F: FnOnce(Arc<RoomLearningRuntime>, u64) -> Result<serde_json::Value, String> + Send + 'static,
 {
+    temporal_status_with_reader_options(state,rt,read_snapshot,false).await
+}
+async fn temporal_status_with_reader_options<F>(
+    state:&SharedState, rt:&Arc<RoomLearningRuntime>, read_snapshot:F, include:bool,
+) -> Json<serde_json::Value>
+where F:FnOnce(Arc<RoomLearningRuntime>,u64)->Result<serde_json::Value,String>+Send+'static {
     // Concurrent polls wait as async futures, without owning an RF lock or
     // spawning another blocking worker. Explicit cancellation removes a waiter.
     let permit = match rt.acquire_temporal_status_reader().await {
@@ -187,10 +207,11 @@ where
         Ok(result) => result,
         Err(_) => return failure("learner_status_unavailable", "learner_status_worker_unavailable"),
     };
-    match result.and_then(|status| {
+    match result.and_then(|mut status| {
         if status["mutation_guard"] != serde_json::to_value(&expected).map_err(|_| "learner_status_guard_invalid")? {
             return Err("learner_state_changed".into());
         }
+        if include {status["native_source_diagnostics"] = ingress::source_rejection_diagnostics(&current, std::time::Instant::now());}
         Ok(status)
     }) {
         Ok(status) => Json(serde_json::json!({"success":true,"status":status})),
@@ -263,9 +284,9 @@ pub(crate) async fn configure_dispatch(
     if !valid_binding_digest(&request.binding_digest)
         || request.revision == 0
         || !valid_source_node_ids(&request.source_node_ids)
-        || request.source_node_ids.len() != 3
+        || !temporal_profile_source_count_valid(request.profile_id.as_deref(),request.source_node_ids.len())
     {
-        return failure("learner_context_invalid", "Temporal engineering profile requires a current room revision and exactly three sorted unique sources.");
+        return failure("learner_context_invalid", "Temporal profile requires a current room revision and its bounded sorted unique source set.");
     }
     let rt = match runtime(&state).await {
         Ok(rt) => rt,
@@ -302,11 +323,7 @@ pub(crate) async fn configure_dispatch(
                 "A selected native source/PHY stream is not ready.",
             );
         };
-        let grid_id = match native::grid_id(
-            key.n_antennas as usize,
-            key.raw_bins as usize,
-            wifi_densepose_hardware::PpduType::from_byte(key.ppdu_type),
-        ) {
+        let grid_id = match key.grid_id() {
             Ok(grid) => grid,
             Err(e) => return failure("learner_grid_unsupported", e),
         };

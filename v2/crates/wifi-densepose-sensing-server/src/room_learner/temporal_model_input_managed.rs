@@ -288,14 +288,14 @@ impl TemporalTrainingSession {
         // Only the unchanged legacy fields' native-validation carrier is built;
         // managed identity/hash/schedule NEVER comes from this seed.
         let bands = schedule
-            .context()
-            .sources
+            .native_window_policy()
+            .source_policies()
             .iter()
-            .map(|s| (s.source_id, ReceiverCadenceBand::Hz30To36))
+            .map(|s| (s.source_id, s.receiver_cadence))
             .collect::<Vec<_>>();
         let plan = AcquisitionPlan::build(
             schedule.context().clone(),
-            ExperimentalPlanId::Native2000msSlots8,
+            if schedule.is_variable_sources() { ExperimentalPlanId::Native2000msSlots4 } else { ExperimentalPlanId::Native2000msSlots8 },
             &bands,
         )?;
         let assembler = NativeWindowAssembler::managed(schedule, policy, run_id.clone())?;

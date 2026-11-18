@@ -1,6 +1,33 @@
 use super::super::tests::{commit_next, setup, start};
 use super::*;
 #[test]
+fn variable_first_real_checkpoint_keeps_valid_window_and_bursty_reservation_tail() {
+    use crate::room_learner::managed_schedule_contract::LeadInPolicy;
+    let dir=tempfile::tempdir().unwrap();
+    let mut context=crate::room_learner::temporal_model_input::managed::tests::context();
+    let mut extra=context.sources[2].clone();extra.source_id=4;extra.device_id="esp32-node-4".into();extra.link_id="native-4".into();context.sources.push(extra);
+    let store=RecoveryStore::new(&dir.path().join(&context.owner_scope).join("SensingServer"),&context.owner_scope,&context.installation_id,Some(&[7;32])).unwrap();
+    let plan=ManagedScheduleContract::build(context,LeadInPolicy::OperatorVariableSourcesV2).unwrap();
+    let mut capture=TemporalTrainCapture::prepare(plan,"synthetic-variable-first-checkpoint".into(),FitConfig::for_source_count(4),1_000_000_000,&store).unwrap();
+    let start=2_000_000_000;
+    capture.start_segment("synthetic-variable-checkpoint",start,&store).unwrap();
+    let mut times=(0..=40).map(|i|i*50_000_000u64).collect::<Vec<_>>();times.push(2_200_000_000);
+    for i in 0..16 {times.push(2_399_850_000+i*10_000);}
+    for (index,relative) in times.iter().copied().enumerate() {
+        for source in 1..=4 {
+            let now=start+relative;
+            capture.ingest(&super::super::tests::bridge_packet(source,index as u32+1,now),now,&store).unwrap();
+        }
+    }
+    let now=start+2_400_000_000;
+    let loaded=store.load_temporal(now).unwrap().unwrap();let prefix=loaded.prefix.unwrap();
+    assert_eq!(prefix.window_count(),1);
+    assert!(validated_prefix(prefix.bytes(),prefix.descriptor(),now).is_ok());
+    let restored=TemporalTrainCapture::cold_restore(&store,capture.context(),now,"synthetic-variable-restored",now).unwrap();
+    assert_eq!(restored.snapshot()["durable_windows"],1);
+    assert_eq!(capture.snapshot()["durable_windows"],1);
+}
+#[test]
 fn real_aead_initial_barrier_and_ambiguous_save_fail_closed_without_new_authority() {
     let (_dir, store, mut w) = setup();
     assert!(w

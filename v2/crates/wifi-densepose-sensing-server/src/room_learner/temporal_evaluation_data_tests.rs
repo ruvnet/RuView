@@ -35,7 +35,7 @@ fn identity() -> TemporalEvaluationIdentityData {
         execution_policy_sha256: fixture_sha(7),
         schedule_sha256: fixture_sha(8),
         configured_fit_sha256: fixture_sha(9),
-        source_ids: [15, 16, 17],
+        source_ids: vec![15, 16, 17],
     }
 }
 fn token(id: &TemporalEvaluationIdentityData, revision: u16) -> CommitmentData {
@@ -52,11 +52,11 @@ fn train() -> TemporalTrainProofData {
     let cut = "1800000900000000000".to_owned();
     let body = TemporalTrainProofBodyData {
         accepted_train_commitment: token(&id, 78),
-        source_floors: std::array::from_fn(|i| FrozenSourceFloorData {
+        source_floors: (0..3).map(|i| FrozenSourceFloorData {
             source_id: id.source_ids[i],
             sequence: 10_000,
             receiver_ns: "1800000899999000000".into(),
-        }),
+        }).collect(),
         identity: id,
         training_data_sha256: fixture_sha(20),
         training_evidence_sha256: fixture_sha(21),
@@ -92,7 +92,7 @@ fn held(t: &TemporalTrainProofData) -> TemporalHeldOutEvidenceData {
         complete_commitment: token(&t.body.identity, 160),
         complete_prepare_receiver_ns: "1800001300000000000".into(),
         complete_persisted_receiver_ns: "1800001300000000000".into(),
-        final_source_fences: std::array::from_fn(|i| {
+        final_source_fences: (0..3).map(|i| {
             let id = t.body.identity.source_ids[i];
             let ns = 1_800_001_299_999_000_000u64;
             FinalSourceFenceData {
@@ -102,7 +102,7 @@ fn held(t: &TemporalTrainProofData) -> TemporalHeldOutEvidenceData {
                 native_frame_id: ((u128::from(ns) << 40) | (u128::from(id) << 32) | 20_000)
                     .to_string(),
             }
-        }),
+        }).collect(),
         held_out_windows: 64,
         windows_per_condition: [16; 4],
         declared_episodes_per_condition: [2; 4],
@@ -335,7 +335,7 @@ fn bounded_max_width_metadata_fixture_fits_without_relaxing_reader_limit() {
     id.installation_id = escaped.clone();
     id.run = escaped.clone();
     id.original_deadline.id = escaped.clone();
-    id.source_ids = [253, 254, 255];
+    id.source_ids = vec![253, 254, 255];
     id.original_deadline.expires_at_unix_ms = u64::MAX / 1_000_000 + 1;
     id.original_deadline.created_at_unix_ms = id.original_deadline.expires_at_unix_ms - TTL_MS;
     t.body.freeze_prepare_receiver_ns = (u64::MAX - 1_000_000_000_000).to_string();
@@ -347,7 +347,7 @@ fn bounded_max_width_metadata_fixture_fits_without_relaxing_reader_limit() {
         .body
         .source_floors
         .iter_mut()
-        .zip(t.body.identity.source_ids)
+        .zip(t.body.identity.source_ids.iter().copied())
     {
         floor.source_id = id;
         floor.sequence = u32::MAX as u64 - 100_000;

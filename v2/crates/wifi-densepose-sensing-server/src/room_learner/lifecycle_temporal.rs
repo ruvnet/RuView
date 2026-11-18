@@ -224,11 +224,11 @@ impl RoomLearningRuntime {
     pub(super) fn temporal_store(
         &self,
     ) -> Result<&super::super::recovery_store::RecoveryStore, String> {
-        if self.operator_profile_selected.load(Ordering::Acquire) { self.operator_recovery_store.as_deref() } else { self.recovery_store.as_deref() }
+        if self.variable_profile_selected.load(Ordering::Acquire) { self.variable_recovery_store.as_deref() } else if self.operator_profile_selected.load(Ordering::Acquire) { self.operator_recovery_store.as_deref() } else { self.recovery_store.as_deref() }
             .ok_or("temporal_recovery_unavailable".into())
     }
     fn temporal_store_arc(&self) -> Result<Arc<super::super::recovery_store::RecoveryStore>, String> {
-        if self.operator_profile_selected.load(Ordering::Acquire) { self.operator_recovery_store.clone() } else { self.recovery_store.clone() }.ok_or("temporal_recovery_unavailable".into())
+        if self.variable_profile_selected.load(Ordering::Acquire) { self.variable_recovery_store.clone() } else if self.operator_profile_selected.load(Ordering::Acquire) { self.operator_recovery_store.clone() } else { self.recovery_store.clone() }.ok_or("temporal_recovery_unavailable".into())
     }
     /// Deliberately PRIVATE: current public configure always constructs Legacy.
     /// Refuses to discard existing capture/candidate/selection/recovery state.
@@ -298,7 +298,7 @@ impl RoomLearningRuntime {
         {
             return Err("temporal_context_owner_or_clock".into());
         }
-        let schedule = ManagedScheduleContract::build(context.clone(), if self.operator_profile_selected.load(Ordering::Acquire) { LeadInPolicy::OperatorEightStepV1 } else { LeadInPolicy::Train5HeldOut15EngineeringV1 })?;
+        let schedule = ManagedScheduleContract::build(context.clone(), if self.variable_profile_selected.load(Ordering::Acquire) { LeadInPolicy::OperatorVariableSourcesV2 } else if self.operator_profile_selected.load(Ordering::Acquire) { LeadInPolicy::OperatorEightStepV1 } else { LeadInPolicy::Train5HeldOut15EngineeringV1 })?;
         let fit = FitConfig::for_source_count(context.sources.len());
         fit.validate_context(&context)?;
         let mut state = self.command_state(expected)?;

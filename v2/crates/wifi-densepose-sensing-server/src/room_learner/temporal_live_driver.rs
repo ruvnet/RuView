@@ -505,7 +505,7 @@ impl ContinuousTemporalInput {
         driver.activate();Ok(driver)
     }
     pub(crate) fn advance_selected_floors(&mut self,floors:&[(u8,u64,u64)],receiver_floor:u64)->Result<(),String>{
-        if floors.len()!=3||floors.iter().any(|(id,seq,_)|*seq>u32::MAX as u64||!self.policy.context().sources.iter().any(|s|s.source_id==*id)){return Err("selected_source_floor_identity".into());}
+        if floors.len()!=self.policy.context().sources.len()||floors.iter().map(|s|s.0).ne(self.policy.context().sources.iter().map(|s|s.source_id))||floors.iter().any(|(id,seq,_)|*seq>u32::MAX as u64||!self.policy.context().sources.iter().any(|s|s.source_id==*id)){return Err("selected_source_floor_identity".into());}
         for(id,seq,time)in floors{let frame=(u128::from(*time)<<40)|(u128::from(*id)<<32)|u128::from(*seq);if let Some(old)=self.fences.get(id){if *seq<u64::from(old.sequence)||*time<old.time_ns{return Err("selected_source_floor_regression".into());}}
             self.fences.insert(*id,Fence{sequence:*seq as u32,time_ns:*time,frame_id:frame});}
         if self.last_now.is_some_and(|old|receiver_floor<old){return Err("selected_receiver_floor_regression".into());}self.last_now=Some(receiver_floor);Ok(())

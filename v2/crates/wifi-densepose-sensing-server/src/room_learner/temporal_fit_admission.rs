@@ -185,7 +185,7 @@ fn identity(
         prefix_schema:if w.full_run.is_some(){full_run::PREFIX_SCHEMA}else{"ruview.room-learner.temporal-runtime-prefix.v2"},
         metadata_kind:if w.full_run.is_some(){full_run::META_KIND}else{"temporal-prefix-commitment-v1"},
         continuation_policy:w.full_run.as_ref().map(|m|m.policy.sha256().into()),
-        operator_profile:schedule.is_operator_eight_step().then(||"native-2s-three-source-56bin-operator-eight-step-v1".into()),
+        operator_profile:schedule.is_operator_eight_step().then(||schedule.profile_id().into()),
     })
 }
 pub(super) fn current_identity(
