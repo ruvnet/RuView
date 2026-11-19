@@ -26,7 +26,7 @@ async def main():
 
 asyncio.run(main())
 ```
-"""
+"""  # noqa: E501 — markdown table rows above must stay on one line
 
 from __future__ import annotations
 

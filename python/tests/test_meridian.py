@@ -65,7 +65,7 @@ def test_geometry_encode_dim_and_permutation_invariance() -> None:
     assert len(v) == 64
     # DeepSets mean-pool is permutation-invariant.
     v_perm = enc.encode([aps[2], aps[0], aps[1]])
-    assert max(abs(a - b) for a, b in zip(v, v_perm)) < 1e-5
+    assert max(abs(a - b) for a, b in zip(v, v_perm, strict=True)) < 1e-5
 
 
 def test_geometry_encode_rejects_empty_and_bad_shape() -> None:

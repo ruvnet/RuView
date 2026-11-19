@@ -25,7 +25,9 @@ _PRESENCE_BODY = {
     "unique_id": "wifi_densepose_aabbccddeeff_presence",
     "object_id": "wifi_densepose_aabbccddeeff_presence",
     "state_topic": "homeassistant/binary_sensor/wifi_densepose_aabbccddeeff/presence/state",
-    "availability_topic": "homeassistant/binary_sensor/wifi_densepose_aabbccddeeff/presence/availability",
+    "availability_topic": (
+        "homeassistant/binary_sensor/wifi_densepose_aabbccddeeff/presence/availability"
+    ),
     "device_class": "occupancy",
     "icon": "mdi:motion-sensor",
 }

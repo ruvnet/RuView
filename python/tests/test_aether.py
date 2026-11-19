@@ -56,7 +56,7 @@ def assert_embedding_matches_golden(embedding: list[float], golden_name: str) ->
     for i, x in enumerate(embedding):
         assert math.isfinite(x), f"{golden_name}: element {i} is not finite ({x})"
 
-    for i, (a, b) in enumerate(zip(embedding, golden)):
+    for i, (a, b) in enumerate(zip(embedding, golden, strict=True)):
         tol = PARITY_ATOL + PARITY_RTOL * abs(b)
         assert abs(a - b) <= tol, (
             f"{golden_name}: element {i} diverged from native golden beyond "
@@ -64,7 +64,7 @@ def assert_embedding_matches_golden(embedding: list[float], golden_name: str) ->
             "a real regression, not cross-arch f32 drift."
         )
 
-    dot = sum(a * b for a, b in zip(embedding, golden))
+    dot = sum(a * b for a, b in zip(embedding, golden, strict=True))
     na = math.sqrt(sum(a * a for a in embedding))
     nb = math.sqrt(sum(b * b for b in golden))
     cosine = dot / (na * nb) if na > 0 and nb > 0 else 0.0
@@ -208,8 +208,8 @@ def test_augment_pair_preserves_shape_and_differs() -> None:
     assert len(view_a[0]) == len(window[0])
     differs = any(
         abs(x - y) > 1e-6
-        for ra, rb in zip(view_a, view_b)
-        for x, y in zip(ra, rb)
+        for ra, rb in zip(view_a, view_b, strict=True)
+        for x, y in zip(ra, rb, strict=True)
     )
     assert differs, "augment_pair should return two distinct views"
 
@@ -239,7 +239,7 @@ def test_load_weights_is_used_and_matches_native_golden() -> None:
     loaded = ext.embed(load_input())
 
     # (1) The loaded weights actually take effect (not a silent no-op).
-    assert any(abs(a - b) > 1e-6 for a, b in zip(baseline, loaded)), (
+    assert any(abs(a - b) > 1e-6 for a, b in zip(baseline, loaded, strict=True)), (
         "load_weights had no effect — embedding still equals the random-init baseline"
     )
     # (2) Matches the native-Rust reference that loaded the same weights, within
