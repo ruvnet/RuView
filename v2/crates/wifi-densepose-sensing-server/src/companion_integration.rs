@@ -392,6 +392,7 @@ mod tests {
         assert_eq!(policy(&Method::POST, "/api/v1/worldgraph/snapshot"), None);
         assert_eq!(policy(&Method::GET, "/api/v1/worldgraph/engine"), Some(false));
         assert_eq!(policy(&Method::POST, "/api/v1/worldgraph/engine"), None);
+        assert_eq!(policy(&Method::HEAD, "/api/v1/worldgraph/engine"), Some(false));
         assert_eq!(policy(&Method::HEAD, "/api/v1/room-learner/selection"), Some(false));
         assert_eq!(policy(&Method::GET, "/api/v1/room-learner/status"), None);
         assert_eq!(policy(&Method::GET, "/api/v1/room-learner/progress"), Some(false));
