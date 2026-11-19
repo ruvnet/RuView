@@ -1,5 +1,9 @@
 import copy
 import json
+import os
+import subprocess
+import sys
+import tempfile
 from pathlib import Path
 import unittest
 from unittest import mock
@@ -116,6 +120,45 @@ class AuditMetadataTests(unittest.TestCase):
         self.assertEqual(decision(1, result, {"output": {"deny": ["warnings"]}}), 1)
         self.assertEqual(decision(1, result, {}), 0)
         with self.assertRaises(ValueError): decision(1, classify(self.report([]), self.lock), {})
+
+    def test_cli_rejects_option_like_or_shell_like_lockfile_names(self):
+        script = Path(__file__).parent / "audit_rust_advisories.py"
+        with tempfile.TemporaryDirectory(prefix="ruview-audit-cli-") as directory:
+            marker = Path(directory) / "must-not-exist"
+            lock = Path(directory) / "Cargo.lock; touch must-not-exist"
+            lock.write_text("version = 4\npackage = []\n")
+            result = subprocess.run([sys.executable, str(script), "--lockfile", str(lock)],
+                cwd=directory, capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("standard Cargo.lock", result.stderr)
+            self.assertFalse(marker.exists())
+
+    def test_cli_cannot_select_an_unreviewed_advisory_database(self):
+        script = Path(__file__).parent / "audit_rust_advisories.py"
+        result = subprocess.run([sys.executable, str(script), "--database", "/unreviewed"],
+            capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("unrecognized arguments", result.stderr)
+
+    def test_project_cargo_entrypoint_is_never_executed(self):
+        script = Path(__file__).parent / "audit_rust_advisories.py"
+        with tempfile.TemporaryDirectory(prefix="ruview-audit-entrypoint-") as directory:
+            root = Path(directory)
+            (root / "Cargo.lock").write_text("version = 4\npackage = []\n")
+            marker = root / "unexpected-cargo"
+            clean = json.dumps({"vulnerabilities": {"found": False, "count": 0, "list": []}, "settings": {"ignore": []}})
+            for binary in ("cargo", "cargo-audit"):
+                text = f"#!{sys.executable}\nfrom pathlib import Path\n"
+                if binary == "cargo": text += f"Path({str(marker)!r}).write_text('unexpected Cargo dispatch')\n"
+                text += f"print({clean!r})\n"
+                executable = root / binary
+                executable.write_text(text)
+                executable.chmod(0o755)
+            result = subprocess.run([sys.executable, str(script), "--lockfile", str(root / "Cargo.lock")],
+                cwd=root, env={**os.environ, "PATH": str(root) + os.pathsep + os.defpath},
+                capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(marker.exists())
 
     def test_native_clean_report_remains_clean(self):
         self.assertEqual(classify(self.report([]), self.lock)["unresolved"], [])

@@ -135,17 +135,17 @@ def main():
     parser.add_argument("--raw-output", type=Path, default=Path("cargo-audit.json"))
     parser.add_argument("--classified-output", type=Path, default=Path("cargo-audit-classification.json"))
     parser.add_argument("--upstream-output", type=Path, default=Path("cargo-audit-upstream.json"))
-    parser.add_argument("--database", type=Path, help="explicit local advisory snapshot for reproducible local verification")
     args = parser.parse_args()
     lockfile = args.lockfile.resolve()
+    if lockfile.name != "Cargo.lock":
+        raise ValueError("the workspace audit requires a standard Cargo.lock filename")
     lock = tomllib.loads(lockfile.read_text())
     policy_file = lockfile.parent / ".cargo/audit.toml"
     policy = tomllib.loads(policy_file.read_text()) if policy_file.exists() else {}
     ignored = policy.get("advisories", {}).get("ignore", [])
-    command = ["cargo", "audit", "--file", str(lockfile), "--json"]
-    if args.database is not None:
-        command += ["--db", str(args.database.resolve()), "--no-fetch"]
-    completed = subprocess.run(command, cwd=lockfile.parent, capture_output=True, text=True, timeout=300)
+    # A fixed direct auditor invocation avoids Cargo aliases and option injection.
+    completed = subprocess.run(["cargo-audit", "audit", "--file", "Cargo.lock", "--json"],
+        cwd=lockfile.parent, capture_output=True, text=True, timeout=300, shell=False)
     args.raw_output.write_text(completed.stdout)
     sys.stdout.write(completed.stdout)
     sys.stderr.write(completed.stderr)
