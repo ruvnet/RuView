@@ -78,3 +78,14 @@ A future version or altered scope must be reassessed, not silently covered.
 No plugin is enabled, helper replaced, application installed, physical sensor
 qualified or production configuration changed by this source repair. Merge/release
 remain the maintainers' separate decisions.
+
+The CLI invokes cargo-audit directly with a fixed argument vector and shell=False.
+It requires a standard Cargo.lock basename and has no alternate-database switch;
+Cargo aliases and CLI-selected advisory arguments do not enter the process command.
+Local pinned-snapshot evidence is reproduced by calling the native tool directly,
+then exercising the pure classifier with fresh upstream evidence.
+
+A controlled negative probe confirmed the previous Cargo dispatcher could execute
+a project-defined audit alias and accept an artificial clean result. The direct
+auditor ignored that alias. This is a negative-control fixture, not a real clean
+audit or a claim that any repository alias was used maliciously.
