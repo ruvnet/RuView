@@ -7,8 +7,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from wifi_densepose.client import (
     HABlueprintHelper,
     HaDiscoveryPayload,
@@ -18,7 +16,6 @@ from wifi_densepose.client.ha import (
     parse_discovery_payload,
     parse_discovery_topic,
 )
-
 
 # Real discovery payloads pulled from ADR-115 §3 (formatted for test
 # readability; payloads are otherwise verbatim).

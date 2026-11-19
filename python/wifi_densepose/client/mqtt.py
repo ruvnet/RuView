@@ -35,7 +35,8 @@ import json
 import logging
 import threading
 import uuid
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 try:
     import paho.mqtt.client as mqtt  # type: ignore[import-not-found]
@@ -69,9 +70,9 @@ class RuViewMqttClient:
         *,
         broker_host: str = "localhost",
         broker_port: int = 1883,
-        client_id: Optional[str] = None,
-        username: Optional[str] = None,
-        password: Optional[str] = None,
+        client_id: str | None = None,
+        username: str | None = None,
+        password: str | None = None,
         keepalive: int = 60,
         tls: bool = False,
     ) -> None:

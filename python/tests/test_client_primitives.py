@@ -13,7 +13,6 @@ from wifi_densepose.client import (
     SemanticPrimitiveListener,
 )
 
-
 # ─── SemanticPrimitive enum ──────────────────────────────────────────
 
 

@@ -29,7 +29,6 @@ from wifi_densepose.client.ha import (
 from wifi_densepose.client.mqtt import _topic_matches
 from wifi_densepose.client.ws import _decode
 
-
 # ─── WS decoder robustness ──────────────────────────────────────────
 
 

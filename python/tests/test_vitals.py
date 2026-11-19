@@ -31,7 +31,6 @@ from wifi_densepose import (
     VitalStatus,
 )
 
-
 # ─── VitalStatus enum ────────────────────────────────────────────────
 
 
