@@ -9,7 +9,6 @@ import pytest
 
 from wifi_densepose import Keypoint, KeypointType
 
-
 # ─── KeypointType ────────────────────────────────────────────────────
 
 

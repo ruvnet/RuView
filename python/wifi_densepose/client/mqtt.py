@@ -35,7 +35,8 @@ import json
 import logging
 import threading
 import uuid
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 try:
     import paho.mqtt.client as mqtt  # type: ignore[import-not-found]
@@ -69,9 +70,9 @@ class RuViewMqttClient:
         *,
         broker_host: str = "localhost",
         broker_port: int = 1883,
-        client_id: Optional[str] = None,
-        username: Optional[str] = None,
-        password: Optional[str] = None,
+        client_id: str | None = None,
+        username: str | None = None,
+        password: str | None = None,
         keepalive: int = 60,
         tls: bool = False,
     ) -> None:
@@ -178,7 +179,14 @@ class RuViewMqttClient:
 
     # ── paho callbacks (v2 signatures) ───────────────────────────────
 
-    def _on_connect(self, client: Any, _userdata: Any, _flags: Any, reason_code: Any, _properties: Any = None) -> None:
+    def _on_connect(
+        self,
+        client: Any,
+        _userdata: Any,
+        _flags: Any,
+        reason_code: Any,
+        _properties: Any = None,
+    ) -> None:
         # paho v2 passes ReasonCode; success is 0 ("Success" / Granted_QoS_0)
         rc = int(reason_code) if hasattr(reason_code, "__int__") else reason_code
         if rc == 0:
@@ -194,7 +202,14 @@ class RuViewMqttClient:
         else:
             log.warning("mqtt CONNACK with non-success rc=%r", reason_code)
 
-    def _on_disconnect(self, _client: Any, _userdata: Any, _flags: Any = None, reason_code: Any = None, _properties: Any = None) -> None:
+    def _on_disconnect(
+        self,
+        _client: Any,
+        _userdata: Any,
+        _flags: Any = None,
+        reason_code: Any = None,
+        _properties: Any = None,
+    ) -> None:
         self._connected_event.clear()
         log.debug("mqtt disconnected rc=%r", reason_code)
 

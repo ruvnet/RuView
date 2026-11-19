@@ -38,16 +38,15 @@ from __future__ import annotations
 # even if the user hasn't installed `[client]` extras yet (HABlueprint
 # is pure stdlib).
 from wifi_densepose.client.ha import (
+    HABlueprintHelper,
     HaDiscoveryPayload,
     HaEntity,
-    HABlueprintHelper,
 )
 from wifi_densepose.client.primitives import (
     SemanticPrimitive,
     SemanticPrimitiveEvent,
     SemanticPrimitiveListener,
 )
-
 
 __all__ = [
     # ws — re-exported lazily; see module docstring

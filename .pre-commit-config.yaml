@@ -1,0 +1,38 @@
+# pre-commit hooks: https://pre-commit.com
+#
+#   pip install pre-commit
+#   pre-commit install            # run automatically on every `git commit`
+#   pre-commit run --files <paths> # run on specific files
+#
+# Hooks only run on the files you stage, so files you don't touch are never
+# reformatted. Third-party, frozen, and binary trees are excluded.
+#
+# Keep the Ruff rev in sync with the pinned Ruff in
+# .github/workflows/python-ci.yml (job: lint).
+
+exclude: '^(vendor|archive|references|releases|assets)/|^firmware/esp32-csi-node/release_bins/|\.min\.(js|css)$'
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ['--maxkb=2048']
+      - id: detect-private-key
+        # Inert test fixtures and docs that mention PEM headers on purpose.
+        exclude: '^(harness/homecore/test/hosts\.test\.mjs|v2/crates/ruview-auth/(Cargo\.toml|tests/verifier_matrix\.rs)|\.claude/agents/.*\.md)$'
+      - id: check-yaml
+        # Syntax check only: Home Assistant blueprints use custom tags (!input).
+        args: ['--unsafe']
+      - id: check-toml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+        args: ['--markdown-linebreak-ext=md']
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.5
+    hooks:
+      # Lints the shipped wheel's sources with python/pyproject.toml [tool.ruff].
+      - id: ruff-check
+        files: '^python/'

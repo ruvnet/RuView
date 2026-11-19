@@ -31,7 +31,6 @@ from wifi_densepose import (
     VitalStatus,
 )
 
-
 # ─── VitalStatus enum ────────────────────────────────────────────────
 
 
@@ -167,7 +166,9 @@ def test_breathing_extract_with_synthetic_signal() -> None:
             )
             break
 
-    assert produced_estimate, "BreathingExtractor never produced an estimate after 40s of synthetic data"
+    assert produced_estimate, (
+        "BreathingExtractor never produced an estimate after 40s of synthetic data"
+    )
 
 
 # ─── HeartRateExtractor ──────────────────────────────────────────────

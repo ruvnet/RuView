@@ -28,7 +28,9 @@ from wifi_densepose import BfldFrame, BfldKind
     (BfldKind.CompressedHE80, (2, 1, 996)),
     (BfldKind.CompressedHE160, (2, 2, 1992)),
 ])
-def test_bfld_from_compressed_feedback(benchmark, kind: BfldKind, shape: tuple[int, int, int]) -> None:
+def test_bfld_from_compressed_feedback(
+    benchmark, kind: BfldKind, shape: tuple[int, int, int]
+) -> None:
     rng = np.random.default_rng(seed=42)
     fb = (rng.standard_normal(shape) + 1j * rng.standard_normal(shape)).astype(np.complex128)
 
@@ -49,7 +51,8 @@ def test_bfld_feedback_matrix_roundtrip(benchmark) -> None:
     that want to do further analysis in numpy after constructing
     the frame."""
     rng = np.random.default_rng(seed=42)
-    fb = (rng.standard_normal((2, 1, 996)) + 1j * rng.standard_normal((2, 1, 996))).astype(np.complex128)
+    shape = (2, 1, 996)
+    fb = (rng.standard_normal(shape) + 1j * rng.standard_normal(shape)).astype(np.complex128)
     frame = BfldFrame.from_compressed_feedback(
         timestamp_ms=0,
         sounding_index=0,

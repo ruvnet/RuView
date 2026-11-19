@@ -29,7 +29,6 @@ from wifi_densepose.client.ha import (
 from wifi_densepose.client.mqtt import _topic_matches
 from wifi_densepose.client.ws import _decode
 
-
 # ─── WS decoder robustness ──────────────────────────────────────────
 
 
@@ -82,7 +81,15 @@ def test_ws_decoder_handles_huge_string_values() -> None:
 def test_ws_decoder_handles_unicode_in_node_id() -> None:
     """Non-ASCII node IDs (e.g. accidental terminal escapes) must
     round-trip cleanly without re-encoding errors."""
-    payload = json.dumps({"type": "edge_vitals", "node_id": "nöde-中", "presence": True, "fall_detected": False, "motion": 0.0})
+    payload = json.dumps(
+        {
+            "type": "edge_vitals",
+            "node_id": "nöde-中",
+            "presence": True,
+            "fall_detected": False,
+            "motion": 0.0,
+        }
+    )
     msg = _decode(payload)
     assert msg.node_id == "nöde-中"  # type: ignore[attr-defined]
 

@@ -7,8 +7,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from wifi_densepose.client import (
     HABlueprintHelper,
     HaDiscoveryPayload,
@@ -19,7 +17,6 @@ from wifi_densepose.client.ha import (
     parse_discovery_topic,
 )
 
-
 # Real discovery payloads pulled from ADR-115 §3 (formatted for test
 # readability; payloads are otherwise verbatim).
 _PRESENCE_TOPIC = "homeassistant/binary_sensor/wifi_densepose_aabbccddeeff/presence/config"
@@ -28,7 +25,9 @@ _PRESENCE_BODY = {
     "unique_id": "wifi_densepose_aabbccddeeff_presence",
     "object_id": "wifi_densepose_aabbccddeeff_presence",
     "state_topic": "homeassistant/binary_sensor/wifi_densepose_aabbccddeeff/presence/state",
-    "availability_topic": "homeassistant/binary_sensor/wifi_densepose_aabbccddeeff/presence/availability",
+    "availability_topic": (
+        "homeassistant/binary_sensor/wifi_densepose_aabbccddeeff/presence/availability"
+    ),
     "device_class": "occupancy",
     "icon": "mdi:motion-sensor",
 }

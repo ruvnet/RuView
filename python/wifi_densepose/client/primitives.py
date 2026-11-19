@@ -26,9 +26,9 @@ from __future__ import annotations
 
 import enum
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
-
+from typing import Any
 
 # ─── Enum ────────────────────────────────────────────────────────────
 
@@ -47,7 +47,7 @@ class SemanticPrimitive(enum.Enum):
     MultiRoomTransition = "multi_room_transition"
 
     @classmethod
-    def from_object_id(cls, object_id: str) -> Optional["SemanticPrimitive"]:
+    def from_object_id(cls, object_id: str) -> SemanticPrimitive | None:
         for v in cls:
             if v.value == object_id:
                 return v
@@ -113,7 +113,7 @@ class SemanticPrimitiveListener:
     _SLUGS = {p.value for p in SemanticPrimitive}
 
     def __init__(self) -> None:
-        self._handlers: dict[Optional[SemanticPrimitive], list[Callback]] = {}
+        self._handlers: dict[SemanticPrimitive | None, list[Callback]] = {}
 
     def on(self, primitive: SemanticPrimitive, cb: Callback) -> None:
         """Register a callback for a specific primitive."""
@@ -124,7 +124,7 @@ class SemanticPrimitiveListener:
         for logging or dashboards."""
         self._handlers.setdefault(None, []).append(cb)
 
-    def handle_mqtt_message(self, topic: str, payload: Any) -> Optional[SemanticPrimitiveEvent]:
+    def handle_mqtt_message(self, topic: str, payload: Any) -> SemanticPrimitiveEvent | None:
         """Decode one MQTT message into a SemanticPrimitiveEvent and
         fire the matching callbacks. Returns the event (or None if the
         topic was not a semantic-primitive state topic)."""

@@ -26,9 +26,8 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
-from typing import Any, Iterable
-
+from dataclasses import dataclass
+from typing import Any
 
 # ─── Topic schema ────────────────────────────────────────────────────
 
@@ -79,7 +78,7 @@ class HaEntity:
     json_attributes_topic: str = ""
 
     @classmethod
-    def from_payload(cls, p: HaDiscoveryPayload) -> "HaEntity":
+    def from_payload(cls, p: HaDiscoveryPayload) -> HaEntity:
         body = p.payload
         return cls(
             entity_kind=p.entity_kind,

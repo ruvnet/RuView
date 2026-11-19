@@ -24,7 +24,9 @@ import pytest
 from wifi_densepose import BreathingExtractor, HeartRateExtractor
 
 
-def _synth_frame(n_subcarriers: int, sample_rate: float, t: float, freq_hz: float, rng: Random) -> tuple[list[float], list[float]]:
+def _synth_frame(
+    n_subcarriers: int, sample_rate: float, t: float, freq_hz: float, rng: Random
+) -> tuple[list[float], list[float]]:
     """Build one ESP32-shape frame at time `t`: sine at `freq_hz` plus
     tiny per-subcarrier noise."""
     base = math.sin(2.0 * math.pi * freq_hz * t)
