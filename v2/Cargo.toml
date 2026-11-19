@@ -3,7 +3,7 @@ resolver = "2"
 members = [
     # Checksum-verified dependency patches; keep their upstream tests in CI.
     "vendor/security/zip-0.6.6",
-    "vendor/security/wasmtime-internal-cache-36.0.20",
+    "vendor/security/wasmtime-internal-cache-36.0.21",
     "vendor/security/sqlx-sqlite-0.8.6",
     "crates/wifi-densepose-core",
     "crates/wifi-densepose-physics", # ADR-323 bounded pose assessment/correction
@@ -357,5 +357,5 @@ zip-legacy = { package = "zip", path = "vendor/security/zip-0.6.6" }
 # Candle 0.9 expects ZIP 7's filename access. The private adapter validates
 # filename decoding and delegates ZIP operations to patched upstream ZIP 9.
 zip-candle = { package = "zip", path = "vendor/security/zip-candle-compat" }
-wasmtime-internal-cache = { path = "vendor/security/wasmtime-internal-cache-36.0.20" }
+wasmtime-internal-cache = { path = "vendor/security/wasmtime-internal-cache-36.0.21" }
 sqlx-sqlite = { path = "vendor/security/sqlx-sqlite-0.8.6" }

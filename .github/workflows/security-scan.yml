@@ -36,16 +36,21 @@ jobs:
       # reviewed ignores in v2/.cargo/audit.toml. Run inside the v2 workspace
       # so that policy file is actually loaded.
       working-directory: v2
+      env:
+        GH_TOKEN: ${{ github.token }}
       run: |
-        set -o pipefail
-        cargo audit --file Cargo.lock --json | tee cargo-audit.json
+        python3 ../scripts/ci/test_audit_rust_advisories.py
+        python3 ../scripts/ci/audit_rust_advisories.py --lockfile Cargo.lock
 
     - name: Upload Rust advisory report
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
       if: always()
       with:
         name: cargo-audit-report
-        path: v2/cargo-audit.json
+        path: |
+          v2/cargo-audit.json
+          v2/cargo-audit-classification.json
+          v2/cargo-audit-upstream.json
         if-no-files-found: error
 
   # Static Application Security Testing (SAST)
