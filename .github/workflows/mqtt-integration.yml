@@ -36,7 +36,7 @@ jobs:
     # NB: we don't use a `services:` mosquitto container here because the
     # eclipse-mosquitto:2.x image rejects anonymous connections by default
     # and GH Actions `services` doesn't easily support mounting a custom
-    # config file. We start mosquitto manually in a step below with an
+    # config file. We start the container manually in a step below with an
     # inline `allow_anonymous true` config.
 
     env:
@@ -50,29 +50,36 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install mosquitto + clients and start with allow_anonymous
+      - name: Start mosquitto with allow_anonymous
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y mosquitto mosquitto-clients
-          sudo systemctl stop mosquitto || true
+          # Run the pinned upstream image instead of the distro package. On
+          # ubuntu-26.04 runners the packaged mosquitto 2.0.22 exits with
+          # "Unable to open config file /tmp/mosquitto-ci.conf" before
+          # listening, and the apt install alone took over five minutes.
           # Inline config: anon listener on 11883 only — no TLS, no auth,
           # OK for CI because we test the wire shape, not security.
           # Production deployments enable mTLS per ADR-115 §3.9.
-          cat > /tmp/mosquitto-ci.conf <<'EOF'
+          cat > "$RUNNER_TEMP/mosquitto-ci.conf" <<'EOF'
           listener 11883
           allow_anonymous true
           persistence false
           log_dest stdout
           EOF
-          mosquitto -c /tmp/mosquitto-ci.conf -d
+          docker run -d --name mosquitto-ci -p 127.0.0.1:11883:11883 \
+            -v "$RUNNER_TEMP/mosquitto-ci.conf:/mosquitto/config/mosquitto.conf:ro" \
+            eclipse-mosquitto:2.0.18
           for i in {1..20}; do
-            if mosquitto_pub -h 127.0.0.1 -p 11883 -t healthcheck -m ok -q 0 2>/dev/null; then
+            # The first check proves the broker accepts an anonymous
+            # publish; the second proves the port is reachable from the
+            # host, where the tests run.
+            if docker exec mosquitto-ci mosquitto_pub -h 127.0.0.1 -p 11883 -t healthcheck -m ok -q 0 2>/dev/null \
+              && (exec 3<>/dev/tcp/127.0.0.1/11883) 2>/dev/null; then
               echo "mosquitto reachable on 11883"; exit 0
             fi
             sleep 2
           done
           echo "mosquitto never became reachable" >&2
-          tail -50 /var/log/mosquitto/*.log 2>/dev/null || true
+          docker logs mosquitto-ci || true
           exit 1
 
       - name: Install Rust toolchain
@@ -115,4 +122,4 @@ jobs:
         if: failure()
         run: |
           docker ps -a
-          docker logs $(docker ps -aqf "ancestor=eclipse-mosquitto:2.0.18") || true
+          docker logs mosquitto-ci || true

@@ -30,7 +30,13 @@ env:
 jobs:
   build-qemu:
     name: Build Espressif QEMU
-    runs-on: ubuntu-latest
+    # Pinned: on ubuntu-26.04 (GCC 15) the bundled dtc subproject fails with
+    # -Werror=discarded-qualifiers in libfdt/fdt_overlay.c, which QEMU's
+    # --disable-werror does not reach. The binary also runs inside the older
+    # espressif/idf container below, so building on the older image keeps
+    # its glibc requirement low. Revisit when Espressif's QEMU builds clean
+    # on the newer image.
+    runs-on: ubuntu-24.04
     steps:
       - name: Cache QEMU build
         id: cache-qemu
