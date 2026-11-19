@@ -1,0 +1,24 @@
+[package]
+name = "zip"
+version = "7.2.0+ruview.zip9.0.5"
+edition = "2021"
+rust-version = "1.89"
+publish = false
+license = "MIT OR Apache-2.0"
+description = "Private Candle ZIP API adapter backed entirely by patched upstream zip 9.0.5"
+
+[features]
+# The current Candle 0.9 consumer explicitly disables ZIP defaults. Fail closed
+# if a future consumer needs additional features: qualify them before forwarding.
+default = []
+
+[dependencies]
+zip-fixed = { package = "zip", version = "=9.0.5", default-features = false }
+
+[dev-dependencies]
+tempfile = "=3.26.0"
+
+# ZIP 0.6 is already a root-workspace member. Cargo disallows two members
+# sharing a package name even at different versions, so qualify this adapter
+# in its own locked workspace and test its consumers in the root workspace.
+[workspace]

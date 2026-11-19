@@ -148,9 +148,10 @@ members = [
 # excluded for the same reason. Build separately:
 #   cargo build --target wasm32-unknown-unknown --release -p homecore-plugin-example
 exclude = [
-    # ZIP registry archives omit large upstream unit fixtures; run its dedicated
-    # self-contained security regression target explicitly in CI.
+    # Retained ZIP 7 regression fixtures are not workspace members; current
+    # Candle IO delegates to the ZIP 9 adapter below.
     "vendor/security/zip-7.2.0",
+    "vendor/security/zip-candle-compat",
     "crates/wifi-densepose-wasm-edge",
     "crates/homecore-plugin-example",
     # ADR-368: napi-rs transport for ruview-kernel. Own workspace so napi never
@@ -202,7 +203,6 @@ burn-cuda = { version = "0.21", default-features = false, features = ["std"] }
 
 # Signal processing
 ndarray = { version = "0.17", features = ["serde"] }
-ndarray-linalg = { version = "0.18", features = ["openblas-static"] }
 rustfft = "6.1"
 num-complex = "0.4"
 num-traits = "0.2"
@@ -349,14 +349,16 @@ strip = false
 inherits = "release"
 debug = true
 
-# Checksum-verified dependency patches. ZIP 7 retains its reviewed allocation
-# guard backport; the Wasmtime cache and legacy ZIP manifests select zstd
+# Checksum-verified dependency patches. Candle delegates ZIP IO to the ZIP 9
+# adapter below; the Wasmtime cache and legacy ZIP manifests select zstd
 # 0.14.3 implementation; sqlx-sqlite selects libsqlite3-sys 0.39.1, which
 # bundles SQLite 3.54.1 (RUSTSEC-2026-0459). sqlx-sqlite 0.8.6 and 0.9.0 both
 # cap libsqlite3-sys below 0.39, so no registry release can reach it yet.
 # See each directory's provenance/backport record for archive digests and scope.
 [patch.crates-io]
-zip-current = { package = "zip", path = "vendor/security/zip-7.2.0" }
 zip-legacy = { package = "zip", path = "vendor/security/zip-0.6.6" }
+# Candle 0.9 expects ZIP 7's filename access. The private adapter validates
+# filename decoding and delegates ZIP operations to patched upstream ZIP 9.
+zip-candle = { package = "zip", path = "vendor/security/zip-candle-compat" }
 wasmtime-internal-cache = { path = "vendor/security/wasmtime-internal-cache-36.0.20" }
 sqlx-sqlite = { path = "vendor/security/sqlx-sqlite-0.8.6" }

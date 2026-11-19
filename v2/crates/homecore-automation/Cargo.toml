@@ -19,7 +19,7 @@ path = "src/lib.rs"
 
 [dependencies]
 # HOMECORE core — state machine, event bus, service registry, entity types
-homecore = { path = "../homecore" }
+homecore = { path = "../homecore", version = "0.1.0-alpha.0" }
 
 # Async runtime
 tokio = { version = "1", features = ["sync", "rt", "rt-multi-thread", "time", "macros"] }
