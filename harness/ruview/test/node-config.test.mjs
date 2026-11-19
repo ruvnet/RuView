@@ -82,7 +82,7 @@ test('the shipped nodes.example.yaml parses and validates', () => {
 
 test('config: defaults are filled and paths expand ~', () => {
   const c = normalizeNodeConfig({ wifi: { ssid: 'x', password_file: '~/p' }, nodes: [] }, { home: '/home/u' });
-  assert.equal(c.wifi.password_file, '/home/u/p');
+  assert.equal(c.wifi.password_file, join('/home/u', 'p'));
   assert.deepEqual(c.aggregator, { ip: 'auto', port: 5005 });
   assert.equal(c.firmware.variant, 's3-8mb');
   assert.deepEqual(c.validate, { wait_secs: 60, udp_secs: 15, min_pps: 20, max_loss: null });
