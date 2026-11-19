@@ -1,0 +1,40 @@
+name: Feature request
+description: Suggest a new capability or an improvement
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea. Large or architectural proposals may need an [Architecture Decision Record](https://github.com/ruvnet/RuView/blob/main/docs/adr/README.md). Please check existing ADRs first.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what's in the way? Describe the problem before the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you like to happen? Include API, CLI, or config sketches if helpful.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches or workarounds you've tried.
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence and constraints
+      description: |
+        Hardware involved, privacy implications, and any related ADRs. Label performance or accuracy expectations as MEASURED, CLAIMED, or SYNTHETIC.
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contribution
+      options:
+        - label: I'd be willing to open a pull request for this.

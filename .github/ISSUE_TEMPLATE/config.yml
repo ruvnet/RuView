@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/ruvnet/RuView/security/advisories/new
+    about: Please report vulnerabilities privately, not as public issues.
+  - name: Questions and discussion
+    url: https://github.com/ruvnet/RuView/discussions
+    about: Ask questions and share ideas in GitHub Discussions.
+  - name: User guide and troubleshooting
+    url: https://github.com/ruvnet/RuView/blob/main/docs/TROUBLESHOOTING.md
+    about: Check the troubleshooting guide for common setup problems.
