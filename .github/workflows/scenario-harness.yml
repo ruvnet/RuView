@@ -1,0 +1,87 @@
+name: Scenario harness (SYNTHETIC)
+
+# Replays 39 generated CSI scenarios (empty rooms, walking, enter-then-sit,
+# still people for vital signs) through the sensing server's per-node ESP32
+# path and fails if presence or breathing accuracy gets worse than the
+# committed baseline in
+# v2/crates/wifi-densepose-sensing-server/tests/fixtures/scenario_baseline.json.
+#
+# Every accuracy number this job prints is SYNTHETIC: it comes from a
+# simulated room, not a real one. See src/scenario_harness.rs for the model,
+# its limits, and how to refresh the baseline after an intended improvement.
+
+on:
+  pull_request:
+    paths:
+      - 'v2/crates/wifi-densepose-sensing-server/src/**'
+      - 'v2/crates/wifi-densepose-sensing-server/tests/fixtures/scenario_baseline.json'
+      - 'v2/crates/wifi-densepose-sensing-server/Cargo.toml'
+      - 'v2/crates/wifi-densepose-signal/src/**'
+      - 'v2/Cargo.lock'
+      - '.github/workflows/scenario-harness.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'v2/crates/wifi-densepose-sensing-server/src/**'
+      - 'v2/crates/wifi-densepose-sensing-server/tests/fixtures/scenario_baseline.json'
+      - 'v2/crates/wifi-densepose-sensing-server/Cargo.toml'
+      - 'v2/crates/wifi-densepose-signal/src/**'
+      - 'v2/Cargo.lock'
+      - '.github/workflows/scenario-harness.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scenario-harness-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scenario-harness:
+    name: Scenario harness (release)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CARGO_TERM_COLOR: always
+      # Debuginfo is not needed to read a pass/fail and a report.
+      CARGO_PROFILE_RELEASE_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          # The v2 workspace lists submodule crates as members.
+          submodules: recursive
+
+      - name: Install system libraries (openssl-sys)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libssl-dev pkg-config
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
+        with:
+          workspaces: v2 -> target
+          key: scenario-harness-release
+
+      - name: Run the scenario harness
+        working-directory: v2
+        env:
+          RUVIEW_SCENARIO_REPORT: ${{ runner.temp }}/scenario-report.md
+        run: >-
+          cargo test --release --locked
+          -p wifi-densepose-sensing-server --no-default-features
+          --bin sensing-server scenario_harness
+          -- --include-ignored --nocapture
+
+      - name: Add the report to the job summary
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/scenario-report.md" ]; then
+            cat "$RUNNER_TEMP/scenario-report.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
