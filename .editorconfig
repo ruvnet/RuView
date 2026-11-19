@@ -1,0 +1,53 @@
+# EditorConfig: https://editorconfig.org
+# Matches the conventions already used in the tree. Line endings are left to
+# .gitattributes, which pins LF where byte-exact files matter (harness/,
+# docker entrypoint).
+
+root = true
+
+[*]
+charset = utf-8
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+# Rust, Python, C/C++ (ESP-IDF firmware): 4 spaces
+[*.{rs,py,pyi,c,h,cpp,hpp}]
+indent_size = 4
+
+# Web, Node harness, and config formats: 2 spaces
+[*.{js,mjs,cjs,jsx,ts,tsx,json,jsonc,css,scss,html,svelte,vue,yml,yaml}]
+indent_size = 2
+
+[*.toml]
+indent_size = 4
+
+# Markdown uses two trailing spaces as a hard line break
+[*.md]
+trim_trailing_whitespace = false
+
+[Makefile]
+indent_style = tab
+
+[*.mk]
+indent_style = tab
+
+# Shell scripts must keep LF so they run in Linux containers and CI
+[*.{sh,bash}]
+end_of_line = lf
+
+# Third-party and frozen code keeps its own style
+[vendor/**]
+charset = unset
+insert_final_newline = unset
+trim_trailing_whitespace = unset
+indent_style = unset
+indent_size = unset
+
+[archive/**]
+charset = unset
+insert_final_newline = unset
+trim_trailing_whitespace = unset
+indent_style = unset
+indent_size = unset
