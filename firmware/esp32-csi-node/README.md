@@ -304,6 +304,25 @@ The boot log must report the intended `internal ceramic` or `external U.FL`
 path before that measurement is labelled. The standard C6 build keeps the
 board default and emits no antenna-path claim.
 
+#### Seeed XIAO ESP32-C6 MR60BHA2 carrier
+
+The assembled Seeed MR60BHA2 kit routes the radar UART to XIAO TX GPIO16 and
+RX GPIO17. It also uses native USB Serial/JTAG for logs and onboarding, so the
+radar UART does not overlap the console. Generic C6 boards keep the GPIO4 and
+GPIO5 defaults.
+
+Build the dedicated carrier profile instead of flashing the generic C6 image:
+
+```bash
+idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.esp32c6;sdkconfig.defaults.xiao-mr60bha2" \
+  set-target esp32c6
+idf.py build
+```
+
+The boot log must identify `MR60BHA2` and the server must receive fresh
+`edge_fused_vitals` packets before the radar is considered connected. Radar
+reported heart and breathing values remain unvalidated, nonmedical evidence.
+
 ### 3. Provision WiFi credentials (no reflash needed)
 
 ```bash

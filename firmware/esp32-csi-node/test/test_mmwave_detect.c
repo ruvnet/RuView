@@ -46,6 +46,8 @@ int main(void)
     CHECK(mmwave_mr60_identifying_type(0x0A15), "MR60BHA2 heart-rate type identifies sensor");
     CHECK(mmwave_mr60_identifying_type(0x0A16), "MR60BHA2 distance type identifies sensor");
     CHECK(mmwave_mr60_identifying_type(0x0F09), "MR60BHA2 presence type identifies sensor");
+    CHECK(mmwave_mr60_target_count(false) == 0, "MR60BHA2 absence maps to zero targets");
+    CHECK(mmwave_mr60_target_count(true) == 1, "MR60BHA2 presence maps to one target");
 
     /* 1. A real basic-report frame (data len 13) validates. */
     int n = make_frame(buf, 13);

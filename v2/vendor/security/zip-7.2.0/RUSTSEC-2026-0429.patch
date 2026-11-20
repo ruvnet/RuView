@@ -1,0 +1,59 @@
+--- a/src/read.rs
++++ b/src/read.rs
+@@ -1,4 +1,12 @@
+ //! Types for reading ZIP archives
++
++/// Upper bound on the uncompressed size of a symlink entry.
++///
++/// A symlink target is a filesystem path, so its length is bounded by the
++/// platform (`PATH_MAX` is 4096 on Linux) no matter what the archive says. The
++/// uncompressed size stored in the central directory is attacker-controlled,
++/// so entries above this bound are rejected rather than pre-allocated.
++pub(crate) const MAX_SYMLINK_TARGET_LEN: u64 = 4096;
+ 
+ #[cfg(feature = "aes-crypto")]
+ use crate::aes::{AesReader, AesReaderValid};
+@@ -993,7 +1001,15 @@
+ 
+             #[cfg(any(unix, windows))]
+             if file.is_symlink() {
+-                let mut target = Vec::with_capacity(file.size() as usize);
++                let declared_len = file.size();
++                if declared_len > MAX_SYMLINK_TARGET_LEN {
++                    return Err(invalid!(
++                        "symlink target declares {} bytes, more than the {} byte limit",
++                        declared_len,
++                        MAX_SYMLINK_TARGET_LEN
++                    ));
++                }
++                let mut target = Vec::with_capacity(declared_len as usize);
+                 file.read_to_end(&mut target)?;
+                 drop(file);
+                 make_symlink(&outpath, &target, &self.shared.files)?;
+--- a/src/read/stream.rs
++++ b/src/read/stream.rs
+@@ -1,4 +1,7 @@
++use crate::result::invalid;
++
+ use super::{
++    MAX_SYMLINK_TARGET_LEN,
+     central_header_to_zip_file_inner, make_symlink, read_zipfile_from_stream, ZipCentralEntryBlock,
+     ZipFile, ZipFileData, ZipResult,
+ };
+@@ -67,7 +70,15 @@
+                 file.safe_prepare_path(&self.0, &mut outpath, None::<&(_, fn(&Path) -> bool)>)?;
+ 
+                 if file.is_symlink() {
+-                    let mut target = Vec::with_capacity(file.size() as usize);
++                    let declared_len = file.size();
++                    if declared_len > MAX_SYMLINK_TARGET_LEN {
++                        return Err(invalid!(
++                            "symlink target declares {} bytes, more than the {} byte limit",
++                            declared_len,
++                            MAX_SYMLINK_TARGET_LEN
++                        ));
++                    }
++                    let mut target = Vec::with_capacity(declared_len as usize);
+                     file.read_to_end(&mut target)?;
+                     make_symlink(&outpath, &target, &self.1)?;
+                     return Ok(());

@@ -76,6 +76,27 @@ cargo run -p wifi-densepose-sensing-server -- \
     --ui-path ../ui
 ```
 
+### Experimental per-source shadow diagnostics
+
+`--source-bank-shadow` is off by default. When explicitly enabled, the next normal,
+operator-confirmed room calibration also trains one independent, canonicalized
+FieldModel per bound source (at least two). Each source must satisfy its own frame,
+duration, grid and continuity requirements. Primary single-source calibration and
+publication gates remain unchanged. This first adapter uses the existing frozen
+raw grid for all sources; independent per-node grid selection is not implemented.
+A radio missing that grid cannot complete its shadow calibration.
+
+After normal calibration completion, protected `GET /api/v1/calibration/status`
+includes `source_bank_shadow`: per-source frame counts and empty-background
+comparisons only after complete, fresh, post-training windows arrive. Privacy mode
+omits the diagnostics. Cancel/reset clears the bank; normal `/calibration/stop`
+completion freezes it for shadow comparison. Restart does not restore it.
+No bank data is persisted or promoted into person count, presence or Vitals.
+The existing UDP source/grid/sequence admission is not cryptographic sensor
+authentication; diagnostics must retain that transport limitation.
+This developer prototype needs independent physical empty/occupied/adjacent
+qualification before any detection benefit can be claimed.
+
 ### Empty-room startup baseline
 
 Provide a stable installation ID and an application-owned private state directory:

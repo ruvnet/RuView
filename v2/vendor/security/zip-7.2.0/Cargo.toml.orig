@@ -1,0 +1,139 @@
+[package]
+name = "zip"
+version = "7.2.0"
+authors = [
+    "Mathijs van de Nes <git@mathijs.vd-nes.nl>",
+    "Marli Frost <marli@frost.red>",
+    "Ryan Levick <ryan.levick@gmail.com>",
+    "Chris Hennick <hennickc@amazon.com>",
+]
+license = "MIT"
+repository = "https://github.com/zip-rs/zip2.git"
+keywords = ["zip", "archive", "compression"]
+# Any change to rust-version must be reflected also in `README.md` and `.github/workflows/ci.yaml`.
+# The MSRV policy is documented in `README.md`.
+rust-version = "1.83.0"
+categories = ["compression", "filesystem", "parser-implementations"]
+description = """
+Library to support the reading and writing of zip files.
+"""
+edition = "2021"
+exclude = ["tests/**", "examples/**", ".github/**", "fuzz_read/**", "fuzz_write/**"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+arbitrary = { version = "1.4", features = ["derive"], optional = true }
+aes = { version = "0.8", optional = true }
+bzip2 = { version = "0.6", default-features = false, optional = true }
+chrono = { version = "^0.4.27", optional = true, default-features = false, features = ["std"] }
+constant_time_eq = { version = "0.3", optional = true }
+crc32fast = "1.5"
+flate2 = { version = "1.1", default-features = false, optional = true }
+generic-array = { version = "=0.14.7", optional = true }
+hmac = { version = "0.12", optional = true, features = ["reset"] }
+indexmap = "2"
+jiff = { version = "0.2.4", optional = true }
+memchr = "2.7"
+nt-time = { version = "0.10.6", default-features = false, optional = true }
+ppmd-rust = { version = "1.3", optional = true }
+pbkdf2 = { version = "0.12", optional = true }
+sha1 = { version = "0.10", optional = true }
+time = { version = "0.3", default-features = false, optional = true, features = [
+    "std",
+] }
+zeroize = { version = "1.8", optional = true, features = ["zeroize_derive"] }
+zstd = { version = "^0.13.3", optional = true, default-features = false }
+zopfli = { version = "0.8", optional = true }
+deflate64 = { version = "0.1.10", optional = true }
+lzma-rust2 = { version = "0.15", optional = true, default-features = false, features = ["std", "encoder", "optimization", "xz"] }
+bitstream-io = { version = "4.5", optional = true }
+typed-path = "0.12"
+
+# native:
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+getrandom = { version = "0.3", default-features = false, optional = true }
+time = { version = "0.3", default-features = false, optional = true, features = [
+    "wasm-bindgen"
+] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+getrandom = { version = "0.3", default-features = false }
+
+# wasm32
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.3", default-features = false, features = ["wasm_js"], optional = true }
+time = { version = "0.3", default-features = false, optional = true, features = [
+    "std",
+    "wasm-bindgen"
+] }
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+getrandom = { version = "0.3", default-features = false, features = ["wasm_js"] }
+wasm-bindgen-test = "^0.3.56"
+
+[dev-dependencies]
+bencher = "0.1"
+getrandom = { version = "0.3", default-features = false, features = [] }
+walkdir = "2.5"
+time = { version = "0.3", features = ["formatting", "macros"] }
+clap = { version = "=4.4.18", features = ["derive"] }
+tempfile = "3.15"
+rayon = "1.11"
+
+[features]
+_arbitrary = ["dep:arbitrary"]
+aes-crypto = ["dep:aes", "dep:constant_time_eq", "dep:generic-array", "getrandom/std", "dep:hmac", "dep:pbkdf2", "dep:sha1", "dep:zeroize"]
+chrono = ["dep:chrono"]
+_deflate-any = []
+_all-features = [] # Detect when --all-features is used
+deflate = ["deflate-zopfli", "deflate-flate2-zlib-rs"]
+# Pull in flate2, but don't choose a backend; useful if you want to choose your own flate2 backend
+deflate-flate2 = ["_deflate-any", "dep:flate2"]
+# Pull in flate2 and the fast zlib-rs backend; this is what most users will want
+deflate-flate2-zlib-rs = ["deflate-flate2", "flate2/zlib-rs"]
+# Pull in zopfli (write-only DEFLATE, slower than flate2 with better compression ratios)
+deflate-zopfli = ["dep:zopfli", "_deflate-any"]
+jiff-02 = ["dep:jiff"]
+nt-time = ["dep:nt-time"]
+lzma = ["dep:lzma-rust2"]
+ppmd = ["dep:ppmd-rust"]
+unreserved = []
+xz = ["dep:lzma-rust2"]
+_bzip2_any = []
+bzip2 = ["dep:bzip2", "bzip2/default", "_bzip2_any"]
+legacy-zip = ["bitstream-io"]
+default = [
+    "aes-crypto",
+    "bzip2",
+    "deflate64",
+    "deflate",
+    "lzma",
+    "ppmd",
+    "time",
+    "zstd",
+    "xz",
+]
+
+# The following features are not supported on wasm
+bzip2-rs = ["dep:bzip2", "bzip2/bzip2-sys", "_bzip2_any"]
+# Pull in flate2 and the zlib backend; only use this if you need a dynamically linked system zlib
+deflate-flate2-zlib = ["deflate-flate2", "flate2/zlib"]
+# Pull in flate2 and the zlib-ng backend; a modern fork of zlib
+deflate-flate2-zlib-ng = ["deflate-flate2", "flate2/zlib-ng"]
+# Pull in flate2 and the zlib-ng backend with a zlib-compatible API
+deflate-flate2-zlib-ng-compat = ["deflate-flate2", "flate2/zlib-ng-compat"]
+
+[[bench]]
+name = "read_entry"
+harness = false
+
+[[bench]]
+name = "read_metadata"
+harness = false
+
+[[bench]]
+name = "merge_archive"
+harness = false

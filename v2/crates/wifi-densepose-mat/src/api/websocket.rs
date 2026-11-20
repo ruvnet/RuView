@@ -37,6 +37,7 @@ use axum::{
         State,
     },
     response::Response,
+    Extension,
 };
 use futures_util::{SinkExt, StreamExt};
 use parking_lot::Mutex;
@@ -45,6 +46,14 @@ use uuid::Uuid;
 
 use super::dto::{WebSocketMessage, WebSocketRequest};
 use super::state::AppState;
+
+/// Optional host-owned output policy for serialized WebSocket frames.
+///
+/// HTTP response middleware cannot filter frames after the upgrade. A host
+/// applying a privacy policy must install this extension on the MAT router.
+/// Returning `None` withholds a frame (fail closed).
+#[derive(Clone, Copy)]
+pub struct StreamOutputFilter(pub fn(&str) -> Option<String>);
 
 /// WebSocket connection handler.
 ///
@@ -75,13 +84,17 @@ use super::state::AppState;
 ///       101:
 ///         description: WebSocket connection established
 /// ```
-#[tracing::instrument(skip(state, ws))]
-pub async fn ws_handler(State(state): State<AppState>, ws: WebSocketUpgrade) -> Response {
-    ws.on_upgrade(move |socket| handle_socket(socket, state))
+#[tracing::instrument(skip(state, ws, filter))]
+pub async fn ws_handler(
+    State(state): State<AppState>,
+    filter: Option<Extension<StreamOutputFilter>>,
+    ws: WebSocketUpgrade,
+) -> Response {
+    ws.on_upgrade(move |socket| handle_socket(socket, state, filter.map(|Extension(f)| f)))
 }
 
 /// Handle an established WebSocket connection.
-async fn handle_socket(socket: WebSocket, state: AppState) {
+async fn handle_socket(socket: WebSocket, state: AppState, filter: Option<StreamOutputFilter>) {
     let (mut sender, mut receiver) = socket.split();
 
     // Subscription state for this connection
@@ -102,7 +115,12 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                         Ok(msg) => {
                             // Check if this message matches subscription filter
                             if subs_clone.lock().should_receive(&msg) {
-                                if let Ok(json) = serde_json::to_string(&msg) {
+                                if let Some(json) = serde_json::to_string(&msg).ok().and_then(|json| {
+                                    match filter {
+                                        Some(filter) => (filter.0)(&json),
+                                        None => Some(json),
+                                    }
+                                }) {
                                     if sender.send(Message::Text(json)).await.is_err() {
                                         break;
                                     }

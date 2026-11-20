@@ -95,6 +95,8 @@ pub enum VerifyError {
     LongLivedCredential,
     #[error("token carries no account_id and cannot be attributed")]
     MissingAccountId,
+    #[error("token does not contain a bounded interactive user ownership context")]
+    InvalidOwnership,
     #[error("token does not carry the required scope {required:?}")]
     MissingScope { required: String },
     /// Minted for a different Cognitum product. `client_id` is the platform's
@@ -126,6 +128,12 @@ struct AccessTokenClaims {
     #[serde(default)]
     jti: String,
     exp: i64,
+    #[serde(default)]
+    iat: i64,
+    #[serde(default)]
+    iss: Option<String>,
+    #[serde(default)]
+    aud: Option<String>,
     /// Long-lived, non-rotating setup credential. Absent on older tokens.
     #[serde(default)]
     setup: bool,
@@ -166,11 +174,11 @@ pub struct VerifierConfig {
 ///
 /// Every rejection path returns a typed error; none of them return a partially
 /// trusted principal.
-pub fn verify_access_token(
+fn verified_interactive_claims(
     token: &str,
     jwks: &JwksCache,
     config: &VerifierConfig,
-) -> Result<Principal, VerifyError> {
+) -> Result<AccessTokenClaims, VerifyError> {
     let header = decode_header(token).map_err(|e| VerifyError::Malformed(e.to_string()))?;
 
     // Compared, never selected. `decode` below independently enforces the same
@@ -217,6 +225,15 @@ pub fn verify_access_token(
         return Err(VerifyError::LongLivedCredential);
     }
 
+    Ok(claims)
+}
+
+pub fn verify_access_token(
+    token: &str,
+    jwks: &JwksCache,
+    config: &VerifierConfig,
+) -> Result<Principal, VerifyError> {
+    let claims = verified_interactive_claims(token, jwks, config)?;
     let account_id = claims.account_id.filter(|a| !a.is_empty());
     let Some(account_id) = account_id else {
         // meta-llm requires this so a token cannot bill an account it doesn't
@@ -244,6 +261,60 @@ pub fn verify_access_token(
     }
 
     Ok(principal)
+}
+
+/// Local-data ownership is a user/tenant/workspace identity, not a billing
+/// principal. This separate type cannot be used as a metering Principal.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AccountIdentity {
+    pub issuer: String,
+    pub subject: String,
+    pub org_id: String,
+    pub workspace_id: String,
+    pub expires_at: i64,
+    _verified: (),
+}
+
+fn canonical_uuid(value: &str) -> Option<String> {
+    (value.len() == 36 && value.bytes().enumerate().all(|(index, byte)| {
+        if [8, 13, 18, 23].contains(&index) { byte == b'-' } else { byte.is_ascii_hexdigit() }
+    })).then(|| value.to_ascii_lowercase())
+}
+
+/// Verify account ownership with the existing fixed ES256/JWKS chain. Unlike
+/// verify_access_token, this does not require the optional Firebase billing ID.
+/// Existing billing/attribution acceptance is unchanged.
+pub fn verify_account_identity(
+    token: &str,
+    jwks: &JwksCache,
+    config: &VerifierConfig,
+) -> Result<AccountIdentity, VerifyError> {
+    if token.len() > 16384 { return Err(VerifyError::InvalidOwnership); }
+    let claims = verified_interactive_claims(token, jwks, config)?;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| VerifyError::InvalidOwnership)?.as_secs() as i64;
+    let issuer = config.issuer.trim_end_matches('/');
+    // Older Identity tokens omit iss/aud. The configured trusted JWKS binds
+    // their issuer, and exact client_id binds their audience. Present values
+    // must match; no token field can choose a key URL or broaden the client.
+    if claims.client_id != "ruview"
+        || claims.iss.as_deref().is_some_and(|value| value != issuer)
+        || claims.aud.as_deref().is_some_and(|value| value != "ruview")
+        || claims.iat > now + 30 || claims.exp <= now || claims.exp <= claims.iat
+        || claims.exp.checked_sub(claims.iat).is_none_or(|ttl| ttl > 3600)
+    { return Err(VerifyError::InvalidOwnership); }
+    let scopes: Vec<&str> = claims.scope.split_whitespace().collect();
+    if !scopes.contains(&config.required_scope.as_str()) {
+        return Err(VerifyError::MissingScope { required: config.required_scope.clone() });
+    }
+    Ok(AccountIdentity {
+        issuer: issuer.into(),
+        subject: canonical_uuid(&claims.sub).ok_or(VerifyError::InvalidOwnership)?,
+        org_id: canonical_uuid(&claims.org_id).ok_or(VerifyError::InvalidOwnership)?,
+        workspace_id: canonical_uuid(&claims.workspace_id).ok_or(VerifyError::InvalidOwnership)?,
+        expires_at: claims.exp,
+        _verified: (),
+    })
 }
 
 /// Extract a bearer token from an `Authorization` header value.

@@ -86,4 +86,4 @@ pub use jwks::{JwksCache, JwksError, JwksFetcher};
 #[cfg(feature = "ureq-transport")]
 pub use jwks::UreqFetcher;
 pub use principal::{scope, Principal};
-pub use verify::{extract_bearer, verify_access_token, VerifierConfig, VerifyError};
+pub use verify::{extract_bearer, verify_access_token, verify_account_identity, AccountIdentity, VerifierConfig, VerifyError};

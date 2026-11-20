@@ -1,0 +1,27 @@
+[workspace]
+dependencies_update = true # update dependencies with `cargo update`
+pr_labels = ["release"] # add the `release` label to the release Pull Request
+release_commits = "^(feat|fix|perf|refactor):" # prepare release only if at least one commit matches a regex
+git_release_type = "auto"
+release_always = false
+
+[changelog]
+protect_breaking_commits = true
+commit_parsers = [
+    { message = "^feat", group = "<!-- 0 -->🚀 Features" },
+    { message = "^fix", group = "<!-- 1 -->🐛 Bug Fixes" },
+    { message = "^doc", skip = true },
+    { message = "^perf", group = "<!-- 4 -->⚡ Performance" },
+    { message = "^refactor", group = "<!-- 2 -->🚜 Refactor" },
+    { message = "^style", skip = true },
+    { message = "^test", skip = true },
+    { message = "^build", skip = true },
+    { message = "^ci", skip = true },
+    { message = "^chore\\(release\\)", skip = true },
+    { message = "^chore\\(deps.*\\)", skip = true },
+    { message = "^chore\\(pr\\)", skip = true },
+    { message = "^chore\\(pull\\)", skip = true },
+    { message = "^chore", group = "<!-- 7 -->⚙️ Miscellaneous Tasks" },
+    { body = ".*security", group = "<!-- 8 -->🛡️ Security" },
+    { message = "^revert", group = "<!-- 9 -->◀️ Revert" },
+]

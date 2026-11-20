@@ -315,6 +315,37 @@ pub fn load(
     installation_id: &str,
     current_unix_ms: u64,
 ) -> Result<(FieldModel, BootstrapBaselineMetadata), BootstrapBaselineError> {
+    let image = read_image(path, installation_id, current_unix_ms)?;
+    let model = FieldModel::from_snapshot(
+        image.payload.field_model.clone(),
+        current_unix_ms.saturating_mul(1_000),
+    )?;
+    Ok((model, metadata(&image)))
+}
+
+/// Read historical expiry diagnostics without restoring an expired model.
+/// Identity, size, schema and exact stored-byte integrity checks still apply.
+/// This returns metadata only and must never confer inference authority.
+pub fn load_expired_metadata(
+    path: &Path,
+    installation_id: &str,
+    current_unix_ms: u64,
+) -> Result<BootstrapBaselineMetadata, BootstrapBaselineError> {
+    // Zero skips only the deadline check; all other payload checks are shared
+    // with the model loader. A newly replaced, unexpired file is not accepted
+    // through this diagnostics-only path.
+    let image = read_image(path, installation_id, 0)?;
+    if current_unix_ms <= image.payload.expires_at_unix_ms {
+        return Err(BootstrapBaselineError::Malformed("reference is not expired".into()));
+    }
+    Ok(metadata(&image))
+}
+
+fn read_image(
+    path: &Path,
+    installation_id: &str,
+    current_unix_ms: u64,
+) -> Result<BootstrapImageV2, BootstrapBaselineError> {
     let file_metadata = fs::symlink_metadata(path)?;
     if file_metadata.file_type().is_symlink() || !file_metadata.is_file() {
         return Err(BootstrapBaselineError::InvalidPath);
@@ -340,15 +371,10 @@ pub fn load(
     }
     let payload: BootstrapPayloadV2 = serde_json::from_str(raw_image.payload.get())?;
     validate_payload(&payload, installation_id, current_unix_ms)?;
-    let image = BootstrapImageV2 {
+    Ok(BootstrapImageV2 {
         payload,
         content_sha256: raw_image.content_sha256,
-    };
-    let model = FieldModel::from_snapshot(
-        image.payload.field_model.clone(),
-        current_unix_ms.saturating_mul(1_000),
-    )?;
-    Ok((model, metadata(&image)))
+    })
 }
 
 pub fn remove(path: &Path) -> Result<bool, BootstrapBaselineError> {
@@ -409,12 +435,12 @@ fn metadata(image: &BootstrapImageV2) -> BootstrapBaselineMetadata {
     }
 }
 
-fn hex_sha256(bytes: &[u8]) -> String {
+pub(crate) fn hex_sha256(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-fn atomic_write_private(path: &Path, bytes: &[u8]) -> Result<(), BootstrapBaselineError> {
+pub(crate) fn atomic_write_private(path: &Path, bytes: &[u8]) -> Result<(), BootstrapBaselineError> {
     let parent = path.parent().ok_or(BootstrapBaselineError::InvalidPath)?;
     fs::create_dir_all(parent)?;
     let file_name = path
@@ -499,6 +525,28 @@ mod tests {
             load(&path, "home-b", now_ms + 1),
             Err(BootstrapBaselineError::InstallationMismatch)
         ));
+    }
+
+    #[test]
+    fn expired_metadata_is_historical_only_and_retains_original_lifetime() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = path_in(dir.path());
+        let now_ms = 1_000_000;
+        let stored = store(&path, "home-a", &[5], TEST_GRID, "model", now_ms,
+            &completed_model(now_ms * 1_000)).unwrap();
+        let original = fs::read(&path).unwrap();
+        let expired_at = stored.expires_at_unix_ms + 1;
+        assert!(matches!(load(&path, "home-a", expired_at), Err(BootstrapBaselineError::Expired)));
+        assert_eq!(load_expired_metadata(&path, "home-a", expired_at).unwrap(), stored);
+        assert_eq!(fs::read(&path).unwrap(), original, "diagnostics must not renew or rewrite the reference");
+        assert!(load_expired_metadata(&path, "home-a", stored.expires_at_unix_ms).is_err());
+        assert!(matches!(load_expired_metadata(&path, "home-b", expired_at),
+            Err(BootstrapBaselineError::InstallationMismatch)));
+        let mut image: serde_json::Value = serde_json::from_slice(&original).unwrap();
+        image["payload"]["expires_at_unix_ms"] = serde_json::json!(expired_at + 99_999);
+        fs::write(&path, serde_json::to_vec(&image).unwrap()).unwrap();
+        assert!(matches!(load_expired_metadata(&path, "home-a", expired_at),
+            Err(BootstrapBaselineError::DigestMismatch)));
     }
 
     #[test]

@@ -1,0 +1,8 @@
+tests/data/** binary=true
+tests/data/**/LICENSE.*.txt binary=false
+tests/data/folder/** binary=true
+tests/data/legacy/** binary=true
+fuzz/corpus/** binary=true
+
+tests/data/folder/first.txt text eol=lf
+tests/data/legacy/*.out text eol=crlf

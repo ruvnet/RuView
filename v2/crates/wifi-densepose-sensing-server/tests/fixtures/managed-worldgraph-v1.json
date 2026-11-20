@@ -1,0 +1,51 @@
+{
+  "protocol_version": 2,
+  "stream_epoch": "wg-1111111111111111111111111111111111111111111111111111111111111111",
+  "seq": 1,
+  "topology": {
+    "schema": "ruview.worldgraph.managed-topology.v1",
+    "coordinate_frame": "managed_room_local",
+    "axis_convention": "x_right_y_down_metres",
+    "provenance": "operator_entered",
+    "registration": null,
+    "installation_id": "installation-1",
+    "room_revision": 7,
+    "binding_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "status": "configured",
+    "room": {
+      "kind": "room",
+      "id": 1,
+      "room_id": "room-1",
+      "name": "Configured room",
+      "width_m": 2.5,
+      "length_m": 3.0,
+      "height_m": 2.4
+    },
+    "nodes": [
+      {
+        "kind": "sensor",
+        "id": 272,
+        "node_id": 15,
+        "x_m": 1.25,
+        "y_m": 2.0,
+        "height_m": null,
+        "role": "receiver",
+        "heading_deg": 150,
+        "slot": "north_west"
+      }
+    ],
+    "edges": [
+      {
+        "from": 272,
+        "to": 1,
+        "rel": "located_in"
+      }
+    ],
+    "access_point": {
+      "slot": "north_east",
+      "x_m": 0,
+      "y_m": 0,
+      "provenance": "operator_entered"
+    }
+  }
+}

@@ -130,6 +130,18 @@ impl Linear {
         }
         out
     }
+    // Same scalar accumulation as forward, writing into an existing buffer.
+    fn forward_into(&self, input: &[f32], out: &mut [f32]) {
+        assert_eq!(input.len(), self.in_features);
+        assert_eq!(out.len(), self.out_features);
+        for (i, row) in self.weights.iter().enumerate() {
+            let mut s = self.bias[i];
+            for (w, x) in row.iter().zip(input) {
+                s += w * x;
+            }
+            out[i] = s;
+        }
+    }
     pub fn weights(&self) -> &[Vec<f32>] {
         &self.weights
     }
@@ -393,38 +405,59 @@ impl CrossAttention {
             return vec![vec![0.0; self.d_model]; n_q];
         }
 
-        let q_proj: Vec<Vec<f32>> = query.iter().map(|q| self.w_q.forward(q)).collect();
-        let k_proj: Vec<Vec<f32>> = key.iter().map(|k| self.w_k.forward(k)).collect();
-        let v_proj: Vec<Vec<f32>> = value.iter().map(|v| self.w_v.forward(v)).collect();
+        let mut q_proj = vec![0.0; n_q * self.d_model];
+        let mut k_proj = vec![0.0; n_kv * self.d_model];
+        let mut v_proj = vec![0.0; value.len() * self.d_model];
+        for (i, row) in query.iter().enumerate() {
+            self.w_q
+                .forward_into(row, &mut q_proj[i * self.d_model..(i + 1) * self.d_model]);
+        }
+        for (i, row) in key.iter().enumerate() {
+            self.w_k
+                .forward_into(row, &mut k_proj[i * self.d_model..(i + 1) * self.d_model]);
+        }
+        for (i, row) in value.iter().enumerate() {
+            self.w_v
+                .forward_into(row, &mut v_proj[i * self.d_model..(i + 1) * self.d_model]);
+        }
 
+        // The former row-indexed V projection rejected missing value rows even
+        // for zero-width models. Flat empty slices alone cannot enforce that.
+        assert!(value.len() >= n_kv, "missing attention value rows");
         let scale = (self.d_k as f32).sqrt();
         let mut output = vec![vec![0.0f32; self.d_model]; n_q];
 
+        // Scratch storage is reused across queries/heads. Keep the original
+        // scalar reduction order and concatenated width, including rejection of
+        // an inconsistent shape restored through unflatten_from.
+        let mut concat = vec![0.0; self.n_heads * self.d_k];
+        let mut scores = vec![0.0; n_kv];
+        let mut wts = vec![0.0; n_kv];
         for qi in 0..n_q {
-            let mut concat = Vec::with_capacity(self.d_model);
             for h in 0..self.n_heads {
                 let (start, end) = (h * self.d_k, (h + 1) * self.d_k);
-                let q_h = &q_proj[qi][start..end];
-                let mut scores = vec![0.0f32; n_kv];
+                let q_h = &q_proj[qi * self.d_model + start..qi * self.d_model + end];
                 for ki in 0..n_kv {
                     let dot: f32 = q_h
                         .iter()
-                        .zip(&k_proj[ki][start..end])
+                        .zip(&k_proj[ki * self.d_model + start..ki * self.d_model + end])
                         .map(|(a, b)| a * b)
                         .sum();
                     scores[ki] = dot / scale;
                 }
-                let mut wts = vec![0.0f32; n_kv];
                 softmax(&scores, &mut wts);
-                let mut head_out = vec![0.0f32; self.d_k];
+                let head_out = &mut concat[start..end];
+                head_out.fill(0.0);
                 for ki in 0..n_kv {
-                    for (o, &v) in head_out.iter_mut().zip(&v_proj[ki][start..end]) {
+                    for (o, &v) in head_out
+                        .iter_mut()
+                        .zip(&v_proj[ki * self.d_model + start..ki * self.d_model + end])
+                    {
                         *o += wts[ki] * v;
                     }
                 }
-                concat.extend_from_slice(&head_out);
             }
-            output[qi] = self.w_o.forward(&concat);
+            self.w_o.forward_into(&concat, &mut output[qi]);
         }
         output
     }
@@ -506,21 +539,26 @@ impl GraphMessagePassing {
             "expected 17 nodes, got {}",
             node_features.len()
         );
-        let mut agg = vec![vec![0.0f32; self.in_features]; 17];
+        // Rows are independent: reuse the aggregation buffer, clearing it
+        // before the same ascending-neighbor reduction used by the matrix path.
+        let mut agg = vec![0.0f32; self.in_features];
+        let mut output = Vec::with_capacity(17);
         #[allow(clippy::needless_range_loop)]
         for i in 0..17 {
+            agg.fill(0.0);
             for j in 0..17 {
                 let a = self.norm_adj[i][j];
                 if a.abs() > 1e-10 {
-                    for (ag, &f) in agg[i].iter_mut().zip(&node_features[j]) {
+                    for (ag, &f) in agg.iter_mut().zip(&node_features[j]) {
                         *ag += a * f;
                     }
                 }
             }
+            let mut row = self.weight.forward(&agg);
+            row.iter_mut().for_each(|value| *value = relu(*value));
+            output.push(row);
         }
-        agg.iter()
-            .map(|a| self.weight.forward(a).into_iter().map(relu).collect())
-            .collect()
+        output
     }
     pub fn in_features(&self) -> usize {
         self.in_features
@@ -1152,3 +1190,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "graph_transformer_equivalence_tests.rs"]
+mod equivalence_tests;

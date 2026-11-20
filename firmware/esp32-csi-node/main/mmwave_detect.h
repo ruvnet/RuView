@@ -25,6 +25,14 @@ static inline bool mmwave_mr60_identifying_type(uint16_t type)
     return type == 0x0A15 || type == 0x0A16 || type == 0x0F09;
 }
 
+/** MR60BHA2 vital-sign firmware exposes one authoritative presence bit, not a
+ * dependable people-count frame. Map that bit to the single-target contract
+ * used by RuView's fused-vitals packet. */
+static inline uint8_t mmwave_mr60_target_count(bool person_present)
+{
+    return person_present ? 1u : 0u;
+}
+
 /**
  * True iff buf[i..] begins a *validated* LD2410 report frame within [0,len):
  *   F4 F3 F2 F1 | len(LE,2) | data[len] | F8 F7 F6 F5

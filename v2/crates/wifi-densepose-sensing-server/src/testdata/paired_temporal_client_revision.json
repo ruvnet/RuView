@@ -1,0 +1,127 @@
+{
+  "schema": "ruview.test.actual-client-paired-revision-seam.v1",
+  "evidence": "SYNTHETIC_ACTUAL_PRODUCTION_CLIENT_FUNCTIONS_NO_RUNTIME_AUTHORITY",
+  "source_commit": "c3b89011a42154f8baef6c2ce08b113a3926584c",
+  "provenance": {
+    "publication": "actual companionService.publishRoom captured by API mock before network/ack/store import",
+    "binding": "actual sanitizeSharedRoom/sharedRoomDigest/createRoomCalibrationBinding; Node SHA256 at Expo boundary",
+    "configure": "actual roomLearnerService.temporalConfigure captured by API mock before network; expected guard is Rust structural idle fixture, NOT a live server permit"
+  },
+  "installation_id": "synthetic-installation",
+  "published_revision": 1,
+  "binding_digest": "c020caf87c161f0bf595e1f603aef139045c9362f0d933341537d73225bca30d",
+  "computed_structural_revision": 211247076768791,
+  "canonical_room": {
+    "schema": "ruview.companion.room.v1",
+    "id": "synthetic-revision-room",
+    "name": "SYNTHETIC revision probe",
+    "widthM": 2.5,
+    "lengthM": 2.5,
+    "heightM": 2.8,
+    "nodes": [
+      {
+        "nodeId": 15,
+        "slot": "north_west",
+        "xM": 0.4,
+        "yM": 0.4,
+        "role": "base_station",
+        "headingDeg": 45,
+        "orientationConfirmed": true,
+        "confirmedAtUnixMs": 1
+      },
+      {
+        "nodeId": 16,
+        "slot": "south_east",
+        "xM": 2,
+        "yM": 2,
+        "role": "receiver",
+        "headingDeg": 225,
+        "orientationConfirmed": true,
+        "confirmedAtUnixMs": 1
+      },
+      {
+        "nodeId": 17,
+        "slot": "south_west",
+        "xM": 0.4,
+        "yM": 2,
+        "role": "receiver",
+        "headingDeg": 315,
+        "orientationConfirmed": true,
+        "confirmedAtUnixMs": 1
+      }
+    ],
+    "accessPoint": null
+  },
+  "publication_request": {
+    "origin": "http://127.0.0.1:3000",
+    "path": "/api/v1/companion/room",
+    "body": {
+      "expected_revision": 0,
+      "room": {
+        "schema": "ruview.companion.room.v1",
+        "id": "synthetic-revision-room",
+        "name": "SYNTHETIC revision probe",
+        "widthM": 2.5,
+        "lengthM": 2.5,
+        "heightM": 2.8,
+        "nodes": [
+          {
+            "nodeId": 15,
+            "slot": "north_west",
+            "xM": 0.4,
+            "yM": 0.4,
+            "role": "base_station",
+            "headingDeg": 45,
+            "orientationConfirmed": true,
+            "confirmedAtUnixMs": 1
+          },
+          {
+            "nodeId": 16,
+            "slot": "south_east",
+            "xM": 2,
+            "yM": 2,
+            "role": "receiver",
+            "headingDeg": 225,
+            "orientationConfirmed": true,
+            "confirmedAtUnixMs": 1
+          },
+          {
+            "nodeId": 17,
+            "slot": "south_west",
+            "xM": 0.4,
+            "yM": 2,
+            "role": "receiver",
+            "headingDeg": 315,
+            "orientationConfirmed": true,
+            "confirmedAtUnixMs": 1
+          }
+        ],
+        "accessPoint": null
+      }
+    }
+  },
+  "configure_request": {
+    "origin": "http://127.0.0.1:3000",
+    "path": "/api/v1/room-learner/configure",
+    "body": {
+      "schema": "ruview.room-learner.configure.v2",
+      "model_kind": "ruview.room-learner.managed-temporal-input.v3",
+      "expected": {
+        "runtime_epoch": "synthetic-wire-epoch",
+        "generation": 0,
+        "workflow_revision": 0,
+        "context_digest": null,
+        "phase": null
+      },
+      "binding_digest": "c020caf87c161f0bf595e1f603aef139045c9362f0d933341537d73225bca30d",
+      "source_node_ids": [
+        15,
+        16,
+        17
+      ],
+      "revision": 211247076768791,
+      "new_training": true,
+      "recovery_consent": true
+    }
+  }
+}

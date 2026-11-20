@@ -21,6 +21,8 @@ pub enum HardwareNormError {
     UnknownHardware(usize),
     #[error("Invalid canonical subcarrier count: {0}")]
     InvalidCanonical(usize),
+    #[error("Magnitude must be finite and non-negative at index {index}")]
+    InvalidMagnitude { index: usize },
 }
 
 /// Known WiFi chipset families with their subcarrier counts and MIMO configs.
@@ -183,6 +185,56 @@ impl HardwareNormalizer {
     pub fn resample_to_canonical(&self, raw: &[f64]) -> Vec<f64> {
         resample_cubic(raw, self.canonical_subcarriers)
     }
+
+    /// Length-only magnitude projection using convex linear interpolation.
+    ///
+    /// Spectral nulls and guard bands can make the cubic control path overshoot
+    /// below zero. This opt-in path retains the canonical grid and amplitude
+    /// units, including constant DC and gain, without phase or z-score changes.
+    /// Invalid inputs are rejected before identity/singleton handling; they are
+    /// never clamped, replaced with zeros, or reinterpreted as measurements.
+    pub fn resample_magnitude_to_canonical(
+        &self,
+        raw: &[f64],
+    ) -> Result<Vec<f64>, HardwareNormError> {
+        if raw.is_empty() {
+            return Err(HardwareNormError::EmptyFrame { amp: 0, phase: 0 });
+        }
+        if let Some(index) = raw.iter().position(|v| !v.is_finite() || *v < 0.0) {
+            return Err(HardwareNormError::InvalidMagnitude { index });
+        }
+        let dst_len = self.canonical_subcarriers;
+        if raw.len() == dst_len {
+            return Ok(raw.to_vec());
+        }
+        if raw.len() == 1 || dst_len == 1 {
+            return Ok(vec![raw[0]; dst_len]);
+        }
+        let last = raw.len() - 1;
+        let ratio = last as f64 / (dst_len - 1) as f64;
+        Ok((0..dst_len)
+            .map(|i| {
+                if i == dst_len - 1 {
+                    return raw[last];
+                }
+                let position = i as f64 * ratio;
+                let left = (position.floor() as usize).min(last);
+                let right = (left + 1).min(last);
+                let fraction = position - left as f64;
+                if raw[left] == raw[right] {
+                    raw[left]
+                } else {
+                    // Same-sign finite endpoints keep the difference finite;
+                    // FMA avoids the overflowing sum of a weighted blend.
+                    let interpolated = (raw[right] - raw[left]).mul_add(fraction, raw[left]);
+                    // Bound rounding to the two valid endpoints, never the input.
+                    interpolated
+                        .max(raw[left].min(raw[right]))
+                        .min(raw[left].max(raw[right]))
+                }
+            })
+            .collect())
+    }
 }
 
 impl Default for HardwareNormalizer {
@@ -293,6 +345,117 @@ fn sanitize_phase(phase: &[f64]) -> Vec<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn magnitude_projection_rejects_invalid_inputs_even_on_identity_grid() {
+        let norm = HardwareNormalizer::new();
+        assert!(matches!(
+            norm.resample_magnitude_to_canonical(&[]),
+            Err(HardwareNormError::EmptyFrame { .. })
+        ));
+        for invalid in [-0.01, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for len in [1, 56, 62, 254] {
+                let mut raw = vec![2.0; len];
+                raw[len - 1] = invalid;
+                assert!(matches!(
+                    norm.resample_magnitude_to_canonical(&raw),
+                    Err(HardwareNormError::InvalidMagnitude { index }) if index == len - 1
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn magnitude_projection_preserves_native_hull_at_sharp_guard_bands() {
+        let norm = HardwareNormalizer::new();
+        for len in [62, 254] {
+            let raw: Vec<f64> = (0..len)
+                .map(|i| {
+                    if (len / 3..2 * len / 3).contains(&i) {
+                        40.0
+                    } else {
+                        0.0
+                    }
+                })
+                .collect();
+            let cubic = norm.resample_to_canonical(&raw);
+            assert!(
+                cubic.iter().any(|v| *v < -1.0),
+                "fixture must expose cubic undershoot"
+            );
+            let projected = norm.resample_magnitude_to_canonical(&raw).unwrap();
+            assert_eq!(projected.len(), 56);
+            assert!(projected
+                .iter()
+                .all(|v| v.is_finite() && (0.0..=40.0).contains(v)));
+            assert_eq!(projected[0], raw[0]);
+            assert_eq!(projected[55], raw[len - 1]);
+        }
+        // A zero-valued notch also exposes cubic ringing on the 62-bin grid.
+        let raw: Vec<f64> = (0..62)
+            .map(|i| if (20..41).contains(&i) { 0.0 } else { 40.0 })
+            .collect();
+        assert!(norm.resample_to_canonical(&raw).iter().any(|v| *v < 0.0));
+        assert!(norm
+            .resample_magnitude_to_canonical(&raw)
+            .unwrap()
+            .iter()
+            .all(|v| (0.0..=40.0).contains(v)));
+    }
+
+    #[test]
+    fn magnitude_projection_preserves_dc_gain_and_configured_width() {
+        for len in [62, 254] {
+            let norm = HardwareNormalizer::new();
+            assert_eq!(
+                norm.resample_magnitude_to_canonical(&vec![7.25; len])
+                    .unwrap(),
+                vec![7.25; 56]
+            );
+            let raw: Vec<f64> = (0..len).map(|i| (i % 13) as f64 * 0.25).collect();
+            let affine: Vec<f64> = raw.iter().map(|v| 3.5 * v + 2.75).collect();
+            let base = norm.resample_magnitude_to_canonical(&raw).unwrap();
+            let scaled = norm.resample_magnitude_to_canonical(&affine).unwrap();
+            for (a, b) in base.iter().zip(scaled) {
+                assert!((b - (3.5 * a + 2.75)).abs() < 1e-12);
+            }
+        }
+        let custom = HardwareNormalizer::with_canonical_subcarriers(3).unwrap();
+        assert_eq!(
+            custom
+                .resample_magnitude_to_canonical(&[2.0, 10.0])
+                .unwrap(),
+            vec![2.0, 6.0, 10.0]
+        );
+        assert_eq!(
+            custom.resample_magnitude_to_canonical(&[3.0]).unwrap(),
+            vec![3.0; 3]
+        );
+        assert_eq!(
+            custom
+                .resample_magnitude_to_canonical(&[2.0, 0.0, 9.0])
+                .unwrap(),
+            vec![2.0, 0.0, 9.0]
+        );
+        let quarters = HardwareNormalizer::with_canonical_subcarriers(5).unwrap();
+        assert_eq!(
+            quarters.resample_magnitude_to_canonical(&[0.0, 8.0]).unwrap(),
+            vec![0.0, 2.0, 4.0, 6.0, 8.0]
+        );
+        let singleton = HardwareNormalizer::with_canonical_subcarriers(1).unwrap();
+        assert_eq!(
+            singleton
+                .resample_magnitude_to_canonical(&[2.0, 10.0])
+                .unwrap(),
+            vec![2.0]
+        );
+        let extreme = HardwareNormalizer::new()
+            .resample_magnitude_to_canonical(&[0.0, f64::MAX])
+            .unwrap();
+        assert!(extreme
+            .iter()
+            .all(|v| v.is_finite() && *v >= 0.0 && *v <= f64::MAX));
+    }
 
     #[test]
     fn detect_hardware_and_properties() {

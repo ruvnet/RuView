@@ -585,3 +585,37 @@ Add rows to `docs/WITNESS-LOG-028.md`:
 **Integration glue -- not yet on the live path:** feeding live fusion outputs and person tracks into nodes; the full `.rvf` bundle container (today it persists as JSON); and the live ADR-141 privacy-mode reducer.
 
 **Trust contribution:** the auditable map -- evidence and contradiction are first-class edges, and the privacy posture is *visible in the persisted graph* (an auditor can read what was suppressed).
+
+
+## 2026-11-04 amendment: managed configured topology transport
+
+Status: implemented source slice; native delivery and physical geometry acceptance remain pending.
+
+The app-managed sensing server exposes authenticated `GET /api/v1/worldgraph/snapshot`
+as protocol 2 when its authoritative companion room store is available. Protocol 1
+and genuine registered ENU WorldGraph snapshots remain a separate unchanged contract.
+Protocol 2 is `ruview.worldgraph.managed-topology.v1`, with `managed_room_local`
+coordinates and `x_right_y_down_metres` axes (room map origin at top left). Its only
+geometry provenance is `operator_entered`; geographic registration and sensor
+heights are explicitly null. Room dimensions may include the operator-entered
+room height, but this never supplies sensor height or AR alignment.
+
+The projection takes one immutable published room envelope, preserving installation,
+revision and binding digest. Canonical room/sensor and located-in vocabulary is
+reused without injecting the engine's default room, person/semantic/vital records,
+raw CSI or phone geometry. The configured AP remains part of the original room
+binding but is not invented as a CSI receiver or RF link. This slice is not an ENU
+registration, a spatial teacher, localization, occupancy model or model-selection
+receipt. It requires no additional persistent graph store.
+
+An ephemeral random `wg-` epoch and safe-integer cursor belong to the loaded account/
+installation store. Equal canonical topology uses the same sequence; readiness,
+binding or privacy changes advance it. Reads never publish geometry, renew a
+baseline, train or select a model. Global server privacy mode conservatively returns
+`privacy_denied` with no geometry. No published room yields `not_configured`;
+missing managed support remains unsupported, not zero people. The same protected
+owner and paired read paths apply, with `Cache-Control: private, no-store`.
+
+The managed client shares capability state between Zones, Settings and MAT, and
+never converts this planar topology to a fabricated geographic or phone AR frame.
+Cloud Cognitum Spaces/Zone projection remains separate under ADR-325.
