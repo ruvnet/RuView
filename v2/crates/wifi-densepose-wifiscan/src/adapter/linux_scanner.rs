@@ -133,7 +133,10 @@ impl BssStanza {
             .or_else(|| self.freq_mhz.map(freq_to_channel))
             .unwrap_or(0);
 
-        let band = BandType::from_channel(channel);
+        let band = self
+            .freq_mhz
+            .and_then(BandType::from_frequency_mhz)
+            .unwrap_or_else(|| BandType::from_channel(channel));
         let radio_type = infer_radio_type_from_freq(self.freq_mhz.unwrap_or(0));
         let signal_pct = ((rssi_dbm + 100.0) * 2.0).clamp(0.0, 100.0);
 
@@ -275,6 +278,21 @@ BSS de:ad:be:ef:ca:fe(on wlan0) -- associated
 \tsignal: -45.00 dBm
 \tSSID: OfficeNet
 ";
+
+    #[test]
+    fn six_ghz_network_is_classified_correctly() {
+        let output = "\
+BSS aa:bb:cc:dd:ee:ff(on wlan0)
+\tfreq: 6295
+\tsignal: -52.00 dBm
+\tSSID: Test6GHz
+";
+
+        let observations = parse_iw_scan_output(output).unwrap();
+        assert_eq!(observations.len(), 1);
+        assert_eq!(observations[0].channel, 69);
+        assert_eq!(observations[0].band, BandType::Band6GHz);
+    }
 
     #[test]
     fn parse_three_bss_stanzas() {

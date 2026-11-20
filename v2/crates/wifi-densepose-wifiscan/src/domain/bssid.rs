@@ -96,6 +96,19 @@ impl BandType {
             _ => Self::Band6GHz,
         }
     }
+
+    /// Classify a Wi-Fi frequency in MHz into its frequency band.
+    ///
+    /// Uses broad band ranges; does not validate individual channel centers.
+    /// Returns None for frequencies outside the recognized ranges.
+    pub fn from_frequency_mhz(freq: u32) -> Option<Self> {
+        match freq {
+            2400..=2500 => Some(Self::Band2_4GHz),
+            5000..=5900 => Some(Self::Band5GHz),
+            5925..=7125 => Some(Self::Band6GHz),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for BandType {
@@ -249,6 +262,26 @@ mod tests {
         assert_eq!(BandType::from_channel(11), BandType::Band2_4GHz);
         assert_eq!(BandType::from_channel(36), BandType::Band5GHz);
         assert_eq!(BandType::from_channel(149), BandType::Band5GHz);
+    }
+
+    #[test]
+    fn band_type_from_frequency_mhz() {
+        assert_eq!(
+            BandType::from_frequency_mhz(2412),
+            Some(BandType::Band2_4GHz)
+        );
+        assert_eq!(BandType::from_frequency_mhz(5180), Some(BandType::Band5GHz));
+        assert_eq!(BandType::from_frequency_mhz(5955), Some(BandType::Band6GHz));
+        assert_eq!(BandType::from_frequency_mhz(6295), Some(BandType::Band6GHz));
+        assert_eq!(BandType::from_frequency_mhz(9999), None);
+        assert_eq!(
+            BandType::from_frequency_mhz(2400),
+            Some(BandType::Band2_4GHz)
+        );
+        assert_eq!(BandType::from_frequency_mhz(2501), None);
+        assert_eq!(BandType::from_frequency_mhz(5901), None);
+        assert_eq!(BandType::from_frequency_mhz(5925), Some(BandType::Band6GHz));
+        assert_eq!(BandType::from_frequency_mhz(7126), None);
     }
 
     #[test]
