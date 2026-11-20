@@ -121,7 +121,10 @@ impl std::fmt::Debug for StoredCredentials {
         f.debug_struct("StoredCredentials")
             .field("schema_version", &self.schema_version)
             .field("access_token", &"<redacted>")
-            .field("refresh_token", &self.refresh_token.as_ref().map(|_| "<redacted>"))
+            .field(
+                "refresh_token",
+                &self.refresh_token.as_ref().map(|_| "<redacted>"),
+            )
             .field("expires_at", &self.expires_at)
             .field("scope", &self.scope)
             .field("account_email", &self.account_email)
@@ -271,16 +274,25 @@ pub fn save(path: &Path, creds: &StoredCredentials) -> Result<(), StoreError> {
     })?;
     // The rename is only durable once the directory entry is: without this a
     // crash can bring back the previous file, and with it a spent refresh token.
+    // Best effort: the new file is already in place, and some filesystems (FUSE,
+    // network mounts) reject a directory fsync with EINVAL or ENOTSUP. Failing
+    // here would make the caller treat a saved pair as unsaved and sign out.
     #[cfg(unix)]
     if let Some(dir) = path.parent() {
-        std::fs::File::open(dir)
-            .and_then(|d| d.sync_all())
-            .map_err(|source| StoreError::Unwritable {
-                path: dir.to_path_buf(),
-                source,
-            })?;
+        if let Err(error) = sync_dir(dir) {
+            tracing::warn!(dir = %dir.display(), %error, "could not flush the credentials directory");
+        }
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn sync_dir(dir: &Path) -> std::io::Result<()> {
+    #[cfg(test)]
+    if std::env::var_os("RUVIEW_TEST_FAIL_DIR_FSYNC").is_some() {
+        return Err(std::io::Error::from_raw_os_error(22)); // EINVAL
+    }
+    std::fs::File::open(dir)?.sync_all()
 }
 
 /// Write `bytes` to a file that is never readable by anyone else, at any point.
@@ -429,7 +441,9 @@ impl Session {
             return Err(StoreError::NoRefreshToken);
         };
 
-        // Token-less marker before sending. If this fails nothing was sent.
+        // Token-less marker before sending. Nothing is sent if this fails:
+        // `save` only fails before its rename lands (the directory fsync after
+        // it is best effort), so the file still holds the previous record.
         let mut marker = guard.clone();
         marker.refresh_token = None;
         save(&self.path, &marker)?;
@@ -590,8 +604,15 @@ mod tests {
         let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o666));
         write_private(&tmp, b"replacement").unwrap();
         let mode = std::fs::metadata(&tmp).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600, "a replaced temp file must also be 0600, got {mode:o}");
-        assert_eq!(std::fs::read(&tmp).unwrap(), b"replacement", "must replace, not append");
+        assert_eq!(
+            mode, 0o600,
+            "a replaced temp file must also be 0600, got {mode:o}"
+        );
+        assert_eq!(
+            std::fs::read(&tmp).unwrap(),
+            b"replacement",
+            "must replace, not append"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -620,7 +641,10 @@ mod tests {
 
         save(&path, &creds(Some(1))).unwrap();
         assert!(clear(&path).unwrap(), "first clear removes the file");
-        assert!(!clear(&path).unwrap(), "second clear is a no-op, not an error");
+        assert!(
+            !clear(&path).unwrap(),
+            "second clear is a no-op, not an error"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -631,7 +655,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
 
         save(&path, &creds(Some(1))).unwrap();
-        assert!(!path.with_extension("tmp").exists(), "temp file must be renamed away");
+        assert!(
+            !path.with_extension("tmp").exists(),
+            "temp file must be renamed away"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

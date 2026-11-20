@@ -127,6 +127,7 @@ fn spawn(path: &Path, url: &str, extra: &[(&str, &str)]) -> std::process::Child 
     .env(CHILD, "1")
     .env_remove("RUVIEW_TEST_REFRESH_TIMEOUT_MS")
     .env_remove("RUVIEW_TEST_LOCK_WAIT_MS")
+    .env_remove("RUVIEW_TEST_FAIL_DIR_FSYNC")
     .env(CREDENTIALS_PATH_ENV, path)
     .env(client::AUTH_URL_ENV, url)
     .stdout(std::process::Stdio::piped());
@@ -239,6 +240,68 @@ fn a_connection_never_made_keeps_the_token() {
         load(&path).unwrap().refresh_token.as_deref(),
         Some("fixture-refresh-0"),
         "unsent, so still good"
+    );
+}
+
+/// L8: a filesystem that rejects a directory fsync (FUSE, network mounts) must
+/// not turn a saved pair into a sign-out.
+#[test]
+fn a_failed_directory_fsync_still_saves_and_refreshes() {
+    let (url, refreshes) = identity(Answer::Rotate { delay_ms: 0 });
+    let path = scratch("dirfsync");
+    save(&path, &expired(Some("fixture-refresh-0"))).unwrap();
+    let r = result(spawn(&path, &url, &[("RUVIEW_TEST_FAIL_DIR_FSYNC", "1")]));
+    assert_eq!(r, "ok fixture-access-1");
+    assert_eq!(refreshes.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        load(&path).unwrap().refresh_token.as_deref(),
+        Some("fixture-refresh-1"),
+        "the new pair is kept"
+    );
+}
+
+#[test]
+fn save_succeeds_when_the_directory_fsync_fails() {
+    let path = scratch("dirfsync-save");
+    let r = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "login::store::refresh_tests::save_child_process",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(SAVE_CHILD, "1")
+        .env("RUVIEW_TEST_FAIL_DIR_FSYNC", "1")
+        .env(CREDENTIALS_PATH_ENV, &path)
+        .output()
+        .unwrap();
+    let out = String::from_utf8_lossy(&r.stdout);
+    assert!(out.contains("SAVE-RESULT ok"), "{out}");
+    assert_eq!(
+        load(&path).unwrap().refresh_token.as_deref(),
+        Some("fixture-refresh-9")
+    );
+}
+
+const SAVE_CHILD: &str = "RUVIEW_TEST_SAVE_CHILD";
+
+/// Runs only as a child of `save_succeeds_when_the_directory_fsync_fails`.
+#[test]
+fn save_child_process() {
+    if std::env::var(SAVE_CHILD).as_deref() != Ok("1") {
+        return;
+    }
+    let r = save(
+        &default_credentials_path(),
+        &expired(Some("fixture-refresh-9")),
+    );
+    println!(
+        "SAVE-RESULT {}",
+        if r.is_ok() {
+            "ok".to_string()
+        } else {
+            format!("{r:?}")
+        }
     );
 }
 
