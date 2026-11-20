@@ -2,4 +2,5 @@
 test_adaptive_controller
 test_rv_feature_state
 test_rv_mesh
+test_edge_calibration_floor
 *.o
