@@ -29,7 +29,7 @@ FEATURE_STATE_SRCS := $(MAIN_DIR)/rv_feature_state.c
 # before including the .c. The decide() body itself has no ESP-IDF deps.
 # Simpler: just recompile decide() here via a small shim.
 
-TESTS := test_adaptive_controller test_rv_feature_state test_rv_mesh test_ping_rate test_link_watchdog
+TESTS := test_adaptive_controller test_rv_feature_state test_rv_mesh test_ping_rate test_link_watchdog test_uplink_wd
 
 all: $(TESTS)
 
@@ -55,6 +55,11 @@ test_ping_rate: test_ping_rate.c $(MAIN_DIR)/ping_rate.c $(MAIN_DIR)/ping_rate.h
 test_link_watchdog: test_link_watchdog.c $(MAIN_DIR)/link_watchdog_core.c $(MAIN_DIR)/link_watchdog_core.h
 	$(CC) $(CFLAGS) test_link_watchdog.c $(MAIN_DIR)/link_watchdog_core.c -o $@ $(LDLIBS)
 
+# Uplink watchdog decision (main.c uplink_watchdog_tick). 100% pure (see
+# uplink_wd_core.h); replays the measured TX-stall and self-healing shapes.
+test_uplink_wd: test_uplink_wd.c $(MAIN_DIR)/uplink_wd_core.c $(MAIN_DIR)/uplink_wd_core.h
+	$(CC) $(CFLAGS) test_uplink_wd.c $(MAIN_DIR)/uplink_wd_core.c -o $@ $(LDLIBS)
+
 check: all
 	./test_adaptive_controller
 	@echo ""
@@ -65,6 +70,8 @@ check: all
 	./test_ping_rate
 	@echo ""
 	./test_link_watchdog
+	@echo ""
+	./test_uplink_wd
 
 clean:
 	rm -f $(TESTS) *.o

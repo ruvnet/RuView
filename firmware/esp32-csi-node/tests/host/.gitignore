@@ -4,4 +4,5 @@ test_rv_feature_state
 test_rv_mesh
 test_ping_rate
 test_link_watchdog
+test_uplink_wd
 *.o

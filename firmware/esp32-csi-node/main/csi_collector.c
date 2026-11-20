@@ -823,6 +823,11 @@ uint32_t csi_collector_get_send_ok_count(void)
     return s_send_ok;
 }
 
+uint32_t csi_collector_get_send_fail_total(void)
+{
+    return s_send_fail;
+}
+
 /* The gate here is fixed at compile time (mesh-aligned bucketing, falling
  * back to elapsed time when unsynced), so there is no mode or period to
  * report. Return the explicit sentinel rather than a number that reads as

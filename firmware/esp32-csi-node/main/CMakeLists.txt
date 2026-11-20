@@ -31,6 +31,9 @@ set(SRCS
     # unset, which is the default.
     "link_watchdog_core.c"
     "link_watchdog.c"
+    # Uplink watchdog decision (main.c uplink_watchdog_tick), pure, host-tested
+    # (tests/host/test_uplink_wd.c).
+    "uplink_wd_core.c"
 )
 
 # ESP-IDF v6+: headers must resolve via explicit REQUIRES (no implicit deps).
