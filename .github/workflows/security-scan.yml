@@ -36,11 +36,10 @@ jobs:
       # reviewed ignores in v2/.cargo/audit.toml. Run inside the v2 workspace
       # so that policy file is actually loaded.
       working-directory: v2
-      env:
-        GH_TOKEN: ${{ github.token }}
       run: |
-        python3 ../scripts/ci/test_audit_rust_advisories.py
-        python3 ../scripts/ci/audit_rust_advisories.py --lockfile Cargo.lock
+        set -o pipefail
+        # Direct invocation avoids project-defined Cargo aliases.
+        cargo-audit audit --file Cargo.lock --json | tee cargo-audit.json
 
     - name: Exercise the active ZIP adapter security guards
       run: cargo test --manifest-path v2/vendor/security/zip-candle-compat/Cargo.toml --locked
@@ -50,10 +49,7 @@ jobs:
       if: always()
       with:
         name: cargo-audit-report
-        path: |
-          v2/cargo-audit.json
-          v2/cargo-audit-classification.json
-          v2/cargo-audit-upstream.json
+        path: v2/cargo-audit.json
         if-no-files-found: error
 
   # Static Application Security Testing (SAST)
