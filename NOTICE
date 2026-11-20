@@ -1,0 +1,22 @@
+RuView third-party notices
+
+This repository is licensed MIT OR Apache-2.0 (see LICENSE). The items below
+are vendored third-party material that keeps its own licence and is not
+covered by that dual licence.
+
+firmware/openwrt-wn586x3/patches/1001-mtk-mt76-mt7915-csi-implement-csi-support-REBASED.patch
+  What:     MediaTek's mt76 mt7915 CSI patch, rebased onto openwrt/mt76
+            eb567bc7 (the revision pinned by OpenWrt 24.10.8).
+  Author:   Bo Jiao <Bo.Jiao@mediatek.com> (original author line kept in the
+            patch header); copyright MediaTek Inc.
+  Origin:   mediatek/mtk-openwrt-feeds @ a15454c888f4f4144c50e33b5feef4f247c5f78b
+  Licence:  BSD-3-Clause-Clear (SPDX identifier,
+            https://spdx.org/licenses/BSD-3-Clause-Clear.html). The patch
+            carries the SPDX tags and MediaTek copyright lines in its added
+            files; the licence text is not reproduced here.
+  Scope:    A vendored patch applied to an OpenWrt/mt76 build. It is not part
+            of the Rust crates, is not compiled by the Cargo workspace, and is
+            not linked into any RuView binary.
+
+See firmware/openwrt-wn586x3/README.md for the other patches in that
+directory and the licence each one keeps.

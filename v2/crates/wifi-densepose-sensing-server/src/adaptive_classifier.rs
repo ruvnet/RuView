@@ -27,6 +27,65 @@ const N_FEATURES: usize = 15;
 /// Default class names for backward compatibility with old saved models.
 const DEFAULT_CLASSES: &[&str] = &["absent", "present_still", "present_moving", "active"];
 
+/// Model version written by the trainer. Version 2 models consume the measured
+/// temporal `dominant_freq_hz` that recordings carry (ADR-356); stamping 1 here
+/// would make the server swap in the legacy subcarrier proxy at runtime.
+pub const TRAINED_MODEL_VERSION: u32 = 2;
+
+/// Subcarrier amplitudes kept per node in the broadcast `sensing_update`, and
+/// therefore in every recording. Runtime classification truncates to the same
+/// length so the subcarrier statistics match what training saw.
+pub const RECORDED_AMPLITUDE_LEN: usize = 56;
+
+/// Extract one feature vector per node from a recorded `sensing_update` line.
+///
+/// Runtime classification is per node, from that node's own features and
+/// amplitudes. Each broadcast carries a snapshot of every node, so a node only
+/// contributes when its amplitude vector changed since the previous line
+/// (`last_amps`), i.e. when it delivered a new frame. Stale nodes are skipped.
+/// Lines without `node_features` (older single-node recordings) fall back to
+/// the frame-level features and the first node.
+pub fn node_samples_from_frame(
+    frame: &serde_json::Value,
+    last_amps: &mut HashMap<u64, Vec<f64>>,
+) -> Vec<[f64; N_FEATURES]> {
+    let Some(per_node) = frame.get("node_features").and_then(|n| n.as_array()) else {
+        return vec![features_from_frame(frame)];
+    };
+    let nodes = frame
+        .get("nodes")
+        .and_then(|n| n.as_array())
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    let mut samples = Vec::new();
+    for entry in per_node {
+        if entry
+            .get("stale")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        let Some(node_id) = entry.get("node_id").and_then(|v| v.as_u64()) else {
+            continue;
+        };
+        let amps: Vec<f64> = nodes
+            .iter()
+            .find(|n| n.get("node_id").and_then(|v| v.as_u64()) == Some(node_id))
+            .and_then(|n| n.get("amplitude"))
+            .and_then(|a| a.as_array())
+            .map(|arr| arr.iter().filter_map(|v| v.as_f64()).collect())
+            .unwrap_or_default();
+        if amps.is_empty() || last_amps.get(&node_id) == Some(&amps) {
+            continue;
+        }
+        let feat = entry.get("features").cloned().unwrap_or_default();
+        samples.push(features_from_runtime(&feat, &amps));
+        last_amps.insert(node_id, amps);
+    }
+    samples
+}
+
 /// Extract extended feature vector from a JSONL frame (features + raw amplitudes).
 pub fn features_from_frame(frame: &serde_json::Value) -> [f64; N_FEATURES] {
     let feat = frame
@@ -118,6 +177,7 @@ pub fn features_from_runtime(feat: &serde_json::Value, amps: &[f64]) -> [f64; N_
         .get("mean_rssi")
         .and_then(|v| v.as_f64())
         .unwrap_or(0.0);
+    let amps = &amps[..amps.len().min(RECORDED_AMPLITUDE_LEN)];
     let (amp_mean, amp_std, amp_skew, amp_kurt, amp_iqr, amp_entropy, amp_max, amp_range) =
         subcarrier_stats(amps);
     [
@@ -137,6 +197,39 @@ pub fn features_from_runtime(feat: &serde_json::Value, amps: &[f64]) -> [f64; N_
         amp_max,
         amp_range,
     ]
+}
+
+/// Preserve the fifth feature's historical meaning for models trained before
+/// the server began measuring temporal frequency from a frame window.
+///
+/// Version 1 models learned a proxy equal to the strongest subcarrier index
+/// multiplied by 0.05. Version 2 and later models consume the measured
+/// temporal frequency in hertz. Keeping this translation at the model boundary
+/// prevents a server upgrade from silently changing an existing model's input
+/// distribution.
+pub fn compatible_dominant_frequency(
+    model_version: u32,
+    temporal_frequency_hz: f64,
+    amplitudes: &[f64],
+) -> f64 {
+    if model_version >= 2 {
+        return if temporal_frequency_hz.is_finite() {
+            temporal_frequency_hz.max(0.0)
+        } else {
+            0.0
+        };
+    }
+
+    amplitudes
+        .iter()
+        .enumerate()
+        .filter(|(_, amplitude)| amplitude.is_finite())
+        .max_by(|(_, left), (_, right)| {
+            left.partial_cmp(right)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|(index, _)| index as f64 * 0.05)
+        .unwrap_or(0.0)
 }
 
 /// Compute statistical features from raw subcarrier amplitudes.
@@ -316,15 +409,14 @@ fn load_recording(path: &Path, class_idx: usize) -> Vec<Sample> {
         Ok(c) => c,
         Err(_) => return Vec::new(),
     };
+    let mut last_amps = HashMap::new();
     content
         .lines()
-        .filter_map(|line| {
-            let v: serde_json::Value = serde_json::from_str(line).ok()?;
-            // Use extended features (server features + subcarrier stats).
-            Some(Sample {
-                features: features_from_frame(&v),
-                class_idx,
-            })
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .flat_map(|v| node_samples_from_frame(&v, &mut last_amps))
+        .map(|features| Sample {
+            features,
+            class_idx,
         })
         .collect()
 }
@@ -597,7 +689,11 @@ pub fn train_from_recordings(recordings_dir: &Path) -> Result<AdaptiveModel, Str
         }
     }
     let accuracy = correct as f64 / n as f64;
-    eprintln!("Training accuracy: {correct}/{n} = {accuracy:.1}%");
+    // In-sample only: this is not an evaluation and must not be quoted as one.
+    eprintln!(
+        "Training accuracy (in-sample): {correct}/{n} = {:.1}%",
+        accuracy * 100.0
+    );
 
     // ── Per-class accuracy ──
     let mut class_correct = vec![0usize; n_classes];
@@ -633,12 +729,114 @@ pub fn train_from_recordings(recordings_dir: &Path) -> Result<AdaptiveModel, Str
         global_std,
         trained_frames: n,
         training_accuracy: accuracy,
-        version: 1,
+        version: TRAINED_MODEL_VERSION,
         class_names,
     })
 }
 
 /// Default path for the saved adaptive model.
-pub fn model_path() -> PathBuf {
-    PathBuf::from("data/adaptive_model.json")
+pub fn model_path(data_dir: &Path) -> PathBuf {
+    data_dir.join("adaptive_model.json")
+}
+
+#[cfg(test)]
+mod node_sample_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn node_features(node_id: u64, variance: f64, stale: bool) -> serde_json::Value {
+        json!({
+            "node_id": node_id,
+            "features": { "variance": variance, "mean_rssi": -50.0, "change_points": 3 },
+            "stale": stale,
+        })
+    }
+
+    fn node(node_id: u64, amplitude: &[f64]) -> serde_json::Value {
+        json!({ "node_id": node_id, "amplitude": amplitude })
+    }
+
+    #[test]
+    fn one_sample_per_node_using_that_nodes_features() {
+        let frame = json!({
+            "features": { "variance": 999.0 },
+            "nodes": [node(1, &[1.0, 2.0]), node(2, &[3.0, 4.0])],
+            "node_features": [node_features(1, 10.0, false), node_features(2, 20.0, false)],
+        });
+        let samples = node_samples_from_frame(&frame, &mut HashMap::new());
+        let mut variances: Vec<f64> = samples.iter().map(|s| s[0]).collect();
+        variances.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert_eq!(variances, vec![10.0, 20.0], "per-node, never the fused 999");
+    }
+
+    #[test]
+    fn repeated_snapshot_of_an_unchanged_node_is_not_resampled() {
+        let mut last = HashMap::new();
+        let first = json!({
+            "nodes": [node(1, &[1.0, 2.0]), node(2, &[3.0, 4.0])],
+            "node_features": [node_features(1, 10.0, false), node_features(2, 20.0, false)],
+        });
+        // Node 2 delivered a new frame; node 1's entry is the same snapshot.
+        let second = json!({
+            "nodes": [node(1, &[1.0, 2.0]), node(2, &[5.0, 6.0])],
+            "node_features": [node_features(1, 10.0, false), node_features(2, 21.0, false)],
+        });
+        assert_eq!(node_samples_from_frame(&first, &mut last).len(), 2);
+        let again = node_samples_from_frame(&second, &mut last);
+        assert_eq!(again.len(), 1);
+        assert_eq!(again[0][0], 21.0);
+    }
+
+    #[test]
+    fn stale_and_amplitude_less_nodes_are_skipped() {
+        let frame = json!({
+            "nodes": [node(1, &[1.0, 2.0]), node(2, &[])],
+            "node_features": [node_features(1, 10.0, true), node_features(2, 20.0, false)],
+        });
+        assert!(node_samples_from_frame(&frame, &mut HashMap::new()).is_empty());
+    }
+
+    #[test]
+    fn recordings_without_node_features_fall_back_to_frame_level() {
+        let frame = json!({
+            "features": { "variance": 7.0 },
+            "nodes": [node(1, &[1.0, 2.0])],
+        });
+        let samples = node_samples_from_frame(&frame, &mut HashMap::new());
+        assert_eq!(samples.len(), 1);
+        assert_eq!(samples[0][0], 7.0);
+    }
+
+    #[test]
+    fn runtime_uses_the_same_amplitude_window_as_recordings() {
+        let mut long = vec![1.0; RECORDED_AMPLITUDE_LEN];
+        long.extend([100.0; 144]);
+        let short = vec![1.0; RECORDED_AMPLITUDE_LEN];
+        let feat = json!({});
+        assert_eq!(
+            features_from_runtime(&feat, &long),
+            features_from_runtime(&feat, &short)
+        );
+    }
+
+    // The trainer must stamp a version that consumes measured frequency.
+    const _: () = assert!(TRAINED_MODEL_VERSION >= 2);
+}
+
+#[cfg(test)]
+mod compatibility_tests {
+    use super::compatible_dominant_frequency;
+
+    #[test]
+    fn version_one_keeps_legacy_subcarrier_proxy() {
+        let amplitudes = [1.0, 2.0, 8.0, 3.0];
+        assert_eq!(compatible_dominant_frequency(1, 1.25, &amplitudes), 0.10);
+    }
+
+    #[test]
+    fn version_two_uses_measured_temporal_frequency() {
+        let amplitudes = [1.0, 20.0, 2.0];
+        assert_eq!(compatible_dominant_frequency(2, 1.25, &amplitudes), 1.25);
+        assert_eq!(compatible_dominant_frequency(2, f64::NAN, &amplitudes), 0.0);
+    }
 }

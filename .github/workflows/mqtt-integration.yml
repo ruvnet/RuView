@@ -16,10 +16,16 @@ on:
       - 'v2/crates/wifi-densepose-sensing-server/tests/mqtt_integration.rs'
       - 'v2/crates/wifi-densepose-sensing-server/Cargo.toml'
       - '.github/workflows/mqtt-integration.yml'
+      # The blueprint check reads the MQTT planner, so blueprint edits and
+      # validator edits must run it too.
+      - 'examples/ha-blueprints/**'
+      - 'scripts/validate-ha-blueprints.py'
   push:
     branches: [main]
     paths:
       - 'v2/crates/wifi-densepose-sensing-server/src/mqtt/**'
+      - 'examples/ha-blueprints/**'
+      - 'scripts/validate-ha-blueprints.py'
   workflow_dispatch: {}
 
 jobs:

@@ -346,6 +346,31 @@ impl VitalSignDetector {
         self.frame_count = 0;
     }
 
+    /// Retune temporal windows to an observed CSI clock. Changes smaller than
+    /// twenty percent are ignored to avoid resetting on normal arrival jitter.
+    /// A real clock change clears history so samples from different clocks are
+    /// never interpreted in one spectrum.
+    pub fn reconfigure_sample_rate(&mut self, sample_rate: f64) -> bool {
+        if !sample_rate.is_finite() || sample_rate < 1.0 {
+            return false;
+        }
+        let relative_change = (sample_rate - self.sample_rate).abs() / self.sample_rate.max(1.0);
+        if relative_change < 0.20 {
+            return false;
+        }
+        self.sample_rate = sample_rate;
+        self.breathing_capacity =
+            ((sample_rate * self.breathing_window_secs) as usize).max(1);
+        self.heartbeat_capacity =
+            ((sample_rate * self.heartbeat_window_secs) as usize).max(1);
+        self.reset();
+        true
+    }
+
+    pub fn sample_rate_hz(&self) -> f64 {
+        self.sample_rate
+    }
+
     /// Current buffer fill levels for diagnostics.
     /// Returns (breathing_len, breathing_capacity, heartbeat_len, heartbeat_capacity).
     pub fn buffer_status(&self) -> (usize, usize, usize, usize) {
@@ -840,6 +865,22 @@ mod tests {
         let (br_len, _, hb_len, _) = detector.buffer_status();
         assert_eq!(br_len, 0);
         assert_eq!(hb_len, 0);
+    }
+
+    #[test]
+    fn measured_clock_reconfigures_once_and_clears_mixed_history() {
+        let mut detector = VitalSignDetector::new(20.0);
+        let amp = vec![10.0; 56];
+        let phase = vec![0.0; 56];
+        for _ in 0..32 {
+            detector.process_frame(&amp, &phase);
+        }
+        assert!(!detector.reconfigure_sample_rate(18.0));
+        assert_eq!(detector.sample_rate_hz(), 20.0);
+        assert!(detector.reconfigure_sample_rate(12.0));
+        assert_eq!(detector.sample_rate_hz(), 12.0);
+        assert_eq!(detector.buffer_status(), (0, 360, 0, 180));
+        assert!(!detector.reconfigure_sample_rate(f64::NAN));
     }
 
     #[test]

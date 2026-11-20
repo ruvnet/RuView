@@ -1,0 +1,7 @@
+{
+  "endpoint": "fal-ai/flux-lora",
+  "lora_url": "https://v3b.fal.media/files/b/0aa8c60d/OjaBs6Gi8pMhZqMo79iym_pytorch_lora_weights.safetensors",
+  "prompt": "ruviewstyle room visualization, a living room with a glowing cyan pose skeleton overlay, wifi signal arcs radiating across the space, a vitals readout panel, dark tech aesthetic, synthetic sensor visualization",
+  "scale": 1.0,
+  "source_image_url": "https://v3b.fal.media/files/b/0aa8cf67/JH1qyC3GCKQ9ojkrAUXe9.png"
+}

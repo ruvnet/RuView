@@ -155,9 +155,12 @@ pub struct VitalsSnapshot {
     pub node_id: String,
     pub timestamp_ms: i64,
     pub presence: bool,
-    pub fall_detected: bool,
+    /// `Some(true)` once per detected fall, `Some(false)` while the node's
+    /// fall detector reports, `None` when the node has no fall source.
+    pub fall_detected: Option<bool>,
     pub motion: f64,             // 0.0–1.0
-    pub motion_energy: f64,
+    /// `None` when the frame carries no motion band power.
+    pub motion_energy: Option<f64>,
     pub presence_score: f64,     // 0.0–1.0
     pub breathing_rate_bpm: Option<f64>,
     pub heartrate_bpm: Option<f64>,
@@ -200,6 +203,12 @@ struct PresenceScorePayload {
 #[derive(Serialize, Debug)]
 struct RssiPayload {
     dbm: f64,
+    ts: String,
+}
+
+#[derive(Serialize, Debug)]
+struct ScorePayload {
+    score: f64,
     ts: String,
 }
 
@@ -269,7 +278,7 @@ impl<'a> StateEncoder<'a> {
                 ts: ts.clone(),
             }).ok()?,
             EntityKind::MotionEnergy => serde_json::to_value(EnergyStatePayload {
-                energy: snap.motion_energy,
+                energy: snap.motion_energy?,
                 ts: ts.clone(),
             }).ok()?,
             EntityKind::PresenceScore => serde_json::to_value(PresenceScorePayload {
@@ -291,6 +300,32 @@ impl<'a> StateEncoder<'a> {
         );
         let payload = serde_json::to_string(&payload_value).ok()?;
         Some(StateMessage::new(topic, payload, DiscoveryComponent::Sensor, false))
+    }
+
+    /// 0–100 score sensor (fall risk), matching the `{{ value_json.score }}`
+    /// discovery template.
+    pub fn score(&self, entity: EntityKind, value: f64, ts_ms: i64) -> Option<StateMessage> {
+        if !matches!(entity.component(), DiscoveryComponent::Sensor) || !value.is_finite() {
+            return None;
+        }
+        let payload = serde_json::to_string(&ScorePayload {
+            score: value.clamp(0.0, 100.0),
+            ts: iso_ts(ts_ms),
+        })
+        .ok()?;
+        let topic = format!(
+            "{}/{}/wifi_densepose_{}/{}/state",
+            self.builder.discovery_prefix,
+            entity.component().as_str(),
+            self.builder.node_id,
+            entity.topic_slug(),
+        );
+        Some(StateMessage::new(
+            topic,
+            payload,
+            DiscoveryComponent::Sensor,
+            false,
+        ))
     }
 
     /// One-shot event encoder. Used for fall, bed exit, multi-room
@@ -354,9 +389,9 @@ mod tests {
             node_id: "aabbccddeeff".into(),
             timestamp_ms: 1779_512_400_000,
             presence: true,
-            fall_detected: false,
+            fall_detected: Some(false),
             motion: 0.35,
-            motion_energy: 1234.5,
+            motion_energy: Some(1234.5),
             presence_score: 0.91,
             breathing_rate_bpm: Some(14.2),
             heartrate_bpm: Some(68.2),
@@ -507,6 +542,32 @@ mod tests {
         let mut s = snap();
         s.heartrate_bpm = None;
         assert!(enc.numeric(EntityKind::HeartRate, &s).is_none());
+    }
+
+    #[test]
+    fn numeric_encoder_has_no_motion_energy_without_a_source() {
+        let b = builder();
+        let enc = StateEncoder { builder: &b };
+        let mut s = snap();
+        s.motion_energy = None;
+        assert!(
+            enc.numeric(EntityKind::MotionEnergy, &s).is_none(),
+            "never a default 0"
+        );
+    }
+
+    #[test]
+    fn score_encoder_matches_discovery_template() {
+        let b = builder();
+        let enc = StateEncoder { builder: &b };
+        let msg = enc.score(EntityKind::FallRiskElevated, 142.0, 0).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&msg.payload).unwrap();
+        assert_eq!(json["score"], 100.0, "clamped to 0..100");
+        assert!(msg.topic.ends_with("/fall_risk_elevated/state"));
+        assert!(enc
+            .score(EntityKind::FallRiskElevated, f64::NAN, 0)
+            .is_none());
+        assert!(enc.score(EntityKind::Presence, 1.0, 0).is_none());
     }
 
     #[test]

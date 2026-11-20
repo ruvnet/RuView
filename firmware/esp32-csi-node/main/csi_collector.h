@@ -17,6 +17,9 @@
 /** ADR-018 header size in bytes. */
 #define CSI_HEADER_SIZE 20
 
+/** ADR-018 byte 19: ESP-IDF reported and firmware sanitized invalid CSI prefix. */
+#define CSI_FLAG_FIRST_WORD_SANITIZED (1U << 5)
+
 /** Maximum frame buffer size (header + 4 antennas * 256 subcarriers * 2 bytes). */
 #define CSI_MAX_FRAME_SIZE (CSI_HEADER_SIZE + 4 * 256 * 2)
 
@@ -135,5 +138,42 @@ uint16_t csi_collector_get_pkt_yield_per_sec(void);
  *         CSI callback path.
  */
 uint16_t csi_collector_get_send_fail_count(void);
+
+/**
+ * Get the cumulative count of CSI frames the stream sender accepted since boot.
+ *
+ * Nonzero means the whole capture path worked at least once: the driver
+ * delivered a CSI callback, the frame serialized, and sendto() accepted it.
+ * Used by the OTA health check (ota_health.c) as its "operational" signal.
+ *
+ * @return Number of successful stream_sender_send() calls from the CSI
+ *         callback path.
+ */
+uint32_t csi_collector_get_send_ok_count(void);
+
+/** Reported by the gate accessors when this build has no selectable gate. */
+#define CSI_GATE_NOT_CONFIGURABLE 0xFF
+
+/**
+ * Report which frame-selection gate is in force, for the on-node log.
+ *
+ * This build has exactly one gate -- mesh-aligned bucketing with an
+ * elapsed-time fallback -- fixed at compile time, so there is no mode or
+ * period to report and both accessors return CSI_GATE_NOT_CONFIGURABLE.
+ *
+ * They exist so the log record keeps a field of fixed width and meaning
+ * whether or not a build can select a gate at runtime, and so an explicit
+ * "not applicable" is stored rather than a plausible number that would
+ * later be reasoned from.
+ */
+uint8_t csi_collector_get_gate_mode(void);
+uint8_t csi_collector_get_gate_seq_period(void);
+
+/**
+ * ADR-423 D1: cumulative HE PPDU counts since boot, split by the driver's
+ * rx_channel_estimate_info_vld flag, counted before any rate gating.
+ * Both are zero on targets without HE support. Either pointer may be NULL.
+ */
+void csi_collector_get_he_validity(uint32_t *valid, uint32_t *invalid);
 
 #endif /* CSI_COLLECTOR_H */

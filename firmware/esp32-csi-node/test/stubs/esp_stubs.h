@@ -90,6 +90,7 @@ typedef struct {
 typedef struct {
     wifi_pkt_rx_ctrl_t rx_ctrl;
     uint8_t            mac[6];
+    bool               first_word_invalid;
     int16_t            len;     /**< Length of the I/Q buffer in bytes. */
     int8_t            *buf;     /**< Pointer to I/Q data. */
 } wifi_csi_info_t;

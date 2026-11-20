@@ -21,10 +21,15 @@
 #include "led_strip.h"
 
 #include "csi_collector.h"
+#include "node_log.h"
+#include "thermal.h"
 #include "stream_sender.h"
 #include "nvs_config.h"
+#include "config_api.h"
+#include "serial_onboarding.h"
 #include "edge_processing.h"
 #include "ota_update.h"
+#include "ota_health.h"
 #include "power_mgmt.h"
 #include "wasm_runtime.h"
 #include "wasm_upload.h"
@@ -36,8 +41,10 @@
 #include "c6_twt.h"                /* ADR-110: TWT (no-op stub on S3) */
 #include "c6_timesync.h"           /* ADR-110: 802.15.4 mesh time-sync (no-op on S3) */
 #include "c6_lp_core.h"            /* ADR-110: LP-core hibernation (no-op on S3) */
+#include "c6_antenna_select.h"     /* XIAO C6 RF switch (opt-in; generic C6 no-op) */
 #include "c6_sync_espnow.h"        /* ADR-110 D1 workaround: ESP-NOW sync */
 #include "c6_softap_he.h"          /* ADR-110 B1/B2: HE/TWT soft-AP (no-op when disabled) */
+#include "node_mdns.h"             /* LAN discovery of this node */
 #ifdef CONFIG_CSI_MOCK_ENABLED
 #include "mock_csi.h"
 #endif
@@ -59,30 +66,131 @@ nvs_config_t g_nvs_config;
 
 static EventGroupHandle_t s_wifi_event_group;
 static int s_retry_num = 0;
-#define MAX_RETRY 10
+
+/* WiFi reconnection.
+ *
+ * This used to be `#define MAX_RETRY 10` with the disconnect handler giving up
+ * permanently once s_retry_num reached it: it set WIFI_FAIL_BIT and never
+ * called esp_wifi_connect() again. s_retry_num is only cleared on a successful
+ * IP_EVENT_STA_GOT_IP, so it accumulated over the node's entire uptime -- ten
+ * disconnects spread across days left the node permanently off the network
+ * with nothing but a power cycle to clear it.
+ *
+ * MEASURED 2026-08-30: a single AP-side event at 03:37:03 EDT disconnected all
+ * three wall-mounted nodes within three minutes of each other. Every one of
+ * them latched off and stayed off for 5.5-7.5 hours, until it was physically
+ * unplugged. CSI capture kept running throughout (it is driver-level and needs
+ * no IP), so the boards looked alive on the bench and dead to the server.
+ *
+ * Retry is now unbounded with exponential backoff. Two things that were
+ * conflated are now separate: WIFI_BOOT_WAIT_ATTEMPTS only releases app_main
+ * from its startup wait so the rest of the node can boot; it does not stop the
+ * node trying to reconnect. Nothing stops the node trying to reconnect. */
+#define WIFI_BOOT_WAIT_ATTEMPTS 10
+#define WIFI_RETRY_BASE_MS       500
+#define WIFI_RETRY_MAX_MS      30000
+
+static esp_timer_handle_t s_reconnect_timer;
+
+/* 500 ms doubling to a 30 s ceiling. Backoff matters because the failure this
+ * guards against is an AP that is down or rebooting: hammering
+ * esp_wifi_connect() at full rate for the minutes an AP takes to come back
+ * wastes power and floods the log without reconnecting any sooner. */
+static uint32_t wifi_retry_delay_ms(int attempt)
+{
+    int shift = attempt - 1;
+    if (shift < 0)  shift = 0;
+    if (shift > 6)  shift = 6;
+    uint32_t d = (uint32_t)WIFI_RETRY_BASE_MS << shift;
+    return d > WIFI_RETRY_MAX_MS ? WIFI_RETRY_MAX_MS : d;
+}
+
+/* Runs on the esp_timer task, not the event loop task -- esp_wifi_connect()
+ * must not be reached through a delay inside the event handler itself. */
+static void wifi_reconnect_cb(void *arg)
+{
+    (void)arg;
+    esp_wifi_connect();
+}
 
 static void event_handler(void *arg, esp_event_base_t event_base,
                           int32_t event_id, void *event_data)
 {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+        /* The band API requires started WiFi. Set it before association,
+         * using the same 2.4 GHz radio domain as existing CSI nodes. */
+        ESP_ERROR_CHECK(esp_wifi_set_band_mode(WIFI_BAND_MODE_2G_ONLY));
+#endif
         esp_wifi_connect();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         wifi_event_sta_disconnected_t *disc = (wifi_event_sta_disconnected_t *)event_data;
         ESP_LOGW(TAG, "WiFi disconnected, reason=%d rssi=%d", disc->reason, disc->rssi);
-        if (s_retry_num < MAX_RETRY) {
-            esp_wifi_connect();
-            s_retry_num++;
-            ESP_LOGI(TAG, "Retrying WiFi connection (%d/%d)", s_retry_num, MAX_RETRY);
-        } else {
+        /* The 7.5 h outage was root-caused to the MAX_RETRY latch only because
+         * someone was watching the console at the time. Persist it. */
+        node_log_note_disconnect((uint8_t)disc->reason, (int8_t)disc->rssi);
+        node_log_event(NODE_LOG_EV_WIFI_DISCONNECT, disc->reason, disc->rssi);
+        s_retry_num++;
+        /* Release the boot wait once, so a node that comes up while the AP is
+         * down still starts CSI capture and the mesh instead of blocking in
+         * app_main. Retrying continues regardless. */
+        if (s_retry_num == WIFI_BOOT_WAIT_ATTEMPTS) {
             xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
         }
+        uint32_t delay_ms = wifi_retry_delay_ms(s_retry_num);
+        if (s_reconnect_timer != NULL) {
+            esp_timer_stop(s_reconnect_timer);   /* may not be running; harmless */
+            esp_timer_start_once(s_reconnect_timer, (uint64_t)delay_ms * 1000);
+        } else {
+            esp_wifi_connect();                  /* timer unavailable: retry now */
+        }
+        ESP_LOGI(TAG, "Reconnecting in %lu ms (attempt %d)",
+                 (unsigned long)delay_ms, s_retry_num);
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
         s_retry_num = 0;
+        ota_health_note_got_ip();
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+        /* Proof that a pending config trial produced a usable network. */
+        config_trial_notify_connected();
     }
 }
+
+#ifdef CONFIG_UPLINK_WATCHDOG
+/* Uplink supervision.
+ *
+ * The reconnect fix above addresses the one wedge whose mechanism we have
+ * proven. This catches the ones we have not: any state in which the node is
+ * powered, capturing, and unable to put a packet on the wire. It bounds such a
+ * state to CONFIG_UPLINK_WATCHDOG_TIMEOUT_S instead of the 7.5 hours measured
+ * on 2026-08-30.
+ *
+ * The signal is a successful sendto(), which on UDP means the stack accepted
+ * the datagram -- NOT that the server received it. That distinction is what
+ * makes this safe: stopping the aggregator does not reboot the fleet, because
+ * sendto keeps succeeding into a socket whose peer is gone. It fires only when
+ * the node's own network path is broken.
+ *
+ * It arms on the first successful send rather than at boot, so a node that has
+ * never reached the network does not reboot-loop while the AP is down; the
+ * unbounded reconnect above owns that case. */
+static void uplink_watchdog_tick(void)
+{
+    int64_t last = stream_sender_last_success_us();
+    if (last == 0) {
+        return;                      /* never delivered -- not armed yet */
+    }
+    int64_t idle_s = (esp_timer_get_time() - last) / 1000000;
+    if (idle_s < CONFIG_UPLINK_WATCHDOG_TIMEOUT_S) {
+        return;
+    }
+    ESP_LOGE(TAG, "uplink watchdog: no successful send for %lld s "
+                  "(limit %d s) -- restarting",
+             (long long)idle_s, CONFIG_UPLINK_WATCHDOG_TIMEOUT_S);
+    esp_restart();
+}
+#endif /* CONFIG_UPLINK_WATCHDOG */
 
 static void wifi_init_sta(void)
 {
@@ -135,6 +243,17 @@ static void wifi_init_sta(void)
     }
 #endif
 
+    const esp_timer_create_args_t reconnect_args = {
+        .callback = &wifi_reconnect_cb,
+        .name     = "wifi_reconnect",
+    };
+    esp_err_t rc_ret = esp_timer_create(&reconnect_args, &s_reconnect_timer);
+    if (rc_ret != ESP_OK) {
+        ESP_LOGW(TAG, "reconnect timer create failed: %s (falling back to "
+                      "immediate retry)", esp_err_to_name(rc_ret));
+        s_reconnect_timer = NULL;
+    }
+
     ESP_ERROR_CHECK(esp_wifi_start());
 
     ESP_LOGI(TAG, "WiFi STA initialized, connecting to SSID: %s", g_nvs_config.wifi_ssid);
@@ -147,7 +266,9 @@ static void wifi_init_sta(void)
     if (bits & WIFI_CONNECTED_BIT) {
         ESP_LOGI(TAG, "Connected to WiFi");
     } else if (bits & WIFI_FAIL_BIT) {
-        ESP_LOGE(TAG, "Failed to connect to WiFi after %d retries", MAX_RETRY);
+        ESP_LOGW(TAG, "Not connected after %d attempts -- continuing boot; "
+                      "reconnection keeps retrying in the background",
+                 WIFI_BOOT_WAIT_ATTEMPTS);
     }
 }
 
@@ -182,8 +303,31 @@ static led_strip_handle_t s_viz_led;
 static void led_gamma_40hz_cb(void *arg)
 {
     static bool on = false;
+    static uint8_t last_mode = 0xFF;
+
+    /* Read live rather than latching at boot, so turning the LED down from
+     * config_push.py takes effect immediately -- the point of the knob is
+     * being able to darken a bedroom without waiting for a reboot. */
+    uint8_t mode = g_nvs_config.led_mode;
+    uint8_t bright = g_nvs_config.led_brightness;
+    if (bright > 100) bright = 100;
+
+    if (mode == LED_MODE_OFF) {
+        /* Blank once on the transition, then leave the RMT idle instead of
+         * clocking out zeros eighty times a second for the node's lifetime. */
+        if (last_mode != LED_MODE_OFF) {
+            led_strip_set_pixel(s_viz_led, 0, 0, 0, 0);
+            led_strip_refresh(s_viz_led);
+            last_mode = mode;
+        }
+        return;
+    }
+    last_mode = mode;
+
     on = !on;
-    if (on) {
+    /* STEADY keeps the motion colour but drops the square wave: same
+     * information, no 40 Hz strobe. */
+    if (on || mode == LED_MODE_STEADY) {
         edge_vitals_pkt_t v;
         float m = edge_get_vitals(&v) ? v.motion_energy : 0.0f;
         float norm = m / LED_MOTION_FULLSCALE;
@@ -191,7 +335,10 @@ static void led_gamma_40hz_cb(void *arg)
         if (norm > 1.0f) norm = 1.0f;
         int idx = (int)(norm * 59.0f + 0.5f);
         const uint8_t *c = VIRIDIS_LUT[idx];
-        led_strip_set_pixel(s_viz_led, 0, c[0], c[1], c[2]); /* R,G,B (driver maps to GRB) */
+        led_strip_set_pixel(s_viz_led, 0,                    /* R,G,B (driver maps to GRB) */
+                            (uint32_t)c[0] * bright / 100,
+                            (uint32_t)c[1] * bright / 100,
+                            (uint32_t)c[2] * bright / 100);
     } else {
         led_strip_set_pixel(s_viz_led, 0, 0, 0, 0);          /* off phase */
     }
@@ -210,6 +357,10 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
 
     /* Load runtime config (NVS overrides Kconfig defaults) */
+    /* Before loading config: if the last change is still on trial this arms
+     * the revert timer, so settings that cannot associate undo themselves. */
+    config_trial_boot_check();
+
     nvs_config_load(&g_nvs_config);
 
     /* Capture node_id IMMEDIATELY — before wifi_init_sta() can corrupt
@@ -218,7 +369,9 @@ void app_main(void)
     csi_collector_set_node_id(g_nvs_config.node_id);
 
     const esp_app_desc_t *app_desc = esp_app_get_description();
-#if defined(CONFIG_IDF_TARGET_ESP32C6)
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+    const char *target_name = "ESP32-C5";
+#elif defined(CONFIG_IDF_TARGET_ESP32C6)
     const char *target_name = "ESP32-C6";
 #elif defined(CONFIG_IDF_TARGET_ESP32S3)
     const char *target_name = "ESP32-S3";
@@ -228,12 +381,33 @@ void app_main(void)
     ESP_LOGI(TAG, "%s CSI Node (ADR-018 / ADR-110) — v%s — Node ID: %d",
              target_name, app_desc->version, g_nvs_config.node_id);
 
+    /* ADR-379: an OTA'd image boots PENDING_VERIFY and reverts at the next
+     * reset unless it confirms itself. Start the clock before anything that
+     * can block (WiFi waits up to ~2 min for an AP), so the deadline is real. */
+    ota_health_start();
+
+    /* Apply the opt-in XIAO RF path before WiFi starts. Generic C6 boards keep
+     * ownership of GPIO3 and GPIO14 because the default implementation is a
+     * no-op unless CONFIG_C6_XIAO_ANTENNA_SELECT is enabled. */
+    ESP_ERROR_CHECK(c6_xiao_antenna_apply());
+    /* The native Mac onboarding bridge must remain available even when WiFi
+     * credentials or the aggregator address are wrong. Start it before any
+     * blocking network initialization. The protocol is physical-USB-only,
+     * nonce-bound, bounded, and never prints credentials. */
+    esp_err_t onboarding_ret = serial_onboarding_start(&g_nvs_config);
+    if (onboarding_ret != ESP_OK) {
+        ESP_LOGW(TAG, "USB onboarding unavailable: %s", esp_err_to_name(onboarding_ret));
+    }
+
     /* Onboard WS2812. C6 wires the LED to GPIO 8; S3 to GPIO 38 (DevKitC-1 v1.0)
      * or GPIO 48 (DevKitC-1 v1.1 / N16R8 — see #962). On S3 we drive 48 (the
      * common module). On C6, GPIO 38/48 don't exist (only 0-30) — gate by target.
      * Behaviour is set by CONFIG_LED_GAMMA_VIZ (ADR-183): on = 40 Hz gamma flicker
      * coloured by CSI motion; off = clear the LED at boot. */
-#if defined(CONFIG_IDF_TARGET_ESP32C6)
+#if !defined(CONFIG_IDF_TARGET_ESP32C5) || CONFIG_C5_STATUS_LED_GPIO >= 0
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+    const int led_gpio = CONFIG_C5_STATUS_LED_GPIO;
+#elif defined(CONFIG_IDF_TARGET_ESP32C6)
     const int led_gpio = 8;
 #else
     const int led_gpio = 48;
@@ -269,6 +443,7 @@ void app_main(void)
         led_strip_del(led_strip);
     }
 #endif /* CONFIG_LED_GAMMA_VIZ */
+#endif /* C5 LED wiring is opt-in; never drive an unknown board pin. */
 
     /* ADR-110 P4: 802.15.4 mesh time-sync (C6 only).
      * Initialized BEFORE WiFi so it's available even when WiFi STA can't
@@ -318,6 +493,54 @@ void app_main(void)
         ESP_LOGI(TAG, "Mock CSI active (scenario=%d)", CONFIG_CSI_MOCK_SCENARIO);
     }
 #else
+    /* Why did we just start? Nothing recorded this before, and it is the
+     * single most useful line in a fleet log: a node that reboots tells you
+     * almost nothing, but a node that reboots with ESP_RST_BROWNOUT tells you
+     * its supply sagged, which on shared outlets is a wiring problem rather
+     * than a firmware one. Three nodes dropping together on 2026-08-28 would
+     * have been answered by this line. */
+    {
+        esp_reset_reason_t rr = esp_reset_reason();
+        const char *why =
+            rr == ESP_RST_POWERON  ? "power-on" :
+            rr == ESP_RST_EXT      ? "external reset" :
+            rr == ESP_RST_SW       ? "software restart" :
+            rr == ESP_RST_PANIC    ? "PANIC (crash)" :
+            rr == ESP_RST_INT_WDT  ? "interrupt watchdog" :
+            rr == ESP_RST_TASK_WDT ? "task watchdog" :
+            rr == ESP_RST_WDT      ? "other watchdog" :
+            rr == ESP_RST_BROWNOUT ? "BROWNOUT (supply sagged)" :
+            rr == ESP_RST_DEEPSLEEP? "deep-sleep wake" : "unknown";
+        if (rr == ESP_RST_PANIC || rr == ESP_RST_BROWNOUT ||
+            rr == ESP_RST_INT_WDT || rr == ESP_RST_TASK_WDT) {
+            ESP_LOGW(TAG, "reset reason: %s (%d) <-- not a clean start", why, (int)rr);
+        } else {
+            ESP_LOGI(TAG, "reset reason: %s (%d)", why, (int)rr);
+        }
+
+        /* And persist it. The console line above is exactly what a power cycle
+         * destroys, which is the whole reason this fleet has no post-mortem for
+         * a remote fault. node_log_init failing is non-fatal by design -- the
+         * node comes up either way, it just has no memory. */
+        if (node_log_init() == ESP_OK) {
+            uint32_t prev_uptime_s = 0;
+            nvs_handle_t nh;
+            if (nvs_open("nodelog", NVS_READWRITE, &nh) == ESP_OK) {
+                nvs_get_u32(nh, "last_up_s", &prev_uptime_s);
+                nvs_set_u32(nh, "last_up_s", 0);
+                nvs_commit(nh);
+                nvs_close(nh);
+            }
+            node_log_boot((uint32_t)rr, prev_uptime_s);
+            ESP_LOGI(TAG, "on-node log active: boot_id=%u, %u records retained",
+                     (unsigned)node_log_boot_id(), (unsigned)node_log_count());
+        }
+    }
+
+    /* Bring thermal monitoring up before the radio is loaded, so the first
+     * reading is taken against a known-idle baseline rather than mid-burst. */
+    thermal_init();
+
     csi_collector_init();
 
     /* ADR-073: Start multi-frequency channel hopping if configured in NVS. */
@@ -375,6 +598,11 @@ void app_main(void)
     if (ota_ret != ESP_OK) {
         ESP_LOGW(TAG, "OTA server init failed: %s", esp_err_to_name(ota_ret));
     }
+#ifdef CONFIG_CSI_NODE_MDNS
+    /* Non-fatal: a node that cannot advertise still captures and streams. */
+    (void)node_mdns_start(g_nvs_config.node_id, g_nvs_config.target_ip,
+                          g_nvs_config.target_port, OTA_UPDATE_PORT);
+#endif
 #else
     esp_err_t ota_ret = ESP_ERR_NOT_SUPPORTED;
     ESP_LOGI(TAG, "Mock CSI mode: skipping OTA server (no network)");
@@ -510,8 +738,30 @@ void app_main(void)
              (swarm_ret == ESP_OK) ? g_nvs_config.seed_url : "off",
              (adapt_ret == ESP_OK) ? "on" : "off");
 
-    /* Main loop — keep alive */
+    /* Main loop — keep alive, and supervise the uplink. */
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(10000));
+#ifdef CONFIG_UPLINK_WATCHDOG
+        uplink_watchdog_tick();
+#endif
+        /* Offered every 10 s; node_log enforces its own floor, so the cadence
+         * lives in one place rather than being implied by this loop's delay.
+         * Also refresh the uptime NVS cell, which is what lets the NEXT boot
+         * record say how long the previous session actually survived -- the
+         * difference between "it rebooted" and "it wedged after 225 s". */
+        node_log_periodic();
+        {
+            static uint32_t s_last_persist_s;
+            uint32_t up_s = (uint32_t)(esp_timer_get_time() / 1000000);
+            if (up_s - s_last_persist_s >= 60) {
+                s_last_persist_s = up_s;
+                nvs_handle_t nh;
+                if (nvs_open("nodelog", NVS_READWRITE, &nh) == ESP_OK) {
+                    nvs_set_u32(nh, "last_up_s", up_s);
+                    nvs_commit(nh);
+                    nvs_close(nh);
+                }
+            }
+        }
     }
 }

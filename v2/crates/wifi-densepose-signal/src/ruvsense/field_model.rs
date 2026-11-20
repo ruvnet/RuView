@@ -7,7 +7,8 @@
 //! (the residual).
 //!
 //! # Algorithm
-//! 1. Collect CSI during empty-room calibration (>=10 min at 20 Hz)
+//! 1. Collect CSI during empty-room calibration (>=10 min wall-clock and at
+//!    least twenty complete runtime-sized background windows)
 //! 2. Compute per-link baseline mean (Welford online accumulator)
 //! 3. Decompose covariance via SVD to extract environmental modes
 //! 4. At runtime: observation - baseline, project out top-K modes, keep residual
@@ -22,6 +23,44 @@ use ndarray::Array2;
 use ndarray_linalg::Eigh;
 #[cfg(feature = "eigenvalue")]
 use ndarray_linalg::UPLO;
+use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
+
+// ---------------------------------------------------------------------------
+// Calibration window constants
+// ---------------------------------------------------------------------------
+
+/// Intended wall-clock duration of the empty-room calibration window (s).
+///
+/// The Welford statistics exist to absorb slow environmental variation —
+/// HVAC cycles, thermal drift — so the calibration gate is expressed in
+/// wall-clock time. Every accepted node packet advances the same field model,
+/// so N nodes reach any frame target N times faster; frames alone therefore
+/// cannot gate calibration (#1756).
+pub const CALIBRATION_DURATION_S: f64 = 600.0;
+
+/// A recent window whose mean remains within this residual energy of the
+/// empty room manifold is treated as background before eigenvalue counting.
+const EMPTY_ROOM_RESIDUAL_ENERGY_MAX: f64 = 1.0;
+
+/// Runtime occupancy is evaluated over fifty frames. Keep ten raw windows
+/// from the end of calibration for covariance rank learning, plus bounded
+/// privacy reduced window means spanning the full capture for residual
+/// conformance scoring.
+const RUNTIME_OCCUPANCY_WINDOW: usize = 50;
+const CALIBRATION_REFERENCE_FRAMES: usize = RUNTIME_OCCUPANCY_WINDOW * 10;
+/// Minimum independent runtime sized means required to learn an empirical
+/// empty room residual distribution. Wall clock duration remains the primary
+/// coverage gate, so slow hardware is not forced to imitate a nominal rate.
+pub const MIN_BACKGROUND_REFERENCE_WINDOWS: usize = 20;
+pub const MIN_CALIBRATION_FRAMES: usize =
+    RUNTIME_OCCUPANCY_WINDOW * MIN_BACKGROUND_REFERENCE_WINDOWS;
+const CALIBRATION_BACKGROUND_WINDOWS_MAX: usize = 512;
+const EMPTY_ROOM_RESIDUAL_MARGIN: f64 = 1.5;
+const EMPTY_ROOM_HELD_OUT_MARGIN: f64 = 1.10;
+const EMPTY_ROOM_REFINEMENT_MAX_LIFT: f64 = 1.25;
+const EMPTY_ROOM_REFINEMENT_MIN_SAMPLES: usize = 10;
+const EMPTY_ROOM_REFINEMENT_MAX_SAMPLES: usize = 64;
 
 // ---------------------------------------------------------------------------
 // Error types
@@ -33,6 +72,12 @@ pub enum FieldModelError {
     /// Not enough calibration frames collected.
     #[error("Insufficient calibration frames: need {needed}, got {got}")]
     InsufficientCalibration { needed: usize, got: usize },
+
+    /// Calibration window shorter than the intended wall-clock duration.
+    /// A frame count alone cannot gate calibration: N nodes streaming in
+    /// aggregate reach any frame target in 1/N of the intended window (#1756).
+    #[error("Calibration window too short: need {needed_s:.1}s of wall-clock time, got {got_s:.1}s")]
+    InsufficientCalibrationDuration { needed_s: f64, got_s: f64 },
 
     /// Dimensionality mismatch between observation and baseline.
     #[error("Dimension mismatch: baseline has {expected} subcarriers, observation has {got}")]
@@ -236,7 +281,8 @@ impl LinkBaselineStats {
 // ---------------------------------------------------------------------------
 
 /// Configuration for field model calibration and runtime.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct FieldModelConfig {
     /// Number of links in the mesh.
     pub n_links: usize,
@@ -244,8 +290,17 @@ pub struct FieldModelConfig {
     pub n_subcarriers: usize,
     /// Number of environmental modes to retain (K). Max 5.
     pub n_modes: usize,
-    /// Minimum calibration frames before baseline is valid (10 min at 20 Hz = 12000).
+    /// Minimum calibration frames before baseline is valid. This is the
+    /// runtime window size times the minimum number of independent background
+    /// references. A frame count alone is not sufficient: N nodes streaming
+    /// in aggregate reach it in 1/N of the window, so
+    /// `min_calibration_duration_s` also gates finalization (#1756).
     pub min_calibration_frames: usize,
+    /// Minimum wall-clock duration of the calibration window in seconds.
+    /// Slow environmental variation (HVAC cycles, thermal drift) can only be
+    /// observed over time, regardless of how many frames a fast fleet
+    /// delivers (#1756). 0 disables the duration gate (tests only).
+    pub min_calibration_duration_s: f64,
     /// Baseline expiry in seconds (default 86400 = 24 hours).
     pub baseline_expiry_s: f64,
 }
@@ -256,7 +311,8 @@ impl Default for FieldModelConfig {
             n_links: 6,
             n_subcarriers: 56,
             n_modes: 3,
-            min_calibration_frames: 12_000,
+            min_calibration_frames: MIN_CALIBRATION_FRAMES,
+            min_calibration_duration_s: CALIBRATION_DURATION_S,
             baseline_expiry_s: 86_400.0,
         }
     }
@@ -267,7 +323,8 @@ impl Default for FieldModelConfig {
 /// Learned from SVD on the covariance of CSI amplitudes during
 /// empty-room calibration. The top-K modes capture environmental
 /// variation (temperature, humidity, time-of-day effects).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct FieldNormalMode {
     /// Per-link baseline mean: `[n_links][n_subcarriers]`.
     pub baseline: Vec<Vec<f64>>,
@@ -291,6 +348,58 @@ pub struct FieldNormalMode {
     /// per-window sample size. Defaults to 0.0 in the diagonal-fallback path.
     /// Issue #942.
     pub baseline_noise_var: f64,
+    /// Empty room significant eigenvalue count learned from runtime sized
+    /// windows. The percentile is stored instead of raw CSI. `None` identifies
+    /// snapshots created before runtime window calibration was introduced.
+    #[serde(default)]
+    pub baseline_runtime_eigenvalue_count: Option<usize>,
+    /// Number of frames used for the runtime window reference above.
+    #[serde(default)]
+    pub baseline_runtime_window_size: Option<usize>,
+    /// Hardware adaptive upper bound for the residual energy of an empty room
+    /// window mean. Only this aggregate boundary is persisted.
+    #[serde(default)]
+    pub empty_room_residual_energy_threshold: Option<f64>,
+    /// Sorted residual energies of privacy reduced runtime window means sampled
+    /// across the full calibration. Raw CSI is never persisted. These scalar
+    /// references support an empirical background match score without turning
+    /// an empty room model into positive person evidence.
+    #[serde(default)]
+    pub empty_room_residual_energy_reference: Vec<f64>,
+    /// Number of operator-confirmed held-out empty refinements. Version one
+    /// permits one bounded refinement so repeated calls cannot ratchet the
+    /// background boundary upward until a weak occupant is suppressed.
+    #[serde(default)]
+    pub empty_room_residual_refinement_count: u8,
+}
+
+/// A bounded comparison between one runtime window and the learned empty room
+/// residual distribution. `score` is an empirical conformance score, not a
+/// probability that a person is absent.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EmptyRoomMatch {
+    pub matches_empty: bool,
+    pub score: Option<f64>,
+    /// Robust residual distance from the quiet reference median.
+    pub normalized_residual_z: Option<f64>,
+    /// Reference coverage relative to the normal calibration target.
+    pub maturity: f64,
+    /// Whether the reference set is large and valid enough to suppress change.
+    pub reliable: bool,
+    pub residual_energy: f64,
+    pub residual_energy_threshold: f64,
+    pub window_size: usize,
+    pub reference_window_count: usize,
+}
+
+/// Receipt for one bounded, operator-confirmed empty-room refinement.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EmptyRoomRefinement {
+    pub threshold_before: f64,
+    pub threshold_after: f64,
+    pub held_out_p95: f64,
+    pub held_out_sample_count: usize,
+    pub reference_window_count: usize,
 }
 
 /// Body perturbation extracted from a CSI observation.
@@ -325,6 +434,18 @@ pub enum CalibrationStatus {
     Expired,
 }
 
+/// Privacy reduced restart image for a completed field model.
+///
+/// This contains only aggregate baseline statistics and environmental modes.
+/// It excludes raw CSI frames, device addresses, room names, credentials, and
+/// calibration authority. A restored image is only a bootstrap prior.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct FieldModelSnapshotV1 {
+    pub config: FieldModelConfig,
+    pub modes: FieldNormalMode,
+}
+
 /// The persistent field model for a single room.
 ///
 /// Maintains per-link Welford statistics during calibration, then
@@ -345,6 +466,19 @@ pub struct FieldModel {
     covariance_sum: Option<Array2<f64>>,
     /// Number of frames accumulated into covariance_sum.
     covariance_count: u64,
+    /// Monotonic timestamp of the first accepted calibration frame of the
+    /// current session; `None` until collection starts (#1756).
+    calibration_started: Option<std::time::Instant>,
+    /// Bounded, memory only tail used to learn inference sized empty room
+    /// covariance statistics. It is never included in a snapshot.
+    calibration_reference_tail: VecDeque<Vec<Vec<f64>>>,
+    /// Per link sum for the current privacy reduced runtime sized window.
+    calibration_window_sum: Vec<Vec<f64>>,
+    /// Number of accepted observations in `calibration_window_sum`.
+    calibration_window_count: usize,
+    /// Runtime sized per link means spanning the full calibration. This is
+    /// bounded, memory only, and reduced to scalar residuals at finalization.
+    calibration_window_means: VecDeque<Vec<Vec<f64>>>,
 }
 
 /// Diagonal variance fallback for when full covariance SVD is unavailable.
@@ -400,6 +534,154 @@ fn diagonal_fallback(
     (mode_energies, environmental_modes, baseline_count)
 }
 
+#[cfg(feature = "eigenvalue")]
+fn significant_eigenvalue_count(
+    frames: &[Vec<f64>],
+    n_subcarriers: usize,
+    baseline_noise_var: f64,
+) -> Option<usize> {
+    if frames.len() < 10 {
+        return None;
+    }
+
+    let mut mean = vec![0.0_f64; n_subcarriers];
+    let mut count = 0_usize;
+    for frame in frames {
+        if frame.len() >= n_subcarriers {
+            for index in 0..n_subcarriers {
+                mean[index] += frame[index];
+            }
+            count += 1;
+        }
+    }
+    if count < 2 {
+        return None;
+    }
+    for value in &mut mean {
+        *value /= count as f64;
+    }
+
+    let mut covariance = Array2::<f64>::zeros((n_subcarriers, n_subcarriers));
+    for frame in frames {
+        if frame.len() >= n_subcarriers {
+            for row in 0..n_subcarriers {
+                let centered_row = frame[row] - mean[row];
+                for column in row..n_subcarriers {
+                    let value = centered_row * (frame[column] - mean[column]);
+                    covariance[[row, column]] += value;
+                    if row != column {
+                        covariance[[column, row]] += value;
+                    }
+                }
+            }
+        }
+    }
+    covariance *= 1.0 / (count as f64 - 1.0);
+
+    let (eigenvalues, _) = covariance.eigh(UPLO::Upper).ok()?;
+    let mut positive: Vec<f64> = eigenvalues
+        .iter()
+        .copied()
+        .filter(|value| *value > 1e-10)
+        .collect();
+    positive.sort_by(|left, right| left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal));
+    let local_noise_var = if positive.len() >= 4 {
+        let half = positive.len() / 2;
+        positive[..half].iter().sum::<f64>() / half as f64
+    } else {
+        positive.first().copied()?
+    };
+    let noise_var = if baseline_noise_var > 0.0 {
+        local_noise_var.max(baseline_noise_var)
+    } else {
+        local_noise_var
+    };
+    let ratio = n_subcarriers as f64 / count as f64;
+    let threshold = noise_var * (1.0 + ratio.sqrt()).powi(2);
+    Some(
+        eigenvalues
+            .iter()
+            .filter(|&&value| value > threshold)
+            .count(),
+    )
+}
+
+fn residual_energy_for_link(
+    modes: &FieldNormalMode,
+    link_index: usize,
+    observation: &[f64],
+) -> Option<f64> {
+    let baseline = modes.baseline.get(link_index)?;
+    if observation.len() != baseline.len() {
+        return None;
+    }
+    let mut residual: Vec<f64> = observation
+        .iter()
+        .zip(baseline.iter())
+        .map(|(value, reference)| value - reference)
+        .collect();
+    for mode in &modes.environmental_modes {
+        let projection: f64 = residual
+            .iter()
+            .zip(mode.iter())
+            .map(|(value, basis)| value * basis)
+            .sum();
+        for (value, basis) in residual.iter_mut().zip(mode.iter()) {
+            *value -= projection * basis;
+        }
+    }
+    Some(
+        residual
+            .iter()
+            .map(|value| value * value)
+            .sum::<f64>()
+            .sqrt(),
+    )
+}
+
+fn percentile_95(mut values: Vec<f64>) -> Option<f64> {
+    values.retain(|value| value.is_finite());
+    values.sort_by(|left, right| left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal));
+    let index = values
+        .len()
+        .saturating_mul(95)
+        .div_ceil(100)
+        .saturating_sub(1);
+    values.get(index).copied()
+}
+
+fn robust_residual_z(reference: &[f64], residual: f64) -> Option<f64> {
+    if !residual.is_finite() || reference.is_empty() {
+        return None;
+    }
+    let mut sorted: Vec<f64> = reference
+        .iter()
+        .copied()
+        .filter(|value| value.is_finite() && *value >= 0.0)
+        .collect();
+    if sorted.len() != reference.len() {
+        return None;
+    }
+    sorted.sort_by(|left, right| left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal));
+    let median = sorted[sorted.len() / 2];
+    let mut deviations: Vec<f64> = sorted.iter().map(|value| (value - median).abs()).collect();
+    deviations.sort_by(|left, right| left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal));
+    let mad = deviations[deviations.len() / 2];
+    let robust_scale = (1.4826 * mad).max((median.abs() * 0.01).max(f64::EPSILON));
+    Some((residual - median) / robust_scale)
+}
+
+#[cfg(feature = "eigenvalue")]
+fn percentile_95_usize(mut values: Vec<usize>) -> Option<usize> {
+    values.sort_unstable();
+    let index = values
+        .len()
+        .saturating_mul(95)
+        .div_ceil(100)
+        .saturating_sub(1);
+    values.get(index).copied()
+}
+
 impl FieldModel {
     /// Create a new field model for the given configuration.
     pub fn new(config: FieldModelConfig) -> Result<Self, FieldModelError> {
@@ -420,6 +702,7 @@ impl FieldModel {
         let link_stats = (0..config.n_links)
             .map(|_| LinkBaselineStats::new(config.n_subcarriers))
             .collect();
+        let calibration_window_sum = vec![vec![0.0_f64; config.n_subcarriers]; config.n_links];
 
         Ok(Self {
             config,
@@ -429,6 +712,11 @@ impl FieldModel {
             last_calibration_us: 0,
             covariance_sum: None,
             covariance_count: 0,
+            calibration_started: None,
+            calibration_reference_tail: VecDeque::with_capacity(CALIBRATION_REFERENCE_FRAMES),
+            calibration_window_sum,
+            calibration_window_count: 0,
+            calibration_window_means: VecDeque::with_capacity(CALIBRATION_BACKGROUND_WINDOWS_MAX),
         })
     }
 
@@ -440,6 +728,191 @@ impl FieldModel {
     /// Access the computed field normal modes, if available.
     pub fn modes(&self) -> Option<&FieldNormalMode> {
         self.modes.as_ref()
+    }
+
+    /// Hardware adaptive empty room boundary learned at finalization. Returns
+    /// `None` for legacy snapshots that predate runtime window calibration.
+    pub fn empty_room_residual_energy_threshold(&self) -> Option<f64> {
+        self.modes
+            .as_ref()
+            .and_then(|modes| modes.empty_room_residual_energy_threshold)
+    }
+
+    /// Refine a completed single-link empty-room boundary with scalar residuals
+    /// measured during a separate operator-confirmed empty holdout.
+    ///
+    /// This never ingests or persists raw CSI. The lift is capped at 25 percent
+    /// and may happen only once per snapshot, preventing repeated calls from
+    /// silently erasing weak occupied evidence.
+    pub fn refine_empty_room_residual_boundary(
+        &mut self,
+        held_out_residuals: &[f64],
+    ) -> Result<EmptyRoomRefinement, FieldModelError> {
+        if self.config.n_links != 1 || self.status != CalibrationStatus::Fresh {
+            return Err(FieldModelError::NotCalibrated);
+        }
+        if !(EMPTY_ROOM_REFINEMENT_MIN_SAMPLES..=EMPTY_ROOM_REFINEMENT_MAX_SAMPLES)
+            .contains(&held_out_residuals.len())
+            || held_out_residuals
+                .iter()
+                .any(|value| !value.is_finite() || *value < 0.0)
+        {
+            return Err(FieldModelError::InvalidConfig(
+                "held-out empty residuals are missing, excessive, or non-finite".into(),
+            ));
+        }
+        let modes = self.modes.as_mut().ok_or(FieldModelError::NotCalibrated)?;
+        if modes.empty_room_residual_refinement_count != 0 {
+            return Err(FieldModelError::InvalidConfig(
+                "the empty-room boundary already has its one permitted held-out refinement"
+                    .into(),
+            ));
+        }
+        if modes.empty_room_residual_energy_reference.len() + held_out_residuals.len()
+            > CALIBRATION_BACKGROUND_WINDOWS_MAX
+        {
+            return Err(FieldModelError::InvalidConfig(
+                "the empty-room residual reference limit would be exceeded".into(),
+            ));
+        }
+        let threshold_before = modes
+            .empty_room_residual_energy_threshold
+            .ok_or(FieldModelError::NotCalibrated)?
+            .max(EMPTY_ROOM_RESIDUAL_ENERGY_MAX);
+        let held_out_p95 = percentile_95(held_out_residuals.to_vec())
+            .ok_or(FieldModelError::NotCalibrated)?;
+        let proposed = held_out_p95 * EMPTY_ROOM_HELD_OUT_MARGIN;
+        let threshold_after = threshold_before
+            .max(proposed.min(threshold_before * EMPTY_ROOM_REFINEMENT_MAX_LIFT));
+
+        modes
+            .empty_room_residual_energy_reference
+            .extend_from_slice(held_out_residuals);
+        modes
+            .empty_room_residual_energy_reference
+            .sort_by(|left, right| {
+                left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal)
+            });
+        modes.empty_room_residual_energy_threshold = Some(threshold_after);
+        modes.empty_room_residual_refinement_count = 1;
+
+        Ok(EmptyRoomRefinement {
+            threshold_before,
+            threshold_after,
+            held_out_p95,
+            held_out_sample_count: held_out_residuals.len(),
+            reference_window_count: modes.empty_room_residual_energy_reference.len(),
+        })
+    }
+
+    /// Export aggregate model state suitable for local restart persistence.
+    /// Raw calibration observations and Welford accumulators are not exported.
+    pub fn export_snapshot(&self) -> Result<FieldModelSnapshotV1, FieldModelError> {
+        let modes = self.modes.clone().ok_or(FieldModelError::NotCalibrated)?;
+        Ok(FieldModelSnapshotV1 {
+            config: self.config.clone(),
+            modes,
+        })
+    }
+
+    /// Restore a bounded, validated aggregate snapshot.
+    pub fn from_snapshot(
+        snapshot: FieldModelSnapshotV1,
+        current_us: u64,
+    ) -> Result<Self, FieldModelError> {
+        let config = &snapshot.config;
+        if config.n_links > 16 || config.n_subcarriers > 2_048 {
+            return Err(FieldModelError::InvalidConfig(
+                "snapshot dimensions exceed bounded limits".into(),
+            ));
+        }
+        if !config.min_calibration_duration_s.is_finite()
+            || config.min_calibration_duration_s < 0.0
+            || !config.baseline_expiry_s.is_finite()
+            || config.baseline_expiry_s <= 0.0
+            || config.baseline_expiry_s > 604_800.0
+        {
+            return Err(FieldModelError::InvalidConfig(
+                "snapshot timing values are invalid".into(),
+            ));
+        }
+
+        let modes = &snapshot.modes;
+        let baseline_shape_valid = modes.baseline.len() == config.n_links
+            && modes
+                .baseline
+                .iter()
+                .all(|link| link.len() == config.n_subcarriers);
+        let mode_shape_valid = modes.environmental_modes.len() == modes.mode_energies.len()
+            && modes.environmental_modes.len() <= config.n_modes
+            && modes
+                .environmental_modes
+                .iter()
+                .all(|mode| mode.len() == config.n_subcarriers);
+        let values_valid = modes
+            .baseline
+            .iter()
+            .flatten()
+            .chain(modes.environmental_modes.iter().flatten())
+            .all(|value| value.is_finite())
+            && modes
+                .mode_energies
+                .iter()
+                .all(|value| value.is_finite() && *value >= 0.0)
+            && modes.variance_explained.is_finite()
+            && (0.0..=10.0).contains(&modes.variance_explained)
+            && modes.baseline_noise_var.is_finite()
+            && modes.baseline_noise_var >= 0.0
+            && modes.baseline_eigenvalue_count <= config.n_subcarriers
+            && modes
+                .baseline_runtime_eigenvalue_count
+                .is_none_or(|count| count <= config.n_subcarriers)
+            && modes
+                .baseline_runtime_window_size
+                .is_none_or(|size| (10..=CALIBRATION_REFERENCE_FRAMES).contains(&size))
+            && modes
+                .empty_room_residual_energy_threshold
+                .is_none_or(|threshold| threshold.is_finite() && threshold >= 0.0)
+            && modes.empty_room_residual_energy_reference.len()
+                <= CALIBRATION_BACKGROUND_WINDOWS_MAX
+            && modes.empty_room_residual_refinement_count <= 1
+            && modes
+                .empty_room_residual_energy_reference
+                .iter()
+                .all(|value| value.is_finite() && *value >= 0.0)
+            && modes
+                .empty_room_residual_energy_reference
+                .windows(2)
+                .all(|window| window[0] <= window[1]);
+        if !baseline_shape_valid || !mode_shape_valid || !values_valid {
+            return Err(FieldModelError::InvalidConfig(
+                "snapshot modes are malformed or non finite".into(),
+            ));
+        }
+        if modes.calibrated_at_us == 0
+            || modes.calibrated_at_us > current_us.saturating_add(300_000_000)
+        {
+            return Err(FieldModelError::InvalidConfig(
+                "snapshot calibration time is invalid".into(),
+            ));
+        }
+        let elapsed_s = current_us.saturating_sub(modes.calibrated_at_us) as f64 / 1_000_000.0;
+        if elapsed_s > config.baseline_expiry_s {
+            return Err(FieldModelError::BaselineExpired {
+                elapsed_s,
+                max_s: config.baseline_expiry_s,
+            });
+        }
+
+        let mut model = Self::new(snapshot.config)?;
+        model.status = if elapsed_s > model.config.baseline_expiry_s * 0.5 {
+            CalibrationStatus::Stale
+        } else {
+            CalibrationStatus::Fresh
+        };
+        model.last_calibration_us = modes.calibrated_at_us;
+        model.modes = Some(snapshot.modes);
+        Ok(model)
     }
 
     /// Number of calibration frames collected so far.
@@ -454,6 +927,32 @@ impl FieldModel {
         self.config.min_calibration_frames
     }
 
+    /// Minimum wall-clock duration (s) of the calibration window required
+    /// before `finalize_calibration` will succeed (#1756).
+    pub fn min_calibration_duration_s(&self) -> f64 {
+        self.config.min_calibration_duration_s
+    }
+
+    /// Wall-clock seconds elapsed since the first accepted calibration frame
+    /// of the current session, or 0.0 if collection has not started (#1756).
+    pub fn calibration_elapsed_s(&self) -> f64 {
+        self.calibration_started
+            .map(|t| t.elapsed().as_secs_f64())
+            .unwrap_or(0.0)
+    }
+
+    /// Effective aggregate frames per second since collection started, or 0.0
+    /// if collection has not started (#1756). With N nodes streaming, this is
+    /// roughly N times the single-node rate.
+    pub fn calibration_frames_per_second(&self) -> f64 {
+        let elapsed = self.calibration_elapsed_s();
+        if elapsed > 0.0 {
+            self.calibration_frame_count() as f64 / elapsed
+        } else {
+            0.0
+        }
+    }
+
     /// Feed a calibration frame (one CSI observation per link during empty room).
     ///
     /// `observations` is `[n_links][n_subcarriers]` amplitude data.
@@ -466,6 +965,11 @@ impl FieldModel {
         }
         for (link_stat, obs) in self.link_stats.iter_mut().zip(observations.iter()) {
             link_stat.update(obs)?;
+        }
+        // Start the wall-clock calibration window on the first accepted frame
+        // (#1756): finalize gates on elapsed duration as well as frame count.
+        if self.calibration_started.is_none() {
+            self.calibration_started = Some(std::time::Instant::now());
         }
         if self.status == CalibrationStatus::Uncalibrated {
             self.status = CalibrationStatus::Collecting;
@@ -496,12 +1000,46 @@ impl FieldModel {
         // Count once per frame (not per link) for correct MP ratio
         self.covariance_count += 1;
 
+        if self.calibration_reference_tail.len() == CALIBRATION_REFERENCE_FRAMES {
+            self.calibration_reference_tail.pop_front();
+        }
+        self.calibration_reference_tail
+            .push_back(observations.to_vec());
+
+        for (link_sum, observation) in self
+            .calibration_window_sum
+            .iter_mut()
+            .zip(observations.iter())
+        {
+            for (sum, value) in link_sum.iter_mut().zip(observation.iter()) {
+                *sum += value;
+            }
+        }
+        self.calibration_window_count += 1;
+        if self.calibration_window_count == RUNTIME_OCCUPANCY_WINDOW {
+            let divisor = self.calibration_window_count as f64;
+            let means: Vec<Vec<f64>> = self
+                .calibration_window_sum
+                .iter()
+                .map(|link_sum| link_sum.iter().map(|value| value / divisor).collect())
+                .collect();
+            if self.calibration_window_means.len() == CALIBRATION_BACKGROUND_WINDOWS_MAX {
+                self.calibration_window_means.pop_front();
+            }
+            self.calibration_window_means.push_back(means);
+            for link_sum in &mut self.calibration_window_sum {
+                link_sum.fill(0.0);
+            }
+            self.calibration_window_count = 0;
+        }
+
         Ok(())
     }
 
     /// Finalize calibration: compute SVD to extract environmental modes.
     ///
-    /// Requires at least `min_calibration_frames` observations.
+    /// Requires at least `min_calibration_frames` observations collected over
+    /// at least `min_calibration_duration_s` of wall-clock time (#1756).
     /// `timestamp_us` is the current timestamp in microseconds.
     /// `geometry_hash` identifies the mesh geometry at calibration time.
     pub fn finalize_calibration(
@@ -514,6 +1052,19 @@ impl FieldModel {
             return Err(FieldModelError::InsufficientCalibration {
                 needed: self.config.min_calibration_frames,
                 got: count as usize,
+            });
+        }
+        // #1756: the frame gate encodes "duration at the single-node rate",
+        // but every accepted node packet advances this model, so a fleet of N
+        // nodes satisfies it in ~1/N of the intended window. Gate on the
+        // wall-clock duration as well so the baseline covers the slow
+        // environmental variation the Welford statistics are meant to absorb.
+        let elapsed_s = self.calibration_elapsed_s();
+        let need_s = self.config.min_calibration_duration_s;
+        if need_s > 0.0 && elapsed_s < need_s {
+            return Err(FieldModelError::InsufficientCalibrationDuration {
+                needed_s: need_s,
+                got_s: elapsed_s,
             });
         }
 
@@ -616,8 +1167,7 @@ impl FieldModel {
                         }
                         Err(_) => {
                             // Fallback to diagonal approximation on SVD failure
-                            let (e, m, b) =
-                                diagonal_fallback(&self.link_stats, n_sc, n_modes);
+                            let (e, m, b) = diagonal_fallback(&self.link_stats, n_sc, n_modes);
                             (e, m, b, 0.0_f64)
                         }
                     }
@@ -669,7 +1219,7 @@ impl FieldModel {
             0.0
         };
 
-        let field_mode = FieldNormalMode {
+        let mut field_mode = FieldNormalMode {
             baseline,
             environmental_modes,
             mode_energies,
@@ -678,13 +1228,155 @@ impl FieldModel {
             geometry_hash,
             baseline_eigenvalue_count: baseline_eig_count,
             baseline_noise_var,
+            baseline_runtime_eigenvalue_count: None,
+            baseline_runtime_window_size: None,
+            empty_room_residual_energy_threshold: None,
+            empty_room_residual_energy_reference: Vec::new(),
+            empty_room_residual_refinement_count: 0,
         };
+
+        // The full calibration covariance and a fifty frame runtime covariance
+        // have different Marcenko Pastur aspect ratios. This first version is
+        // deliberately single link: combining link specific residual scales
+        // requires a separate multistatic calibration model.
+        if self.config.n_links == 1 {
+            let reference_frames: Vec<Vec<f64>> = self
+                .calibration_reference_tail
+                .iter()
+                .filter_map(|observation| observation.first().cloned())
+                .collect();
+            let complete_windows: Vec<&[Vec<f64>]> = reference_frames
+                .chunks(RUNTIME_OCCUPANCY_WINDOW)
+                .filter(|window| window.len() == RUNTIME_OCCUPANCY_WINDOW)
+                .collect();
+
+            #[cfg(feature = "eigenvalue")]
+            {
+                let counts: Vec<usize> = complete_windows
+                    .iter()
+                    .filter_map(|window| {
+                        significant_eigenvalue_count(window, n_sc, baseline_noise_var)
+                    })
+                    .collect();
+                field_mode.baseline_runtime_eigenvalue_count = percentile_95_usize(counts);
+            }
+
+            let mut residual_energies: Vec<f64> = self
+                .calibration_window_means
+                .iter()
+                .filter_map(|means| means.first())
+                .filter_map(|mean| residual_energy_for_link(&field_mode, 0, mean))
+                .filter(|value| value.is_finite() && *value >= 0.0)
+                .collect();
+            if residual_energies.is_empty() {
+                residual_energies = complete_windows
+                    .iter()
+                    .filter_map(|window| {
+                        let mut mean = vec![0.0_f64; n_sc];
+                        for frame in *window {
+                            for (sum, value) in mean.iter_mut().zip(frame.iter()) {
+                                *sum += value;
+                            }
+                        }
+                        for value in &mut mean {
+                            *value /= window.len() as f64;
+                        }
+                        residual_energy_for_link(&field_mode, 0, &mean)
+                    })
+                    .collect();
+            }
+            residual_energies.sort_by(|left, right| {
+                left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal)
+            });
+            field_mode.empty_room_residual_energy_threshold =
+                percentile_95(residual_energies.clone()).map(|value| {
+                    (value * EMPTY_ROOM_RESIDUAL_MARGIN).max(EMPTY_ROOM_RESIDUAL_ENERGY_MAX)
+                });
+            field_mode.empty_room_residual_energy_reference = residual_energies;
+            if field_mode.baseline_runtime_eigenvalue_count.is_some()
+                || field_mode.empty_room_residual_energy_threshold.is_some()
+            {
+                field_mode.baseline_runtime_window_size = Some(RUNTIME_OCCUPANCY_WINDOW);
+            }
+        }
 
         self.modes = Some(field_mode);
         self.status = CalibrationStatus::Fresh;
         self.last_calibration_us = timestamp_us;
+        self.calibration_reference_tail.clear();
+        self.calibration_window_means.clear();
+        for link_sum in &mut self.calibration_window_sum {
+            link_sum.fill(0.0);
+        }
+        self.calibration_window_count = 0;
 
         Ok(self.modes.as_ref().unwrap())
+    }
+
+    /// Compare a runtime sized single link window with the learned empty room
+    /// distribution. The score is empirical conformance while the learned
+    /// boundary holds. Crossing the boundary returns zero. Legacy snapshots
+    /// without residual references retain binary suppression but no score.
+    pub fn empty_room_match(&self, recent_frames: &[Vec<f64>]) -> Option<EmptyRoomMatch> {
+        let modes = self.modes.as_ref()?;
+        if self.config.n_links != 1 {
+            return None;
+        }
+        let window_size = modes.baseline_runtime_window_size?;
+        if recent_frames.len() < window_size {
+            return None;
+        }
+        let mut mean = vec![0.0_f64; self.config.n_subcarriers];
+        for frame in recent_frames.iter().take(window_size) {
+            if frame.len() < self.config.n_subcarriers {
+                return None;
+            }
+            for (sum, value) in mean.iter_mut().zip(frame.iter()) {
+                *sum += value;
+            }
+        }
+        for value in &mut mean {
+            *value /= window_size as f64;
+        }
+        let residual_energy = residual_energy_for_link(modes, 0, &mean)?;
+        let residual_energy_threshold = modes
+            .empty_room_residual_energy_threshold?
+            .max(EMPTY_ROOM_RESIDUAL_ENERGY_MAX);
+        let reference_window_count = modes.empty_room_residual_energy_reference.len();
+        let maturity = (reference_window_count as f64
+            / MIN_BACKGROUND_REFERENCE_WINDOWS as f64)
+            .clamp(0.0, 1.0);
+        let reliable = reference_window_count >= 10
+            && modes
+                .empty_room_residual_energy_reference
+                .iter()
+                .all(|value| value.is_finite() && *value >= 0.0);
+        let matches_empty = reliable && residual_energy <= residual_energy_threshold;
+        let score = if !reliable {
+            None
+        } else if !matches_empty {
+            Some(0.0)
+        } else {
+            let at_or_below = modes
+                .empty_room_residual_energy_reference
+                .partition_point(|value| *value <= residual_energy);
+            let empirical_quantile = at_or_below as f64 / reference_window_count as f64;
+            Some((1.0 - empirical_quantile * 0.5).clamp(0.5, 1.0))
+        };
+        Some(EmptyRoomMatch {
+            matches_empty,
+            score,
+            normalized_residual_z: robust_residual_z(
+                &modes.empty_room_residual_energy_reference,
+                residual_energy,
+            ),
+            maturity,
+            reliable,
+            residual_energy,
+            residual_energy_threshold,
+            window_size,
+            reference_window_count,
+        })
     }
 
     /// Extract body perturbation from a runtime observation.
@@ -797,6 +1489,22 @@ impl FieldModel {
             *m /= count as f64;
         }
 
+        // Rank alone is not person evidence. A short continuation window can
+        // expose more significant eigenvalues while its mean remains on the
+        // learned empty room manifold. Use the hardware adaptive residual
+        // boundary when available.
+        let empty_room_residual_energy_max = modes
+            .empty_room_residual_energy_threshold
+            .unwrap_or(EMPTY_ROOM_RESIDUAL_ENERGY_MAX)
+            .max(EMPTY_ROOM_RESIDUAL_ENERGY_MAX);
+        let mean_residual_energy = self
+            .extract_perturbation(&[mean.clone()])
+            .ok()
+            .map(|perturbation| perturbation.total_energy);
+        if mean_residual_energy.is_some_and(|energy| energy <= empty_room_residual_energy_max) {
+            return Ok(0);
+        }
+
         let mut cov = Array2::<f64>::zeros((n, n));
         for frame in recent_frames {
             if frame.len() >= n {
@@ -857,7 +1565,23 @@ impl FieldModel {
         let mp_threshold = noise_var * (1.0 + ratio.sqrt()).powi(2);
 
         let significant = eigenvalues.iter().filter(|&&ev| ev > mp_threshold).count();
-        let occupancy = significant.saturating_sub(modes.baseline_eigenvalue_count);
+        let reference_count = if modes.baseline_runtime_window_size == Some(count) {
+            modes
+                .baseline_runtime_eigenvalue_count
+                .unwrap_or(modes.baseline_eigenvalue_count)
+        } else {
+            modes.baseline_eigenvalue_count
+        };
+        let rank_occupancy = significant.saturating_sub(reference_count);
+        // A stable person can shift the window mean without increasing its
+        // covariance rank. Preserve at least one occupant after the learned
+        // empty room residual boundary is exceeded.
+        let occupancy =
+            if mean_residual_energy.is_some_and(|energy| energy > empty_room_residual_energy_max) {
+                rank_occupancy.max(1)
+            } else {
+                rank_occupancy
+            };
 
         Ok(occupancy.min(10)) // Cap at 10 persons
     }
@@ -895,6 +1619,13 @@ impl FieldModel {
         self.status = CalibrationStatus::Uncalibrated;
         self.covariance_sum = None;
         self.covariance_count = 0;
+        self.calibration_started = None;
+        self.calibration_reference_tail.clear();
+        self.calibration_window_count = 0;
+        for link_sum in &mut self.calibration_window_sum {
+            link_sum.fill(0.0);
+        }
+        self.calibration_window_means.clear();
     }
 }
 
@@ -912,6 +1643,8 @@ mod tests {
             n_subcarriers: n_sc,
             n_modes: 3,
             min_calibration_frames: min_frames,
+            // Tests feed frames instantly; disable the wall-clock gate (#1756).
+            min_calibration_duration_s: 0.0,
             baseline_expiry_s: 86_400.0,
         }
     }
@@ -1114,6 +1847,7 @@ mod tests {
             n_subcarriers: 8,
             n_modes: 2,
             min_calibration_frames: 5,
+            min_calibration_duration_s: 0.0,
             baseline_expiry_s: 86_400.0,
         };
         let mut model = FieldModel::new(config).unwrap();
@@ -1307,6 +2041,7 @@ mod tests {
             n_subcarriers: 8,
             n_modes: 3,
             min_calibration_frames: 20,
+            min_calibration_duration_s: 0.0,
             baseline_expiry_s: 86_400.0,
         };
         let mut model = FieldModel::new(config).unwrap();
@@ -1369,6 +2104,7 @@ mod tests {
             n_subcarriers: 8,
             n_modes: 3,
             min_calibration_frames: 20,
+            min_calibration_duration_s: 0.0,
             baseline_expiry_s: 86_400.0,
         };
         let mut model = FieldModel::new(config).unwrap();
@@ -1410,6 +2146,217 @@ mod tests {
         assert_eq!(occupancy, 0, "Noise-only frames should yield 0 occupancy");
     }
 
+    #[cfg(feature = "eigenvalue")]
+    #[test]
+    fn runtime_sized_empty_reference_scores_held_out_background() {
+        let config = FieldModelConfig {
+            n_links: 1,
+            n_subcarriers: 56,
+            n_modes: 3,
+            min_calibration_frames: 500,
+            min_calibration_duration_s: 0.0,
+            baseline_expiry_s: 86_400.0,
+        };
+        let mut model = FieldModel::new(config).unwrap();
+        let mut calibration = Vec::new();
+        for frame_index in 0..600 {
+            let time = frame_index as f64 * 0.071;
+            let frame: Vec<f64> = (0..56)
+                .map(|subcarrier| {
+                    let carrier = subcarrier as f64;
+                    18.0 + carrier * 0.08
+                        + (time + carrier * 0.13).sin() * 0.8
+                        + (time * 0.37 + carrier * 0.031).cos() * 0.35
+                })
+                .collect();
+            model.feed_calibration(&[frame.clone()]).unwrap();
+            calibration.push(frame);
+        }
+        model.finalize_calibration(1_000_000, 0).unwrap();
+
+        let modes = model.modes().unwrap();
+        assert_eq!(
+            modes.baseline_runtime_window_size,
+            Some(RUNTIME_OCCUPANCY_WINDOW)
+        );
+        assert!(modes.baseline_runtime_eigenvalue_count.is_some());
+        assert!(modes.empty_room_residual_energy_threshold.is_some());
+        assert_eq!(modes.empty_room_residual_energy_reference.len(), 12);
+
+        let held_out_empty = calibration[550..600].to_vec();
+        assert_eq!(model.estimate_occupancy(&held_out_empty).unwrap(), 0);
+        let background = model
+            .empty_room_match(&held_out_empty)
+            .expect("background match");
+        assert!(background.matches_empty);
+        assert_eq!(background.reference_window_count, 12);
+        assert!(background.reliable);
+        assert_eq!(background.maturity, 0.6);
+        assert!(background.normalized_residual_z.is_some());
+        assert!(background
+            .score
+            .is_some_and(|score| (0.5..=1.0).contains(&score)));
+    }
+
+    #[test]
+    fn held_out_empty_refinement_is_bounded_and_single_use() {
+        let config = FieldModelConfig {
+            n_links: 1,
+            n_subcarriers: 8,
+            n_modes: 2,
+            min_calibration_frames: 100,
+            min_calibration_duration_s: 0.0,
+            baseline_expiry_s: 86_400.0,
+        };
+        let mut model = FieldModel::new(config).unwrap();
+        for frame_index in 0..1_000 {
+            let phase = frame_index as f64 * 0.071;
+            let frame = (0..8)
+                .map(|index| 20.0 + index as f64 * 0.1 + (phase + index as f64).sin())
+                .collect();
+            model.feed_calibration(&[frame]).unwrap();
+        }
+        model.finalize_calibration(1_000_000, 0).unwrap();
+
+        let before = model.empty_room_residual_energy_threshold().unwrap();
+        let residuals = vec![before * 1.4; 12];
+        let receipt = model
+            .refine_empty_room_residual_boundary(&residuals)
+            .unwrap();
+        assert_eq!(receipt.threshold_before, before);
+        assert!(receipt.threshold_after > before);
+        assert!(receipt.threshold_after <= before * EMPTY_ROOM_REFINEMENT_MAX_LIFT);
+        assert_eq!(receipt.held_out_sample_count, 12);
+        assert_eq!(
+            model.modes().unwrap().empty_room_residual_refinement_count,
+            1
+        );
+        assert!(model
+            .refine_empty_room_residual_boundary(&residuals)
+            .is_err());
+    }
+
+    #[cfg(feature = "eigenvalue")]
+    #[test]
+    fn runtime_reference_rejects_shifted_held_out_window() {
+        let config = FieldModelConfig {
+            n_links: 1,
+            n_subcarriers: 56,
+            n_modes: 3,
+            min_calibration_frames: 500,
+            min_calibration_duration_s: 0.0,
+            baseline_expiry_s: 86_400.0,
+        };
+        let mut model = FieldModel::new(config).unwrap();
+        for frame_index in 0..600 {
+            let time = frame_index as f64 * 0.071;
+            let frame: Vec<f64> = (0..56)
+                .map(|subcarrier| {
+                    let carrier = subcarrier as f64;
+                    18.0 + carrier * 0.08
+                        + (time + carrier * 0.13).sin() * 0.8
+                        + (time * 0.37 + carrier * 0.031).cos() * 0.35
+                })
+                .collect();
+            model.feed_calibration(&[frame]).unwrap();
+        }
+        model.finalize_calibration(1_000_000, 0).unwrap();
+
+        let shifted: Vec<Vec<f64>> = (0..RUNTIME_OCCUPANCY_WINDOW)
+            .map(|frame_index| {
+                let time = (600 + frame_index) as f64 * 0.071;
+                (0..56)
+                    .map(|subcarrier| {
+                        let carrier = subcarrier as f64;
+                        let body_shift = if subcarrier % 3 == 0 { 8.0 } else { -5.0 };
+                        18.0 + carrier * 0.08
+                            + (time + carrier * 0.13).sin() * 0.8
+                            + (time * 0.37 + carrier * 0.031).cos() * 0.35
+                            + body_shift
+                    })
+                    .collect()
+            })
+            .collect();
+        assert!(model.estimate_occupancy(&shifted).unwrap() >= 1);
+        let background = model.empty_room_match(&shifted).expect("shifted match");
+        assert!(!background.matches_empty);
+        assert_eq!(background.score, Some(0.0));
+        assert!(background.reliable);
+        assert!(background.normalized_residual_z.is_some());
+    }
+
+    #[cfg(feature = "eigenvalue")]
+    #[test]
+    fn sparse_background_reference_cannot_suppress_runtime_change() {
+        let config = FieldModelConfig {
+            n_links: 1,
+            n_subcarriers: 56,
+            n_modes: 3,
+            min_calibration_frames: 500,
+            min_calibration_duration_s: 0.0,
+            baseline_expiry_s: 86_400.0,
+        };
+        let mut model = FieldModel::new(config).unwrap();
+        let mut calibration = Vec::new();
+        for frame_index in 0..600 {
+            let time = frame_index as f64 * 0.071;
+            let frame: Vec<f64> = (0..56)
+                .map(|subcarrier| {
+                    let carrier = subcarrier as f64;
+                    18.0 + carrier * 0.08
+                        + (time + carrier * 0.13).sin() * 0.8
+                        + (time * 0.37 + carrier * 0.031).cos() * 0.35
+                })
+                .collect();
+            model.feed_calibration(&[frame.clone()]).unwrap();
+            calibration.push(frame);
+        }
+        model.finalize_calibration(1_000_000, 0).unwrap();
+        model
+            .modes
+            .as_mut()
+            .unwrap()
+            .empty_room_residual_energy_reference
+            .truncate(9);
+
+        let result = model
+            .empty_room_match(&calibration[550..600])
+            .expect("background comparison");
+        assert!(!result.reliable);
+        assert!(!result.matches_empty);
+        assert_eq!(result.score, None);
+        assert_eq!(result.maturity, 0.45);
+    }
+
+    #[test]
+    fn runtime_background_reference_is_single_link_only() {
+        let config = FieldModelConfig {
+            n_links: 2,
+            n_subcarriers: 8,
+            n_modes: 2,
+            min_calibration_frames: 100,
+            min_calibration_duration_s: 0.0,
+            baseline_expiry_s: 86_400.0,
+        };
+        let mut model = FieldModel::new(config).unwrap();
+        for frame_index in 0..100 {
+            let phase = frame_index as f64 * 0.1;
+            model
+                .feed_calibration(&[
+                    (0..8).map(|index| phase + index as f64).collect(),
+                    (0..8).map(|index| phase - index as f64).collect(),
+                ])
+                .unwrap();
+        }
+        model.finalize_calibration(1_000_000, 0).unwrap();
+
+        let modes = model.modes().unwrap();
+        assert_eq!(modes.baseline_runtime_window_size, None);
+        assert_eq!(modes.baseline_runtime_eigenvalue_count, None);
+        assert_eq!(modes.empty_room_residual_energy_threshold, None);
+        assert!(modes.empty_room_residual_energy_reference.is_empty());
+    }
+
     #[test]
     fn test_baseline_eigenvalue_count_stored() {
         let config = FieldModelConfig {
@@ -1417,6 +2364,7 @@ mod tests {
             n_subcarriers: 8,
             n_modes: 3,
             min_calibration_frames: 20,
+            min_calibration_duration_s: 0.0,
             baseline_expiry_s: 86_400.0,
         };
         let mut model = FieldModel::new(config).unwrap();
@@ -1446,6 +2394,48 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_round_trip_preserves_aggregate_modes_without_raw_frames() {
+        let config = make_config(1, 4, 10);
+        let mut model = FieldModel::new(config).unwrap();
+        for i in 0..10 {
+            model
+                .feed_calibration(&[vec![1.0 + i as f64 * 0.01, 2.0, 3.0, 4.0]])
+                .unwrap();
+        }
+        model.finalize_calibration(1_000_000, 0xCA1).unwrap();
+
+        let snapshot = model.export_snapshot().unwrap();
+        let restored = FieldModel::from_snapshot(snapshot.clone(), 2_000_000).unwrap();
+
+        assert_eq!(restored.status(), CalibrationStatus::Fresh);
+        assert_eq!(restored.calibration_frame_count(), 0);
+        assert_eq!(restored.export_snapshot().unwrap(), snapshot);
+    }
+
+    #[test]
+    fn snapshot_restore_rejects_expired_and_malformed_images() {
+        let config = make_config(1, 4, 10);
+        let mut model = FieldModel::new(config).unwrap();
+        for _ in 0..10 {
+            model.feed_calibration(&[vec![1.0, 2.0, 3.0, 4.0]]).unwrap();
+        }
+        model.finalize_calibration(1_000_000, 0).unwrap();
+        let snapshot = model.export_snapshot().unwrap();
+
+        assert!(matches!(
+            FieldModel::from_snapshot(snapshot.clone(), 90_000_000_000),
+            Err(FieldModelError::BaselineExpired { .. })
+        ));
+
+        let mut malformed = snapshot;
+        malformed.modes.baseline[0].pop();
+        assert!(matches!(
+            FieldModel::from_snapshot(malformed, 2_000_000),
+            Err(FieldModelError::InvalidConfig(_))
+        ));
+    }
+
+    #[test]
     fn test_environmental_projection_removes_drift() {
         let config = make_config(1, 4, 10);
         let mut model = FieldModel::new(config).unwrap();
@@ -1472,5 +2462,73 @@ mod tests {
             perturbation.environmental_projections[0] > 0.0,
             "Environmental projection should be non-zero for drifting subcarrier"
         );
+    }
+
+    // -----------------------------------------------------------------
+    // Wall-clock calibration gate (#1756)
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn test_default_frame_target_covers_background_reference_windows() {
+        let cfg = FieldModelConfig::default();
+        assert_eq!(cfg.min_calibration_duration_s, CALIBRATION_DURATION_S);
+        assert_eq!(
+            cfg.min_calibration_frames, MIN_CALIBRATION_FRAMES,
+            "frame target must cover the minimum independent runtime windows"
+        );
+        assert_eq!(MIN_CALIBRATION_FRAMES, 1_000);
+        assert_eq!(MIN_BACKGROUND_REFERENCE_WINDOWS, 20);
+    }
+
+    #[test]
+    fn test_finalize_requires_wall_clock_window() {
+        // Enough frames, but fed instantly: the fleet-fast scenario from #1756.
+        let mut config = make_config(1, 4, 5);
+        config.min_calibration_duration_s = 600.0;
+        let mut model = FieldModel::new(config).unwrap();
+        for _ in 0..10 {
+            model
+                .feed_calibration(&make_observations(1, 4, 1.0))
+                .unwrap();
+        }
+        assert!(model.calibration_frame_count() >= 5);
+        match model.finalize_calibration(1_000_000, 0) {
+            Err(FieldModelError::InsufficientCalibrationDuration { needed_s, got_s }) => {
+                assert!((needed_s - 600.0).abs() < 1e-9);
+                assert!(got_s < 1.0, "test feeds frames instantly, got {got_s}s");
+            }
+            other => panic!("expected InsufficientCalibrationDuration, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_duration_gate_disabled_with_zero() {
+        // min_calibration_duration_s = 0 keeps the legacy frame-only gate.
+        let mut model = FieldModel::new(make_config(1, 4, 5)).unwrap();
+        for _ in 0..5 {
+            model
+                .feed_calibration(&make_observations(1, 4, 1.0))
+                .unwrap();
+        }
+        assert!(model.finalize_calibration(1_000_000, 0).is_ok());
+    }
+
+    #[test]
+    fn test_calibration_clock_accessors() {
+        let mut model = FieldModel::new(make_config(1, 4, 5)).unwrap();
+        // No frames yet: the session clock has not started.
+        assert_eq!(model.calibration_elapsed_s(), 0.0);
+        assert_eq!(model.calibration_frames_per_second(), 0.0);
+
+        model
+            .feed_calibration(&make_observations(1, 4, 1.0))
+            .unwrap();
+        assert!(model.calibration_elapsed_s() >= 0.0);
+        assert!(model.calibration_frames_per_second() >= 0.0);
+
+        // Reset clears the session clock.
+        model.reset_calibration();
+        assert_eq!(model.calibration_elapsed_s(), 0.0);
+        assert_eq!(model.calibration_frames_per_second(), 0.0);
     }
 }

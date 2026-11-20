@@ -287,6 +287,7 @@ mod eig {
             n_links,
             n_modes: 3,
             min_calibration_frames: 20,
+            min_calibration_duration_s: 0.0,
             baseline_expiry_s: 86_400.0,
         };
         let mut model = FieldModel::new(config).unwrap();

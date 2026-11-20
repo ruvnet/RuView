@@ -1,0 +1,8 @@
+# Seeed XIAO ESP32-C6 external U.FL antenna test overlay.
+# Use only with the XIAO board; generic C6 boards may use GPIO3/GPIO14.
+CONFIG_C6_XIAO_ANTENNA_SELECT=y
+CONFIG_C6_XIAO_ANTENNA_EXTERNAL=y
+
+# XIAO C6 (IDF 6.0.2) is 1100 KiB against a 1152 KiB gate; mDNS (~43 KB)
+# would leave too little margin, so it stays off on this board for now.
+CONFIG_CSI_NODE_MDNS=n

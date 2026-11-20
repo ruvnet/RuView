@@ -265,7 +265,7 @@ pub(crate) fn parse_csi_packet(buf: &[u8], tier: &str) -> Option<CsiFrame> {
     let n_antennas    = buf[5] as usize;
     // u16 since ADR-110 / #1005: ESP32-C6 HE-SU frames carry 256 bins
     // (the old single-byte read decoded 256 = 0x0100 LE as 0 subcarriers).
-    let n_subcarriers = u16::from_le_bytes([buf[6], buf[7]]) as usize;
+    let n_sub_raw     = u16::from_le_bytes([buf[6], buf[7]]) as usize;
     let freq_mhz      = u32::from_le_bytes([buf[8], buf[9], buf[10], buf[11]]);
     let freq_mhz      = u16::try_from(freq_mhz).unwrap_or(0);
     let _sequence     = u32::from_le_bytes([buf[12], buf[13], buf[14], buf[15]]);
@@ -273,7 +273,17 @@ pub(crate) fn parse_csi_packet(buf: &[u8], tier: &str) -> Option<CsiFrame> {
     let noise_floor   = buf[17] as i8;
     let _ppdu_type    = buf[18]; // ADR-110; baseline tier gating is by count
 
-    let n_pairs = n_antennas * n_subcarriers;
+    // ESP32-S3 firmware configures CSI with L-LTF + HT-LTF + STBC HT-LTF
+    // (`csi_collector.c`), so HT frames arrive as 192 complex values: three
+    // 64-value segments. Slice the HT-LTF segment [64..128) so the 64-FFT
+    // HT20 tier configs line up (#1000). Every other count passes through.
+    let (seg_off, n_subcarriers) = if n_sub_raw == 192 {
+        (64usize, 64usize)
+    } else {
+        (0usize, n_sub_raw)
+    };
+
+    let n_pairs = n_antennas * n_sub_raw;
     let iq_start = 20usize;
     if buf.len() < iq_start + n_pairs * 2 {
         return None;
@@ -283,7 +293,7 @@ pub(crate) fn parse_csi_packet(buf: &[u8], tier: &str) -> Option<CsiFrame> {
     let mut data = Array2::<Complex64>::zeros((n_antennas.max(1), n_subcarriers.max(1)));
     for s in 0..n_antennas {
         for k in 0..n_subcarriers {
-            let idx = s * n_subcarriers + k;
+            let idx = s * n_sub_raw + seg_off + k;
             let i_val = buf[iq_start + idx * 2]     as i8 as f64;
             let q_val = buf[iq_start + idx * 2 + 1] as i8 as f64;
             data[[s, k]] = Complex64::new(i_val, q_val);
@@ -469,6 +479,28 @@ mod tests {
         assert!(he.record(&f).is_ok());
         let mut ht = wifi_densepose_signal::CalibrationRecorder::new(tier_config("ht20"));
         assert!(ht.record(&f).is_err());
+    }
+
+    #[test]
+    fn test_parse_csi_packet_merged_ltf_slices_htltf_segment() {
+        // ESP32-S3 firmware with L-LTF + HT-LTF + STBC HT-LTF enabled reports
+        // 192 subcarriers per frame (#1000). The parser must slice the HT-LTF
+        // segment [64..128) so the HT20 tier config (64-FFT) accepts it.
+        let mut buf = build_frame(192, 0);
+        // Mark each 64-value segment with a distinct I value: 1, 2, 3.
+        for k in 0..192 {
+            buf[20 + k * 2] = (k / 64 + 1) as u8; // I
+            buf[20 + k * 2 + 1] = 0;              // Q
+        }
+        let f = parse_csi_packet(&buf, "ht20").expect("merged-LTF frame must parse");
+        assert_eq!(f.num_subcarriers(), 64);
+        for k in 0..64 {
+            assert_eq!(f.data[[0, k]].re, 2.0, "subcarrier {k} not from HT-LTF segment");
+        }
+        // Before the slice, a 192-bin frame failed the HT20 geometry check,
+        // so calibrate/enroll/room-watch could never record a baseline.
+        let mut ht = wifi_densepose_signal::CalibrationRecorder::new(tier_config("ht20"));
+        assert!(ht.record(&f).is_ok(), "sliced frame must satisfy the HT20 tier");
     }
 
     /// Security pin (review 2026-06, ADR-127): the UDP parser is the CLI's

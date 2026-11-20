@@ -1,0 +1,128 @@
+Fix: CSIdump forwarded nothing against the mt76 CSI driver built here.
+Base: github.com/MtkWifiRev/MtkCSIdump @ 276b4b0814a283dcbc6544a76033e0e37154f092
+
+CSIdump was written against a DIFFERENT mt76 vendor ABI than the 2022
+MediaTek CSI patch we build. Two enumerators are missing from its copies of
+the attribute enums, so every attribute number past them was off by one:
+  CTRL: our driver has STA_INTERVAL between INTERVAL and DUMP_NUM
+  DATA: our driver has DATA_NUM between TA and I, and ends CHAIN_INFO not H_IDX
+
+Failure chain. CSIdump put DUMP_NUM at attr 8, which is the driver's
+STA_INTERVAL (policy NLA_U32); a 2-byte u16 payload failed the driver's
+nla_parse minimum-length check, so the dumpit returned -EINVAL and emitted
+NOTHING. The ring therefore never drained (a unit sat pinned at 3000) and the
+dump callback never ran. Even had the request landed, the driver replies with
+DATA at attr 10 while CSIdump looked at attr 9, so the callback would have
+returned NL_SKIP at its first check with no message printed. And the error
+print used a stale ret that was always 0, so any failure read as 'Success'.
+---
+--- /tmp/mt76_api.cpp.orig	2026-09-19 23:14:12
++++ src/wifi_drv_api/mt76_api.cpp	2026-09-19 23:14:12
+@@ -47,10 +47,12 @@
+     MTK_VENDOR_ATTR_CSI_CTRL_CFG_VAL2,
+     MTK_VENDOR_ATTR_CSI_CTRL_MAC_ADDR,
+     MTK_VENDOR_ATTR_CSI_CTRL_INTERVAL,
++    MTK_VENDOR_ATTR_CSI_CTRL_STA_INTERVAL,
+ 
+     MTK_VENDOR_ATTR_CSI_CTRL_DUMP_NUM,
+ 
+     MTK_VENDOR_ATTR_CSI_CTRL_DATA,
++    MTK_VENDOR_ATTR_CSI_CTRL_DUMP_MAC_FILTER,
+ 
+     /* keep last */
+     NUM_MTK_VENDOR_ATTRS_CSI_CTRL,
+@@ -70,6 +72,7 @@
+     MTK_VENDOR_ATTR_CSI_DATA_BW,
+     MTK_VENDOR_ATTR_CSI_DATA_CH_IDX,
+     MTK_VENDOR_ATTR_CSI_DATA_TA,
++    MTK_VENDOR_ATTR_CSI_DATA_NUM,
+     MTK_VENDOR_ATTR_CSI_DATA_I,
+     MTK_VENDOR_ATTR_CSI_DATA_Q,
+     MTK_VENDOR_ATTR_CSI_DATA_INFO,
+@@ -80,7 +83,7 @@
+     MTK_VENDOR_ATTR_CSI_DATA_TX_ANT,
+     MTK_VENDOR_ATTR_CSI_DATA_RX_ANT,
+     MTK_VENDOR_ATTR_CSI_DATA_MODE,
+-    MTK_VENDOR_ATTR_CSI_DATA_H_IDX,
++    MTK_VENDOR_ATTR_CSI_DATA_CHAIN_INFO,
+ 
+     /* keep last */
+     NUM_MTK_VENDOR_ATTRS_CSI_DATA,
+@@ -123,7 +126,8 @@
+         csi_data_policy[MTK_VENDOR_ATTR_CSI_DATA_TX_ANT].type = NLA_U8;
+         csi_data_policy[MTK_VENDOR_ATTR_CSI_DATA_RX_ANT].type = NLA_U8;
+         csi_data_policy[MTK_VENDOR_ATTR_CSI_DATA_MODE].type = NLA_U8;
+-        csi_data_policy[MTK_VENDOR_ATTR_CSI_DATA_H_IDX].type = NLA_U32;
++        csi_data_policy[MTK_VENDOR_ATTR_CSI_DATA_NUM].type = NLA_U32;
++        csi_data_policy[MTK_VENDOR_ATTR_CSI_DATA_CHAIN_INFO].type = NLA_U32;
+     }
+     ~MT76APIPrivate()
+     {
+@@ -172,7 +176,7 @@
+               tb_data[MTK_VENDOR_ATTR_CSI_DATA_Q] &&
+               tb_data[MTK_VENDOR_ATTR_CSI_DATA_INFO] &&
+               tb_data[MTK_VENDOR_ATTR_CSI_DATA_MODE] &&
+-              tb_data[MTK_VENDOR_ATTR_CSI_DATA_H_IDX]))
++              tb_data[MTK_VENDOR_ATTR_CSI_DATA_CHAIN_INFO]))
+         {
+             fprintf(stderr, "Attributes error for CSI data\n");
+             return NL_SKIP;
+@@ -192,7 +196,7 @@
+         c->rx_idx = nla_get_u16(tb_data[MTK_VENDOR_ATTR_CSI_DATA_RX_ANT]);
+ 
+         c->ext_info = nla_get_u32(tb_data[MTK_VENDOR_ATTR_CSI_DATA_INFO]);
+-        c->h_idx = nla_get_u32(tb_data[MTK_VENDOR_ATTR_CSI_DATA_H_IDX]);
++        c->h_idx = nla_get_u32(tb_data[MTK_VENDOR_ATTR_CSI_DATA_CHAIN_INFO]);
+ 
+         c->ts = nla_get_u32(tb_data[MTK_VENDOR_ATTR_CSI_DATA_TS]);
+ 
+@@ -271,8 +275,9 @@
+ 
+             nla_nest_end(msg, data);
+ 
+-            if (unl_genl_request(&unl, msg, md_csi_dump_cb, NULL))
+-                fprintf(stderr, "nl80211 call failed: %s\n", strerror(-ret));
++            ret = unl_genl_request(&unl, msg, md_csi_dump_cb, NULL);
++            if (ret)
++                fprintf(stderr, "csi dump: nl80211 call failed: %s\n", strerror(-ret));
+ 
+             unl_free(&unl);
+         }
+--- /tmp/motion_detector.cpp.orig	2026-09-19 23:14:58
++++ src/motion_detector.cpp	2026-09-19 23:14:58
+@@ -1,3 +1,4 @@
++#include <cstdio>
+ #include "motion_detector.h"
+ #include "wifi_drv_api/mt76_api.h"
+ #include "parsers/parser_mt76.h"
+@@ -35,6 +36,12 @@
+         std::vector<csi_data *> *list = wifi.motion_detection_dump(ifname.c_str(), pkt_num);
+         oldTime = currTime;
+ 
++        /* Visibility: without this a failing dump is completely silent, which is
++         * exactly how the enum/ABI mismatch went unnoticed. */
++        fprintf(stderr, "csi: dump returned %zu records (%d ms since last)\n",
++                list ? list->size() : (size_t)0, diff);
++
++        unsigned sentThisInterval = 0;
+         dataMutex.lock();
+         unsigned antIdx = antMonIdx;
+         dataMutex.unlock();
+@@ -49,6 +56,7 @@
+                             if (!packet.empty()) {
+                                 std::vector<std::vector<double>> singlePacket = { packet };
+                                 sendCsiDataUdp(singlePacket, i);
++                                sentThisInterval++;
+                             }
+                         }
+                     }
+@@ -56,6 +64,9 @@
+             } 
+         }
+ 
++        if (sentThisInterval)
++            fprintf(stderr, "csi: sent %u udp datagrams\n", sentThisInterval);
++
+         std::this_thread::sleep_for(std::chrono::milliseconds(interval));
+     }
+ }

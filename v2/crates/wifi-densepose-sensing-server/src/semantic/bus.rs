@@ -81,6 +81,29 @@ impl SemanticBus {
         }
     }
 
+    /// Current state of a boolean primitive, so the publisher can report it
+    /// on a heartbeat and not only on the tick it changed. `None` for the
+    /// scalar and event primitives.
+    pub fn is_active(&self, kind: SemanticKind) -> Option<bool> {
+        Some(match kind {
+            SemanticKind::SomeoneSleeping => self.sleeping.active,
+            SemanticKind::PossibleDistress => self.distress.active,
+            SemanticKind::RoomActive => self.room_active.active,
+            SemanticKind::ElderlyAnomaly => self.elderly_anomaly.active,
+            SemanticKind::Meeting => self.meeting.active,
+            SemanticKind::BathroomOccupied => self.bathroom.active,
+            SemanticKind::NoMovement => self.no_movement.active,
+            SemanticKind::FallRisk | SemanticKind::BedExit | SemanticKind::MultiRoom => {
+                return None
+            }
+        })
+    }
+
+    /// Latest fall-risk score (0–100). Zero until the first post-warmup tick.
+    pub fn fall_risk_score(&self) -> f64 {
+        self.fall_risk.last_score
+    }
+
     /// Run all primitives on one snapshot. Returns only events that
     /// emit (Idle states are filtered).
     pub fn tick(&mut self, snap: &RawSnapshot) -> Vec<SemanticEvent> {
@@ -218,6 +241,22 @@ mod tests {
         } else {
             panic!("expected Boolean state");
         }
+    }
+
+    #[test]
+    fn is_active_reflects_boolean_primitive_state() {
+        let mut bus = SemanticBus::new(cfg());
+        assert_eq!(bus.is_active(SemanticKind::RoomActive), Some(false));
+        assert_eq!(bus.is_active(SemanticKind::FallRisk), None);
+        let snap = RawSnapshot {
+            node_id: "test".into(),
+            since_start: Duration::from_secs(120),
+            presence: true,
+            motion: 0.4,
+            ..Default::default()
+        };
+        bus.tick(&snap);
+        assert_eq!(bus.is_active(SemanticKind::RoomActive), Some(true));
     }
 
     #[test]

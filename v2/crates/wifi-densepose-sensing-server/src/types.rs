@@ -544,6 +544,10 @@ impl AppStateInner {
     pub fn person_count(&self) -> usize {
         use crate::csi::score_to_person_count;
         use crate::field_bridge;
+        let observed_at_us = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_micros() as u64)
+            .unwrap_or(0);
         match self.field_model.as_ref() {
             Some(fm) => {
                 let history = if !self.frame_history.is_empty() {
@@ -559,6 +563,7 @@ impl AppStateInner {
                 field_bridge::occupancy_or_fallback(
                     fm,
                     history,
+                    observed_at_us,
                     self.smoothed_person_score,
                     self.prev_person_count,
                 )

@@ -2,6 +2,24 @@
 
 Latest proposed decisions:
 
+- [ADR-379: An OTA'd image confirms itself with a bounded health check, or rolls back](ADR-379-ota-first-boot-health-check.md)
+- [ADR-380: Loopback UDP tee for second consumers of the CSI stream](ADR-380-loopback-udp-tee.md)
+- [ADR-382: `spatial.evidence.v1` export of RF Gaussians and link observations](ADR-382-spatial-evidence-rf-export.md)
+- [ADR-378: `ruview-live` showcase views — CSI waterfall, radar fan, animated cells](ADR-378-ruview-live-showcase-views.md)
+- [ADR-377: `ruview-live` — a Claude Code mod shipped inside `@ruvnet/ruview`](ADR-377-ruview-live-claude-code-mod.md)
+- [ADR-376: `ruview` — one npm install for every RuView component](ADR-376-ruview-umbrella-npm-package.md)
+- [ADR-375: MCP Apps console, HTTP transport and terminal UI for `@ruvnet/ruview`](ADR-375-ruview-mcp-apps-console-http-transport-and-terminal-ui.md)
+- [ADR-374: Remote host access over SSH (read-only)](ADR-374-remote-host-access-over-ssh.md)
+- [ADR-373: Host device access layer — ESP32, mmWave, LiDAR](ADR-373-host-device-access-layer.md)
+- [ADR-372: Structured debugging doctor](ADR-372-structured-debugging-doctor.md)
+- [ADR-371: Harness training runner and mean-pose evidence gate](ADR-371-harness-training-runner-and-evidence-gate.md)
+- [ADR-370: Cross-platform, verified ESP32 firmware flashing from npm](ADR-370-cross-platform-firmware-flashing.md)
+- [ADR-369: npm RuView operator surface — CLI, MCP, and SDK](ADR-369-ruview-npm-operator-surface-and-sdk.md)
+- [ADR-368: RuView compute kernel as a WASM + napi-rs npm package](ADR-368-ruview-kernel-wasm-napi-npm.md)
+- [ADR-367: Bounded research swarm and compute ownership](ADR-367-bounded-research-swarm-and-compute-ownership.md)
+- [ADR-366: CSI controls and frozen evaluation](ADR-366-csi-controls-and-frozen-evaluation.md)
+- [ADR-365: Public BFI dataset and decoder contract](ADR-365-public-bfi-dataset-and-decoder-contract.md)
+- [ADR-364: BFI capture admission and continuity](ADR-364-bfi-capture-admission-and-continuity.md)
 - [ADR-187: archive/v1 deprecation + model-weights honest labeling](ADR-187-archive-v1-deprecation-honest-labeling.md) (refs #509, #1125)
 - [ADR-186: Training progress API — wire the orphaned in-server trainer to /ws/train/progress](ADR-186-training-progress-api.md) (refs #1233)
 - [ADR-185: Python P6 SOTA bindings — AETHER, MERIDIAN, MAT](ADR-185-python-p6-sota-bindings.md)
@@ -9,7 +27,7 @@ Latest proposed decisions:
 - [ADR-264: Versioned wire protocol for RTL8720F CFR and Range-FFT reports](ADR-264-rtl8720f-radar-wire-protocol.md)
 - [ADR-263: Adopt RTL8720F 2.4 GHz FMCW radar as an optional RuView sensing platform](ADR-263-rtl8720f-2-4ghz-fmcw-radar-platform.md)
 
-This folder contains 210 Architecture Decision Records (ADRs) that document every significant technical choice in the RuView / WiFi-DensePose project. (The index tables below list a curated subset per domain; see the directory listing for the full set.)
+This folder records significant architectural choices in the RuView / WiFi-DensePose project. The index tables below list a curated subset per domain; see the directory listing for the full set.
 
 ## Why ADRs?
 
@@ -59,6 +77,7 @@ Statuses: **Proposed** (under discussion), **Accepted** (approved and/or impleme
 | [ADR-040](ADR-040-wasm-programmable-sensing.md) | WASM Programmable Sensing (Tier 3) | Accepted |
 | [ADR-041](ADR-041-wasm-module-collection.md) | WASM Module Collection (65 edge modules) | Accepted (hardware-validated) |
 | [ADR-044](ADR-044-provisioning-tool-enhancements.md) | Provisioning Tool Enhancements | Proposed |
+| [ADR-379](ADR-379-ota-first-boot-health-check.md) | OTA'd image confirms itself with a bounded health check (IP + CSI frame) or rolls back; OTA httpd stack sized from device data | Proposed (host-tested; hardware-verified on one S3 and one C6) |
 | [ADR-110](ADR-110-esp32-c6-firmware-extension.md) | ESP32-C6 firmware extension — Wi-Fi 6 / 802.15.4 / TWT / LP-core | Accepted, P1-P10 complete, firmware-side substrate closed at **[v0.7.0-esp32](https://github.com/ruvnet/RuView/releases/tag/v0.7.0-esp32)**. Companion docs: [`WITNESS-LOG-110`](../WITNESS-LOG-110.md) (13 §A0.x entries · 99.56 % cross-board RX · **104.1 µs smoothed sync stdev** · ≤100 µs target met), [`ADR-110-REVIEW-GUIDE`](../ADR-110-REVIEW-GUIDE.md) (one-page reviewer tour), [`ADR-110-BRANCH-STATE`](../ADR-110-BRANCH-STATE.md) (coordination map vs `feat/adr-115-ha-mqtt-matter`). Host decoders + tests: Python `SyncPacketParser` (10) + Rust `wifi_densepose_hardware::SyncPacket` (15), cross-language hex pin gates drift. |
 
 ### Signal processing and sensing
@@ -92,9 +111,13 @@ Statuses: **Proposed** (under discussion), **Accepted** (approved and/or impleme
 | [ADR-150](ADR-150-rf-foundation-encoder.md) | RF Foundation Encoder: pose-preserving, subject/room/device-invariant CSI embedding | Proposed |
 | [ADR-151](ADR-151-room-calibration-specialist-training.md) | Per-Room Calibration & Specialized Model Training (room-first → bank of small ruVector specialists) | Proposed |
 | [ADR-152](ADR-152-wifi-pose-sota-2026-intake.md) | WiFi-Pose SOTA 2026 Intake: geometry-conditioned calibration, external benchmarks, foundation-encoder recipe | Proposed |
+| [ADR-345](ADR-345-per-link-csi-and-node-to-node-ranging.md) | Per-link CSI attribution and node-to-node ranging — why phase-based position fails on this hardware (measured), and the coordination-free `(tx_mac, rx_seq)` join key that does not need it | Proposed — measurement layer implemented and validated on hardware; localization not built |
 | [ADR-348](ADR-348-independent-rust-multivariate-forecasting.md) | Independent Rust multivariate forecasting for RuView | Proposed |
 | [ADR-349](ADR-349-governed-local-and-fal-forecast-training.md) | Governed local and fal.ai forecast training | Proposed |
 | [ADR-350](ADR-350-ruvector-predictive-memory-and-ruvllm-boundary.md) | RuVector predictive memory and RuVLLM authority boundary | Proposed |
+| [ADR-354](ADR-354-forecast-governance-enforcement-in-ruforecast-submodule.md) | fal.ai forecast governance and spend enforcement now real, in the vendored RuForecast submodule | Accepted |
+| [ADR-355](ADR-355-local-empty-room-bootstrap-prior.md) | Local empty room bootstrap prior | Accepted |
+| [ADR-356](ADR-356-rate-truthful-csi-and-reliability-gated-adaptation.md) | Rate truthful CSI and reliability gated room adaptation | Accepted |
 
 ### Platform and UI
 
@@ -111,6 +134,7 @@ Statuses: **Proposed** (under discussion), **Accepted** (approved and/or impleme
 | [ADR-344](ADR-344-adaptive-local-installation-discovery.md) | Adaptive Local Installation Discovery | Accepted (local software path) |
 | [ADR-346](ADR-346-fail-closed-edge-occupancy-evidence.md) | Fail closed ESP32 occupancy evidence | Accepted (C6 occupancy integrity qualified) |
 | [ADR-347](ADR-347-rate-aware-esp32-temporal-sensing.md) | Rate aware ESP32 temporal sensing | Accepted (C6 timing and transport qualified) |
+| [ADR-363](ADR-363-native-macos-usb-node-onboarding.md) | Native macOS USB node onboarding with nonce bound discovery and fresh server verification | Accepted and physically qualified on one ESP32 S3; C6 and signed distribution pending |
 | [ADR-115](ADR-115-home-assistant-integration.md) | Home Assistant integration via MQTT auto-discovery + Matter bridge (HA-DISCO + HA-FABRIC + HA-MIND) | Accepted (MQTT track) / Proposed (Matter SDK P8b) |
 | [ADR-169](ADR-169-adam-mode-light-theme.md) | adam-mode — light theme toggle for the three.js realtime demo | Proposed |
 | [ADR-170](ADR-170-yoga-mode-pose-system.md) | yoga-mode — yoga pose detection, classification, and scoring for the three.js realtime demo | Proposed |
@@ -161,6 +185,7 @@ Statuses: **Proposed** (under discussion), **Accepted** (approved and/or impleme
 | [ADR-294](ADR-294-wifi-veil-integration.md) | WiFi Veil integration — emission-shaping countermeasure as advisory BFLD dependency | Accepted (initial implementation) |
 | [ADR-295](ADR-295-source-provenance-state-machine.md) | Source provenance state machine — synthetic can never present as live | Accepted (initial implementation) |
 | [ADR-296](ADR-296-sensor-data-plane-bind-hardening.md) | Sensor data-plane hardening — UDP bind control and source allowlist (step one) | Accepted (initial implementation) |
+| [ADR-380](ADR-380-loopback-udp-tee.md) | Loopback UDP tee for second consumers of the CSI stream (`--udp-tee`) | Proposed |
 | [ADR-297](ADR-297-multi-node-semantic-correctness.md) | Multi-node semantic correctness — per-node inference, node-keyed rate limiting, stale state | Accepted (initial implementation) |
 | [ADR-298](ADR-298-model-release-sanity-gates.md) | Model release sanity gates — block degenerate and mislabeled model artifacts | Accepted (initial implementation) |
 | [ADR-299](ADR-299-csi-data-incident-repo-controls.md) | Repository CSI data-incident controls — ignore rules and pre-commit/CI policy check | Accepted (controls implemented; tree remediation gated) |

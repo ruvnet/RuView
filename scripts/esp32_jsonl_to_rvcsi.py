@@ -11,6 +11,7 @@ Usage: esp32_jsonl_to_rvcsi.py <in.csi.jsonl> <out.rvcsi> [--limit N]
 """
 import json
 import math
+import os
 import sys
 
 # --- rvcsi_core::ValidationPolicy::default() -------------------------------
@@ -60,6 +61,10 @@ def main():
         print(__doc__)
         sys.exit(2)
     in_path, out_path = sys.argv[1], sys.argv[2]
+    # Check file identity before opening output: aliases can share one inode.
+    if os.path.exists(out_path) and os.path.samefile(in_path, out_path):
+        print("Input and output must refer to different files.", file=sys.stderr)
+        sys.exit(2)
     limit = None
     if "--limit" in sys.argv:
         limit = int(sys.argv[sys.argv.index("--limit") + 1])
@@ -116,7 +121,15 @@ def main():
                 stats["read"] -= 1
                 break
             iq_hex = d.get("iq_hex", "")
-            raw = bytes.fromhex(iq_hex)
+            try:
+                raw = bytes.fromhex(iq_hex)
+            except (TypeError, ValueError):
+                stats["rej_len"] += 1
+                continue
+            # A partial I/Q pair cannot be reconstructed from this recording.
+            if len(raw) % 2:
+                stats["rej_len"] += 1
+                continue
             n_pairs = len(raw) // 2
             # ESP-IDF CSI buffer layout: [imag0, real0, imag1, real1, ...] as int8
             i_vals, q_vals, amp, ph = [], [], [], []

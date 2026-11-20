@@ -1,0 +1,23 @@
+[package]
+name = "wifi-densepose-mtk-bridge"
+version = "0.1.0"
+edition.workspace = true
+description = "Bridge MediaTek MT7981 (mt76) vendor CSI into the ADR-267 MTC1 wire protocol"
+license = "MIT OR Apache-2.0"
+authors.workspace = true
+readme = "README.md"
+
+[lib]
+name = "wifi_densepose_mtk_bridge"
+path = "src/lib.rs"
+
+[[bin]]
+name = "wifi-densepose-mtk-bridge"
+path = "src/main.rs"
+
+[dependencies]
+wifi-densepose-hardware = { path = "../wifi-densepose-hardware" }
+clap = { version = "4.4", features = ["derive"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

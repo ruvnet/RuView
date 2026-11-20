@@ -378,3 +378,157 @@ Reproducer: `v2/crates/ruforecast/crates/ruforecast-train/examples/bidmc_prepare
 one 76-row (context 64 + horizon 12) window per eligible patient, and writes
 governed `train.jsonl`/`test.jsonl`/`train-local.toml` per judge split. Raw
 data cached at `/tmp/bidmc-raw/` on the training host only.
+
+### Zero-shot pretrained-checkpoint comparison (2026-09-02)
+
+Every RuForecast result above this line is a **from-scratch-trained** model
+(RuForecast's own Burn/Rust architecture, trained on a tiny real or synthetic
+corpus) evaluated against trivial baselines. All of them lost. A literature
+pass after the BIDMC result above (arXiv:2505.11349, "context parroting";
+arXiv:2607.20027, zero-shot HRV forecasting with TimesFM/Chronos/MOIRAI on
+wearables) converged on an explanation: published foundation-model wins over
+naive baselines on short-horizon, smooth physiological signals come from
+**massive real pretraining corpora** (Chronos: ~10M real+augmented series;
+TimesFM: ~100B real time points), not from architecture alone — and
+RuForecast's from-scratch training used a real corpus many orders of
+magnitude smaller (tens to low hundreds of windows), so re-implementing
+these architectures from scratch and training small was never going to
+replicate their wins.
+
+This test checks the other half of that hypothesis directly: does a **real,
+public, pretrained checkpoint**, run **zero-shot** (no fine-tuning, no
+training of any kind on this repo's data) on the **exact same BIDMC
+cross-entity test windows and metrics** as the BIDMC result above, actually
+beat the naive baselines? If the massive-pretraining-corpus explanation is
+right, it should — unlike every from-scratch attempt this session.
+
+**Setup (kept identical to the BIDMC test above for a fair comparison):**
+same `/tmp/bidmc-raw/` cache (53 real ICU patients, PhysioNet BIDMC, Open
+Data Commons Attribution License v1.0), same window construction (context
+64s + horizon 12s, 1 Hz, variates HR/RESP/SpO2, one window per patient from
+that patient's first 76 rows), same two disjoint patient-partition judges (A:
+train 1-37/test 38-53 contiguous; B: train odd/test even interleaved — train
+patients are irrelevant here since nothing is trained, only the *test*
+partition is used), same quantile set
+`[0.05,0.10,0.25,0.50,0.75,0.90,0.95]`, same seasonal period (12), and the
+same WQL formula (`2*sum(pinball)/(numQuantiles*sum|actual|)`) and MAE
+definition as `ruforecast-core::metrics.rs`. Baselines were independently
+re-derived from `ruforecast-core::baseline.rs`'s exact logic in Python and
+cross-checked against the BIDMC section above: reproduced last-value WQL was
+0.01171 (A) / 0.01013 (B) versus the Rust CLI's originally reported
+0.01159 / 0.01002 — a ~1% gap attributable to f32 (Rust) vs f64 (Python)
+accumulation, not a methodology difference, so this reproduction is treated
+as validated.
+
+Four real, public, pretrained-checkpoint models were run zero-shot on GPU
+(RTX 5080, `ruvultra`), per-variate univariate (none of these checkpoints has
+a native multivariate mode for these two families, so HR/RESP/SpO2 were
+forecast independently and recombined into the same window-level WQL/MAE as
+the baselines and the from-scratch RuForecast model):
+
+- **Chronos-Bolt base/small** (`amazon/chronos-bolt-base`,
+  `amazon/chronos-bolt-small`) — direct quantile-regression heads,
+  deterministic given input (no sampling).
+- **Chronos (T5) small** (`amazon/chronos-t5-small`) — the original
+  sampling-based Chronos family; `predict_quantiles` internally draws
+  samples (default `num_samples`), so this one model's numbers below carry
+  run-to-run sampling variance the other three don't.
+- **TimesFM 2.5 (200M, PyTorch)** (`google/timesfm-2.5-200m-pytorch`) —
+  quantile output uses 10 channels; per the installed package's source
+  (`timesfm_2p5_base.py`, `decode_index: int = 5`) and empirical
+  verification across multiple windows/variates, channel 5 is the point
+  forecast and channels 1-9 are the native quantile levels [0.1..0.9] in
+  order (channel 0 is an unused duplicate, not a real quantile). Levels 0.05
+  and 0.95 were clamped to the nearest native level (0.10/0.90); 0.25 and
+  0.75 were linearly interpolated between the adjacent native levels — the
+  same class of approximation Chronos-Bolt's own pipeline applies
+  internally when asked for quantile levels outside its trained range (a
+  warning it printed for 0.05/0.95 on every call).
+
+| Judge | Model | Test windows | MAE | WQL | WQL vs last-value |
+|---|---|---:|---:|---:|---:|
+| A | last-value (baseline) | 16 | 0.7882 | 0.01171 | — |
+| A | seasonal-naive (baseline) | 16 | 1.0885 | 0.01617 | worse |
+| A | Chronos-Bolt-base (zero-shot) | 16 | 0.7802 | 0.00756 | **-35.4%** |
+| A | Chronos-Bolt-small (zero-shot) | 16 | 0.7212 | 0.00684 | **-41.6%** |
+| A | Chronos-T5-small (zero-shot) | 16 | 0.9487 | 0.00955 | **-18.4%** |
+| A | TimesFM-2.5-200M (zero-shot) | 16 | 0.7490 | 0.00731 | **-37.6%** |
+| B | last-value (baseline) | 26 | 0.6944 | 0.01013 | — |
+| B | seasonal-naive (baseline) | 26 | 0.8697 | 0.01269 | worse |
+| B | Chronos-Bolt-base (zero-shot) | 26 | 0.7096 | 0.00719 | **-29.0%** |
+| B | Chronos-Bolt-small (zero-shot) | 26 | 0.6852 | 0.00676 | **-33.3%** |
+| B | Chronos-T5-small (zero-shot) | 26 | 0.8254 | 0.00886 | **-12.5%** |
+| B | TimesFM-2.5-200M (zero-shot) | 26 | 0.6511 | 0.00698 | **-31.1%** |
+
+**Honest result: this is the first test all session where a model beats the
+trivial baselines, and it does so decisively and consistently** — all four
+pretrained checkpoints beat both last-value and seasonal-naive on WQL, on
+both independently-partitioned judges, by double-digit-to-40% margins. This
+is a materially larger and more consistent margin than the closest published
+direct analog found in the literature pass (zero-shot HRV forecasting,
+arXiv:2607.20027: Chronos beat EWMA by ~3%, MOIRAI showed no significant
+advantage over a mean baseline, p=0.953) — plausibly because BIDMC's 1 Hz
+ICU HR/RESP/SpO2 signals are smoother and more autocorrelated than the HRV
+series in that paper, which is itself a fair, disclosed difference between
+the two comparisons rather than a claim of a stronger general result.
+
+On MAE (point accuracy) the picture is more mixed: Chronos-Bolt-small and
+TimesFM beat last-value's MAE on both judges, but Chronos-Bolt-base and
+Chronos-T5-small do not consistently (e.g. Chronos-Bolt-base's MAE is
+essentially tied with last-value on judge A, worse on judge B, despite a
+much better WQL there) — the pretrained models' advantage is concentrated in
+calibrated quantile spread (what WQL scores), not in shifting the central
+point forecast much past what last-value already gets from strong
+autocorrelation in these signals.
+
+**This directly confirms the massive-pretraining-corpus hypothesis from the
+literature pass**: the same short-horizon, smooth physiological-signal task
+on which every from-scratch RuForecast configuration this session lost to
+naive baselines is won, cleanly, by checkpoints that carry a pretraining
+corpus many orders of magnitude larger than any real dataset available to
+this project. This is evidence *for* zero-shot/foundation-model inference
+(or later, fine-tuning a pretrained checkpoint) as the credible next lever
+for RuForecast-style short-horizon vitals forecasting — not for continuing
+to scale from-scratch training on this project's own small real corpora,
+which the BIDMC and household tests above already showed does not close
+this gap even with genuine, cross-entity real data.
+
+**Scope and caveats, stated plainly:**
+- This is zero-shot inference only — no fine-tuning was attempted on any
+  checkpoint. A fine-tuned comparison (e.g. LoRA-adapting Chronos-Bolt on
+  RuForecast's own training windows) is a natural, not-yet-run follow-up.
+- Univariate-per-variate forecasting was used for all four models because
+  neither Chronos nor TimesFM in these releases has a native multivariate
+  mode matching RuForecast's joint HR/RESP/SpO2 modeling; a true
+  multivariate foundation model (e.g. MOIRAI, which does support cross-variate
+  attention) was not tested here and is a natural next step.
+- Chronos-T5-small's `predict_quantiles` samples internally (unlike
+  Chronos-Bolt's direct quantile heads or TimesFM's quantile head); its
+  numbers above are one run and carry unquantified sampling variance the
+  other three models' numbers don't.
+- No inference-cost/latency comparison against RuForecast's own (much
+  smaller, ~tens-of-KB) model is included; all four pretrained checkpoints
+  are orders of magnitude larger (small-to-200M+ parameters) and ran on a
+  discrete GPU (RTX 5080), not the ESP32-class edge target RuForecast's own
+  architecture is designed for. A model that wins on WQL here is not
+  automatically deployable to the same edge budget RuForecast targets — that
+  tradeoff is unresolved by this test and is itself a reason zero-shot
+  inference (call out to a hosted/cloud checkpoint) and from-scratch
+  small-model training remain different tools for different deployment
+  constraints, not a strict replacement of one by the other.
+
+Reproducer: `scripts/ruforecast-zeroshot/bidmc_windows.py` (window builder,
+baselines, and metrics — ported line-for-line from
+`ruforecast-train/examples/bidmc_prepare.rs` and
+`ruforecast-core/src/{baseline,metrics}.rs`, verified against this document's
+own BIDMC last-value/seasonal-naive numbers) and
+`scripts/ruforecast-zeroshot/run_zeroshot_eval.py` (zero-shot inference and
+scoring), both in this worktree (`research/ruforecast-zeroshot-eval`). Run
+against `/tmp/bidmc-raw/` (downloaded fresh from PhysioNet if not already
+cached) with `python run_zeroshot_eval.py --models chronos-bolt-base
+chronos-bolt-small chronos-t5-small timesfm-2.5-200m --judges a b` inside a
+venv with `chronos-forecasting`, `timesfm`, and a CUDA-enabled `torch`
+installed (`amazon/chronos-*` and `google/timesfm-2.5-200m-pytorch` download
+automatically from HuggingFace Hub on first run; no HF token was required).
+Model weights and the raw BIDMC CSVs are not committed — `/tmp/bidmc-raw/`
+and the HuggingFace cache live only on the host that ran this evaluation.

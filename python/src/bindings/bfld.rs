@@ -15,7 +15,7 @@
 //!
 //! 1. Capture BFR frames with `tcpdump` / Wireshark + the BFR dissector
 //!    (or via `mac80211` debugfs on Linux 6.10+)
-//! 2. Parse the compressed feedback into a numpy Complex64 ndarray
+//! 2. Parse the compressed feedback into a numpy complex128 ndarray
 //!    `[Nr × Nc × Nsc]` using your favourite Python BFR parser
 //! 3. Construct `BfldFrame.from_compressed_feedback(...)` to hand the
 //!    matrix to RuView
@@ -36,7 +36,7 @@ use numpy::{Complex64, PyArray3, PyUntypedArrayMethods, PyReadonlyArray3};
 /// from wifi_densepose import BfldKind
 /// BfldKind.CompressedHE80   # 802.11ax 80 MHz compressed BFR
 /// ```
-#[pyclass(eq, eq_int, hash, frozen, name = "BfldKind")]
+#[pyclass(from_py_object, eq, eq_int, hash, frozen, name = "BfldKind")]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum PyBfldKind {
     CompressedHE20 = 0,
@@ -103,7 +103,7 @@ impl PyBfldKind {
 /// One BFR snapshot: a compressed beamforming feedback matrix tagged
 /// with metadata (timestamp, sounding sequence, source MAC, kind).
 ///
-/// Backing storage: a numpy Complex64 ndarray `[Nr × Nc × Nsc]`. The
+/// Backing storage: a numpy complex128 ndarray `[Nr × Nc × Nsc]`. The
 /// Python constructor accepts the ndarray directly; under the hood we
 /// hold a `Vec<Complex64>` in row-major order.
 ///
@@ -112,7 +112,7 @@ impl PyBfldKind {
 /// import numpy as np
 /// from wifi_densepose import BfldFrame, BfldKind
 ///
-/// fb = np.zeros((2, 1, 996), dtype=np.complex64)  # Nr=2, Nc=1, Nsc=996
+/// fb = np.zeros((2, 1, 996), dtype=np.complex128)  # Nr=2, Nc=1, Nsc=996
 /// frame = BfldFrame.from_compressed_feedback(
 ///     timestamp_ms=1234,
 ///     sounding_index=42,
@@ -138,7 +138,7 @@ pub struct PyBfldFrame {
 
 #[pymethods]
 impl PyBfldFrame {
-    /// Construct from a pre-parsed Complex64 ndarray of shape
+    /// Construct from a pre-parsed numpy complex128 ndarray of shape
     /// `[n_rows, n_cols, n_subcarriers]`. The last dimension MUST
     /// match `kind.n_subcarriers`.
     #[staticmethod]
@@ -212,11 +212,11 @@ impl PyBfldFrame {
         sum / self.matrix.len() as f64
     }
 
-    /// Return the feedback matrix as a numpy Complex64 ndarray of
+    /// Return the feedback matrix as a numpy complex128 ndarray of
     /// shape `[n_rows, n_cols, n_subcarriers]`. Allocates a fresh
     /// Python-owned array; the BfldFrame keeps its own copy.
     fn feedback_matrix<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray3<Complex64>> {
-        PyArray3::from_vec3_bound(
+        PyArray3::from_vec3(
             py,
             &self.reshape_to_vec3(),
         )

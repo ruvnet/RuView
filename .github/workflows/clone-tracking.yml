@@ -34,13 +34,33 @@ jobs:
   snapshot:
     runs-on: ubuntu-latest
     steps:
+      # /traffic/{clones,views} require the "Administration: read" repository
+      # permission, which the workflow GITHUB_TOKEN can never be granted, so
+      # every run since 2026-08 failed with HTTP 403. The scrape now uses a
+      # fine-grained PAT stored as TRAFFIC_TOKEN (ruvnet/RuView only,
+      # Administration: read). Until the owner adds it, the job emits a
+      # warning and skips the scrape instead of failing.
+      - name: Check for TRAFFIC_TOKEN
+        id: tok
+        env:
+          TRAFFIC_TOKEN: ${{ secrets.TRAFFIC_TOKEN }}
+        run: |
+          if [ -n "$TRAFFIC_TOKEN" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=clone-tracking skipped::TRAFFIC_TOKEN secret is not set; the traffic API needs a token with Administration: read (GITHUB_TOKEN cannot have it). No snapshot recorded this run."
+          fi
+
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        if: steps.tok.outputs.present == 'true'
         with:
           submodules: recursive
 
       - name: Fetch /traffic/clones + /traffic/views from GitHub
+        if: steps.tok.outputs.present == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.TRAFFIC_TOKEN }}
         run: |
           mkdir -p data
           gh api repos/${{ github.repository }}/traffic/clones > /tmp/clones.json
@@ -51,6 +71,7 @@ jobs:
           jq '{count, uniques, days: (.views | length)}' /tmp/views.json
 
       - name: Append snapshot to data/clone-data.rvf
+        if: steps.tok.outputs.present == 'true'
         env:
           REPO: ${{ github.repository }}
         run: |
@@ -103,6 +124,7 @@ jobs:
           wc -l "$RVF"
 
       - name: Compute aggregates for the commit summary
+        if: steps.tok.outputs.present == 'true'
         id: agg
         run: |
           # Count distinct per-day entries across all snapshots so we can
@@ -139,6 +161,7 @@ jobs:
           PY
 
       - name: Commit + push if changed
+        if: steps.tok.outputs.present == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

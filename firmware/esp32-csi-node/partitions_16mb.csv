@@ -1,0 +1,25 @@
+# ESP32-C6 CSI Node - 16MB flash partition table
+# For boards with 16MB flash (e.g. ESP32-C6 DevKitC-1 N16).
+#
+# Two 4MB OTA slots. The app is ~1.04MB, so the slots are far larger than
+# needed for the binary alone -- the size is chosen so an OTA never has to
+# care how much the image has grown, and it leaves room for a coredump
+# partition and an 8MB FAT volume for on-node storage.
+#
+# The 4MB and display layouts do not fit this: their slots are 1.875MB and
+# 2MB, sized for 4MB and 8MB parts respectively.
+#
+# Usage: set in sdkconfig, or use the matching defaults file:
+#   CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_16mb.csv"
+#   idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.esp32c6;sdkconfig.defaults.16mb" build
+#
+# Verify before flashing an already-deployed node: a smaller table written
+# over a 16MB node relocates NVS and destroys its provisioning.
+# Name, Type, SubType, Offset, Size, Flags
+nvs,data,nvs,0x9000,24K,
+otadata,data,ota,0xf000,8K,
+phy_init,data,phy,0x11000,4K,
+ota_0,app,ota_0,0x20000,4M,
+ota_1,app,ota_1,0x420000,4M,
+coredump,data,coredump,0x820000,64K,
+storage,data,fat,0x830000,8000K,

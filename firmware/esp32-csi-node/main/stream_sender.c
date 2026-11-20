@@ -37,6 +37,12 @@ static uint32_t s_enomem_suppressed = 0;
  * succeeds. */
 static uint32_t s_enomem_streak = 0;
 
+/* Timestamp of the last sendto() the stack accepted, on either path; 0 until
+ * the node has ever delivered anything. Read by the uplink watchdog in main.c
+ * -- see the rationale there for why "accepted by the stack" is deliberately
+ * not "received by the server". */
+static int64_t s_last_success_us = 0;
+
 static int sender_init_internal(const char *ip, uint16_t port)
 {
     s_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -118,6 +124,7 @@ int stream_sender_send(const uint8_t *data, size_t len)
 
     /* A send got through — buffer pressure cleared; reset the backoff streak. */
     s_enomem_streak = 0;
+    s_last_success_us = esp_timer_get_time();
     return sent;
 }
 
@@ -146,7 +153,16 @@ int stream_sender_send_priority(const uint8_t *data, size_t len)
         }
         return -1;
     }
+    /* Counts for the watchdog: the mesh sync packet rides this path at ~1 Hz,
+     * and its getting through proves the node's network path is intact even
+     * when the bulk CSI stream is being suppressed by the ENOMEM backoff. */
+    s_last_success_us = esp_timer_get_time();
     return sent;
+}
+
+int64_t stream_sender_last_success_us(void)
+{
+    return s_last_success_us;
 }
 
 void stream_sender_deinit(void)

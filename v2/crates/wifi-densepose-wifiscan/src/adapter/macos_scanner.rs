@@ -24,8 +24,8 @@
 //!
 //! macOS only. Gated behind `#[cfg(target_os = "macos")]` at the module level.
 
-use std::process::Command;
-use std::time::Instant;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use crate::domain::bssid::{BandType, BssidId, BssidObservation, RadioType};
 use crate::error::WifiScanError;
@@ -64,17 +64,43 @@ impl MacosCoreWlanScanner {
 
     /// Run the Swift helper and parse the output synchronously.
     ///
-    /// Returns one [`BssidObservation`] per BSSID seen in the scan.
+    /// Returns one [`BssidObservation`] for the connected link.
+    /// Helpers that fail to exit within five seconds are killed and reaped.
     pub fn scan_sync(&self) -> Result<Vec<BssidObservation>, WifiScanError> {
-        let output = Command::new(&self.helper_path)
+        let mut child = Command::new(&self.helper_path)
             .arg("--scan-once")
-            .output()
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
             .map_err(|e| {
                 WifiScanError::ProcessError(format!(
                     "failed to run mac_wifi helper ({}): {e}",
                     self.helper_path
                 ))
             })?;
+
+        // Older helpers ignore --scan-once and stream forever. Bound the
+        // wait so an outdated installation cannot hang capture or auto-detect.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match child.try_wait() {
+                Ok(Some(_)) => break,
+                Ok(None) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                status => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(WifiScanError::ProcessError(match status {
+                        Err(e) => format!("failed to wait for mac_wifi: {e}"),
+                        _ => "mac_wifi --scan-once timed out; rebuild the Swift helper".into(),
+                    }));
+                }
+            }
+        }
+        let output = child.wait_with_output().map_err(|e| {
+            WifiScanError::ProcessError(format!("failed to read mac_wifi output: {e}"))
+        })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -134,8 +160,11 @@ fn parse_json_line(line: &str, timestamp: Instant) -> Option<BssidObservation> {
     let channel_f = extract_number_field(line, "channel")?;
     let channel = channel_f as u8;
 
+    // `--scan-once` reports only the connected link and marks it so.
+    let connected = extract_bool_field(line, "connected").unwrap_or(false);
+
     // Resolve BSSID: use real MAC if available, otherwise generate synthetic.
-    let bssid = resolve_bssid(&bssid_str, &ssid, channel)?;
+    let bssid = resolve_bssid(&bssid_str, &ssid, channel, connected)?;
 
     let band = BandType::from_channel(channel);
 
@@ -160,8 +189,11 @@ fn parse_json_line(line: &str, timestamp: Instant) -> Option<BssidObservation> {
 /// Resolve a BSSID string to a [`BssidId`].
 ///
 /// If the MAC is all-zeros (macOS redaction), generate a synthetic
-/// locally-administered MAC from `SHA-256(ssid:channel)`.
-fn resolve_bssid(bssid_str: &str, ssid: &str, channel: u8) -> Option<BssidId> {
+/// locally-administered MAC from the SSID and channel. When both are redacted
+/// (no Location Services permission), keep the observation only if the helper
+/// marked it as the connected link: there is exactly one, so it cannot collide
+/// with another network. Otherwise abstain.
+fn resolve_bssid(bssid_str: &str, ssid: &str, channel: u8, connected: bool) -> Option<BssidId> {
     // Try parsing the real BSSID first.
     if let Ok(id) = BssidId::parse(bssid_str) {
         // Check for the all-zeros redacted BSSID.
@@ -170,10 +202,20 @@ fn resolve_bssid(bssid_str: &str, ssid: &str, channel: u8) -> Option<BssidId> {
         }
     }
 
-    // Generate synthetic BSSID: SHA-256(ssid:channel), take first 6 bytes,
+    // Without either identity, unrelated networks on the same channel would
+    // collapse to one synthetic BSSID. Do not emit an observation in that case.
+    if ssid.trim().is_empty() {
+        return connected.then(|| synthetic_bssid(REDACTED_CONNECTED_LINK, channel));
+    }
+
+    // Generate synthetic BSSID from SSID and channel, take first 6 bytes,
     // set locally-administered + unicast bits (byte 0: bit 1 set, bit 0 clear).
     Some(synthetic_bssid(ssid, channel))
 }
+
+/// Hash key for the connected link when macOS redacts both SSID and BSSID.
+/// The NUL prefix keeps it from matching any real SSID.
+const REDACTED_CONNECTED_LINK: &str = "\u{0}redacted-connected-link";
 
 /// Generate a deterministic synthetic BSSID from SSID and channel.
 ///
@@ -240,6 +282,20 @@ fn extract_string_field(json: &str, key: &str) -> Option<String> {
     Some(after_quote[..end].to_owned())
 }
 
+/// Extract a boolean field value (`"key": true|false`) from a JSON object string.
+fn extract_bool_field(json: &str, key: &str) -> Option<bool> {
+    let pattern = format!("\"{key}\"");
+    let key_pos = json.find(&pattern)?;
+    let after = json[key_pos + pattern.len()..].trim_start().strip_prefix(':')?.trim_start();
+    if after.starts_with("true") {
+        Some(true)
+    } else if after.starts_with("false") {
+        Some(false)
+    } else {
+        None
+    }
+}
+
 /// Extract a numeric field value from a JSON object string.
 ///
 /// Looks for `"key": <number>` patterns.
@@ -277,6 +333,32 @@ mod tests {
 "#;
 
     #[test]
+    fn helper_process_errors_are_reported() {
+        assert!(matches!(
+            MacosCoreWlanScanner::with_path("/usr/bin/false").scan_sync(),
+            Err(WifiScanError::ScanFailed { .. })
+        ));
+        assert!(matches!(
+            MacosCoreWlanScanner::with_path("/dev/null/mac_wifi").scan_sync(),
+            Err(WifiScanError::ProcessError(_))
+        ));
+    }
+
+    #[test]
+    fn legacy_helper_is_timed_out() {
+        use std::os::unix::fs::PermissionsExt;
+        let path = std::env::temp_dir().join(format!("mac-wifi-timeout-{}", std::process::id()));
+        // exec preserves the helper PID, so killing it cannot orphan sleep.
+        std::fs::write(&path, "#!/bin/sh\nexec /bin/sleep 30\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let start = Instant::now();
+        let result = MacosCoreWlanScanner::with_path(path.to_string_lossy()).scan_sync();
+        std::fs::remove_file(path).unwrap();
+        assert!(matches!(result, Err(WifiScanError::ProcessError(ref e)) if e.contains("timed out")));
+        assert!(start.elapsed() < Duration::from_secs(15));
+    }
+
+    #[test]
     fn parse_valid_output() {
         let obs = parse_macos_scan_output(SAMPLE_OUTPUT).unwrap();
         assert_eq!(obs.len(), 3);
@@ -302,6 +384,65 @@ mod tests {
         assert_eq!(obs[2].bssid.0[0] & 0x02, 0x02);
         // Should have unicast bit (multicast cleared).
         assert_eq!(obs[2].bssid.0[0] & 0x01, 0x00);
+    }
+
+    #[test]
+    fn unavailable_bssid_without_ssid_abstains() {
+        for bssid in ["00:00:00:00:00:00", "", "invalid"] {
+            for ssid in ["", "   "] {
+                let output = format!(
+                    r#"{{"ssid":"{ssid}","bssid":"{bssid}","rssi":-65,"noise":-88,"channel":36}}"#
+                );
+                assert!(parse_macos_scan_output(&output).unwrap().is_empty());
+            }
+        }
+    }
+
+    // macOS without Location Services: the helper's connected-link sample has
+    // a blank SSID and zero BSSID but real rssi/channel. Keep it (#H15).
+    #[test]
+    fn redacted_connected_link_is_kept() {
+        let output = r#"{"bssid":"00:00:00:00:00:00","channel":40,"connected":true,"noise":-94,"rssi":-57,"ssid":"","timestamp":1790888839.88,"tx_rate":576}"#;
+        let obs = parse_macos_scan_output(output).unwrap();
+        assert_eq!(obs.len(), 1);
+        assert!((obs[0].rssi_dbm - (-57.0)).abs() < f64::EPSILON);
+        assert_eq!(obs[0].channel, 40);
+        assert!(obs[0].ssid.is_empty(), "never invent an SSID");
+        assert_ne!(obs[0].bssid.0, [0; 6]);
+        assert_eq!(obs[0].bssid.0[0] & 0x03, 0x02, "locally administered unicast");
+        // Stable across samples, distinct from any real SSID's synthetic id.
+        let again = parse_macos_scan_output(output).unwrap();
+        assert_eq!(obs[0].bssid, again[0].bssid);
+        assert_ne!(obs[0].bssid, synthetic_bssid("", 40));
+    }
+
+    #[test]
+    fn redacted_line_not_marked_connected_still_abstains() {
+        for connected in ["", r#","connected":false"#] {
+            let output = format!(
+                r#"{{"ssid":"","bssid":"00:00:00:00:00:00","rssi":-65,"channel":36{connected}}}"#
+            );
+            assert!(parse_macos_scan_output(&output).unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn extract_bool_field_basic() {
+        assert_eq!(extract_bool_field(r#"{"connected":true}"#, "connected"), Some(true));
+        assert_eq!(extract_bool_field(r#"{"connected" : false}"#, "connected"), Some(false));
+        assert_eq!(extract_bool_field(r#"{"connected":1}"#, "connected"), None);
+        assert_eq!(extract_bool_field(r#"{"x":true}"#, "connected"), None);
+    }
+
+    #[test]
+    fn real_bssid_without_ssid_is_preserved() {
+        let output = r#"{"ssid":"","bssid":"aa:bb:cc:dd:ee:ff","rssi":-65,"noise":-88,"channel":36}"#;
+        let obs = parse_macos_scan_output(output).unwrap();
+        assert_eq!(obs.len(), 1);
+        assert_eq!(obs[0].bssid.to_string(), "aa:bb:cc:dd:ee:ff");
+        assert!(obs[0].ssid.is_empty());
+        assert_eq!(obs[0].rssi_dbm, -65.0);
+        assert_eq!(obs[0].channel, 36);
     }
 
     #[test]

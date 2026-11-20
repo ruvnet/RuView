@@ -29,7 +29,7 @@ chrono = { version = "0.4", features = ["serde"] }
 
 # Signal processing
 ndarray = { workspace = true }
-ndarray-linalg = { workspace = true, optional = true }
+# ndarray-linalg (optional, `eigenvalue` feature) is declared per target below.
 rustfft.workspace = true
 num-complex.workspace = true
 num-traits.workspace = true
@@ -103,3 +103,14 @@ harness = false
 [[bin]]
 name = "calibration_proof_runner"
 path = "src/bin/calibration_proof_runner.rs"
+
+# BLAS backend for the optional `eigenvalue` feature (PR #825).
+# openblas-src does not support its bundled/static build on Windows
+# ("Non-vcpkg builds are not supported on Windows"), so Windows links the
+# system/vcpkg OpenBLAS instead. Other targets keep the static build.
+# Both stay `optional`: `--no-default-features` still drops BLAS entirely.
+[target.'cfg(windows)'.dependencies]
+ndarray-linalg = { version = "0.18", optional = true, features = ["openblas-system"] }
+
+[target.'cfg(not(windows))'.dependencies]
+ndarray-linalg = { version = "0.18", optional = true, features = ["openblas-static"] }

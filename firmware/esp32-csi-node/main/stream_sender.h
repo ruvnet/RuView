@@ -51,6 +51,18 @@ int stream_sender_send(const uint8_t *data, size_t len);
 int stream_sender_send_priority(const uint8_t *data, size_t len);
 
 /**
+ * esp_timer timestamp (microseconds) of the last sendto() the network stack
+ * accepted, on either the bulk or the priority path. Returns 0 if the node has
+ * not successfully sent anything since boot.
+ *
+ * This reports that the datagram was accepted for transmission, NOT that the
+ * aggregator received it -- UDP gives no such signal. Used by the uplink
+ * watchdog to detect a node that is powered and capturing but cannot reach the
+ * network.
+ */
+int64_t stream_sender_last_success_us(void);
+
+/**
  * Close the UDP sender socket.
  */
 void stream_sender_deinit(void);

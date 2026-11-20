@@ -12,13 +12,43 @@
     "ruview_verify",
     "ruview_node_monitor",
     "ruview_guidance",
-    "ruview_memory_search"
+    "ruview_memory_search",
+    "ruview_kernel_selftest",
+    "ruview_doctor",
+    "ruview_firmware_plan",
+    "ruview_firmware_ports",
+    "ruview_train_plan",
+    "ruview_train_gate",
+    "ruview_host_list"
   ],
   "guardedReadTools": {
     "ruview_spaces_list": {
       "grant": "credential-use",
       "network": true,
       "mayRefreshStoredCredential": true
+    },
+    "ruview_devices_scan": {
+      "grant": "device-access",
+      "hardware": true
+    },
+    "ruview_esp32_capture": {
+      "grant": "device-access",
+      "hardware": true
+    },
+    "ruview_mmwave_read": {
+      "grant": "device-access",
+      "hardware": true,
+      "network": true
+    },
+    "ruview_lidar_read": {
+      "grant": "device-access",
+      "hardware": true,
+      "network": true
+    },
+    "ruview_host_run": {
+      "grant": "remote-host",
+      "network": true,
+      "readOnlyRemoteTools": true
     }
   },
   "dangerousTools": {
@@ -28,6 +58,10 @@
     },
     "ruview_node_flash": {
       "grant": "hardware-write",
+      "confirm": true
+    },
+    "ruview_train": {
+      "grant": "workspace-write",
       "confirm": true
     }
   }

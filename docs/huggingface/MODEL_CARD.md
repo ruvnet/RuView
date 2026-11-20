@@ -81,6 +81,42 @@ v1, with its flat loss, was barely better than random on this same test.
 params, trained with InfoNCE (temperature 0.1, in-batch + temporal-far negatives), AdamW, 60 epochs.
 Temporal positives within 2 s; negatives >30 s apart. Time-disjoint 80/20 split.
 
+**EWC (catastrophic-forgetting protection):** measured forgetting rate on the 4 protected
+tasks is **32.97%** — real and non-trivial, disclosed here rather than only in the raw
+`training-metrics.json`. Fisher information is computed and applied (protection strength
+2000), but this is not "solved forgetting" — a user fine-tuning per-room LoRA adapters
+should expect some drift on earlier tasks, not none.
+
+## 🔧 v2.0.1 — fixed the published training-metrics.json itself (2026-09-09)
+
+Separately from the v1→v2 accuracy retraction above, an unrelated bug was found and fixed
+in the **export code** (`scripts/train-ruvllm.js`) that produces `config.json` and
+`training-metrics.json` for this file set (`model.safetensors`, `model-q2/q4/q8.bin`,
+`presence-head.json`, `node-1/2.json`) — separate from the `csi-embed-v2*` files, which
+come from a different script.
+
+The exported `lossHistory` and `contrastive.durationMs` were being read from a disconnected
+baseline pass (`ContrastiveTrainer.train()`, which computes loss but never updates the
+encoder) instead of from the loop that actually performs gradient updates on the encoder
+weights. Concretely: `lossHistory` published a flat, non-decreasing curve around `0.1352`
+for all 20 epochs, and `durationMs` reported ~12.4s — both measuring the wrong computation.
+
+**This did not affect `finalLoss`/`improvement`/the 82.3% held-out temporal-triplet
+accuracy above** — those were already computed from the real training loop and are
+unchanged by this fix. It only affected the exported diagnostic curve and duration, which
+anyone auditing convergence from the published JSON would have been misled by. Re-run
+against the same real capture (`data/recordings/overnight-1775217646.csi.jsonl`) with the
+fix applied: `lossHistory` now shows a genuine decreasing curve (0.1037 -> 0.0654 across 20
+epochs) and `durationMs` reports the real ~40s gradient-loop time. `config.json`'s
+`training.steps` field (`12212300` — epochs × triplets, arithmetically consistent but read
+like optimizer-step count) is now reported as separate `epochs`/`tripletUpdatesPerEpoch`
+fields instead.
+
+Repro: `node scripts/train-ruvllm.js --data data/recordings/overnight-1775217646.csi.jsonl
+--output <dir> --epochs 20` in [github.com/ruvnet/RuView](https://github.com/ruvnet/RuView)
+(the `aether-arena/staging/train_csi_embed.py` path cited above is for the separate
+`csi-embed-v2*` files and was not touched by this fix).
+
 ### v2 files & proof
 | File | Size | Use |
 |------|------|-----|

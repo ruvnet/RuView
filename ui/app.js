@@ -28,6 +28,7 @@ import { i18n } from './utils/i18n.js';
 import { ScreenshotTool } from './utils/screenshot.js';
 import { UptimeClock } from './utils/uptime-clock.js';
 import { QuickSettings } from './utils/quick-settings.js';
+import { dataSourceBanner } from './utils/data-source-banner.js';
 
 class WiFiDensePoseApp {
   constructor() {
@@ -97,6 +98,10 @@ class WiFiDensePoseApp {
         console.warn('⚠️ Backend not available:', error.message);
         this.showBackendStatus('Backend unavailable — start sensing-server', 'warning');
       }
+
+      // Mount the global provenance bar before the service starts, so the very
+      // first non-live state is visible on whichever tab is showing.
+      dataSourceBanner.init();
 
       // Start the sensing WebSocket service early so the dashboard and
       // live-demo tabs can show the correct data-source status immediately.
@@ -359,6 +364,22 @@ class WiFiDensePoseApp {
     // Handle before unload
     window.addEventListener('beforeunload', () => {
       this.cleanup();
+    });
+
+    // `beforeunload` above tears down every component and disconnects the
+    // sensing WebSocket. If the browser restores this page from bfcache on
+    // Back/Forward instead of doing a fresh navigation, that torn-down state
+    // comes back frozen exactly as-is — nothing re-runs DOMContentLoaded, so
+    // sensingService.start() never fires again and disposed components (e.g.
+    // Room Builder) never get recreated. `pageshow`'s `event.persisted` is
+    // the standard signal for "this is a bfcache restore, not a fresh load";
+    // forcing a real reload here is simpler and more robust than trying to
+    // hand-reinitialize every component/connection back to a clean state.
+    window.addEventListener('pageshow', (event) => {
+      if (event.persisted) {
+        console.log('Page restored from bfcache after cleanup() — forcing reload');
+        window.location.reload();
+      }
     });
   }
 

@@ -111,7 +111,12 @@ handler (`health_ready`, `main.rs:8128,8133`) and return a `trust` block
 ```json
 {
   "status": "ready",
+  "source": "esp32",
+  "source_state": "live_unverified",
+  "waiting_for_frames": false,
+  "last_frame_age_ms": 42,
   "trust": {
+    "node_positions": { "1": [0.5, 0.0, 1.0], "2": [4.0, 3.0, 1.0] },
     "last_witness": "…64 hex chars or null…",
     "effective_class": "Anonymous | Restricted | …",
     "demoted": false,
@@ -121,6 +126,11 @@ handler (`health_ready`, `main.rs:8128,8133`) and return a `trust` block
   }
 }
 ```
+
+`node_positions` is the `--node-positions` map the governed fuser holds,
+keyed by node id. It is `{}` when no positions are configured, and then every
+node fuses at the origin. A node the map does not name also fuses at the
+origin.
 
 **This is a real, currently-shipped diagnostic surface — but it is honestly
 limited.** It tells you *that* errors are occurring and *that* the current

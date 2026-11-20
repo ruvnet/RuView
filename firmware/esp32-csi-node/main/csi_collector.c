@@ -17,6 +17,7 @@
 #include "edge_processing.h"
 #include "c6_timesync.h"  /* ADR-110: 802.15.4 epoch for cross-node alignment */
 #include "c6_sync_espnow.h" /* ADR-110 §A0.11: mesh-aligned epoch for sync packet */
+#include "csi_he_gate.h"     /* ADR-423 D1: HE-LTF validity gate */
 
 #include <string.h>
 #include "esp_log.h"
@@ -74,7 +75,7 @@ static uint32_t s_rate_skip = 0;
 #define CSI_SELF_PING_INTERVAL_MS (1000U / CONFIG_CSI_SELF_PING_HZ)
 
 #ifndef CONFIG_EDGE_DSP_SAMPLE_HZ
-#if CONFIG_IDF_TARGET_ESP32C6
+#if CONFIG_IDF_TARGET_ESP32C6 || CONFIG_IDF_TARGET_ESP32C5
 #define CONFIG_EDGE_DSP_SAMPLE_HZ 8
 #else
 #define CONFIG_EDGE_DSP_SAMPLE_HZ 20
@@ -114,7 +115,23 @@ static int64_t s_last_send_us = 0;
  */
 #define CSI_MIN_PROCESS_INTERVAL_US  (20 * 1000)  /* 50 Hz */
 static int64_t s_last_process_us = 0;
+/* Mesh-epoch window index of the last accepted frame. UINT64_MAX means "none
+ * yet", which no real bucket can collide with. */
+static uint64_t s_last_gate_bucket = UINT64_MAX;
 static uint32_t s_early_drop = 0;
+
+/* ADR-423 D1: HE-LTF validity gate. Counted for every HE PPDU the driver
+ * delivers (before the rate gate), so the reported ratio is the radio's, not
+ * the post-gate sample's. */
+#if defined(CONFIG_CSI_HE_INVALID_POLICY_TAG)
+#define CSI_HE_POLICY CSI_HE_POLICY_TAG
+#elif defined(CONFIG_CSI_HE_INVALID_POLICY_PASS)
+#define CSI_HE_POLICY CSI_HE_POLICY_PASS
+#else
+#define CSI_HE_POLICY CSI_HE_POLICY_DROP
+#endif
+static uint32_t s_he_valid = 0;
+static uint32_t s_he_invalid = 0;
 
 /* ---- ADR-029: Channel-hop state ---- */
 
@@ -263,8 +280,16 @@ size_t csi_serialize_frame(const wifi_csi_info_t *info, uint8_t *buf, size_t buf
     buf[19] = 0;
 #endif
 
-    /* I/Q data */
+    /* I/Q data. ESP-IDF documents that the first four CSI bytes are invalid
+     * when first_word_invalid is set. Never let those hardware artifacts feed
+     * either the host or edge DSP path. Preserve the fixed ADR-018 geometry by
+     * zeroing rather than removing bytes, and mark the sanitation in bit 5. */
     memcpy(&buf[CSI_HEADER_SIZE], info->buf, iq_len);
+    if (info->first_word_invalid && iq_len > 0) {
+        size_t invalid_len = iq_len < 4 ? iq_len : 4;
+        memset(&buf[CSI_HEADER_SIZE], 0, invalid_len);
+        buf[19] |= CSI_FLAG_FIRST_WORD_SANITIZED;
+    }
 
     return frame_size;
 }
@@ -276,16 +301,16 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
 {
     (void)ctx;
 
-    /* Early rate gate: drop excess callbacks to ~50 Hz to prevent
-     * SPI flash cache crash in WiFi ISR (wDev_ProcessFiq). */
-    int64_t now_us = esp_timer_get_time();
-    if ((now_us - s_last_process_us) < CSI_MIN_PROCESS_INTERVAL_US) {
-        s_early_drop++;
-        return;
-    }
-    s_last_process_us = now_us;
-
-    /* ADR-060: MAC address filtering — drop frames from non-matching sources.
+    /* ADR-060: MAC address filtering — MOVED ABOVE the rate gate.
+     *
+     * The gate below stamps s_last_process_us before this filter ran, so a
+     * frame from any foreign transmitter claimed the 20 ms window and was then
+     * discarded here — starving the filtered stream. Measured on an ESP32-C6
+     * locked to its associated AP: 1.7 CSI/s instead of ~20 Hz. Filtering
+     * first preserves the gate's crash protection (processing is still capped
+     * at 50 Hz) while letting the matched transmitter actually fill the slots.
+     * With no filter configured the behaviour is byte-for-byte unchanged.
+     *
      * Uses defensively-copied s_filter_mac instead of g_nvs_config (which can
      * be corrupted by wifi_init_sta — same root cause as the node_id clobber). */
     if (s_filter_mac_set) {
@@ -294,6 +319,77 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
         }
     }
 
+    /* ADR-423 D1: decide on HE estimate validity BEFORE the rate gate, so an
+     * invalid frame cannot claim the 20 ms slot that a valid one would fill
+     * (the same starvation the ADR-060 move above fixed for MAC filtering). */
+    csi_he_action_t he_action = CSI_HE_ACTION_ACCEPT;
+#if CONFIG_SOC_WIFI_HE_SUPPORT
+    {
+        unsigned bb = info->rx_ctrl.cur_bb_format;
+        bool vld = info->rx_ctrl.rx_channel_estimate_info_vld;
+        if (bb >= CSI_BB_FORMAT_HE_MIN) {
+            if (vld) { s_he_valid++; } else { s_he_invalid++; }
+        }
+        he_action = csi_he_gate_action(bb, vld, CSI_HE_POLICY);
+        if (he_action == CSI_HE_ACTION_DROP) {
+            return;
+        }
+    }
+#endif
+
+    /* Early rate gate: drop excess callbacks to ~50 Hz to prevent
+     * SPI flash cache crash in WiFi ISR (wDev_ProcessFiq).
+     *
+     * HOW the rate is limited decides whether cross-node fusion is possible.
+     *
+     * The original gate is "at least 20 ms since MY last accept". Each node
+     * therefore has an independent phase: node A can accept at t=0,20,40 ms
+     * while node B accepts at 7,27,47. Both are perfectly healthy and both hit
+     * 50 Hz, yet they accept disjoint frames and nothing can be paired.
+     *
+     * MEASURED 2026-08-30, two boards side by side: they HEARD the same
+     * transmissions 72% of the time but only 25% of accepted frames were
+     * common. The frames were there; the gate was throwing away the pairing.
+     *
+     * So gate on a bucket of the MESH-ALIGNED epoch instead: every node takes
+     * the first frame it hears in the same absolute 20 ms window. Two nodes
+     * that heard the same frame now both accept it. Mesh sync is good to
+     * roughly 490 us against a 20 ms bucket -- about 2.5% of a window -- so
+     * boundary disagreements are rare.
+     *
+     * Falls back to the original elapsed-time gate whenever mesh sync is not
+     * valid (no leader heard yet, or a node that just booted), because an
+     * unsynced epoch would otherwise gate on a meaningless number. A node
+     * running unsynced simply gets the old behaviour rather than no gate.
+     *
+     * The half-interval floor below keeps the crash protection honest: bucket
+     * gating alone could accept at the end of one window and the start of the
+     * next, back to back. The floor bounds that to ~100 Hz for a single pair
+     * while the average stays at 50 Hz. Do not remove it; the gate exists for
+     * a crash, not for tidiness. */
+    int64_t now_us = esp_timer_get_time();
+    bool take;
+#ifdef CONFIG_CSI_GATE_MESH_ALIGNED
+    if (c6_sync_espnow_is_valid()) {
+        uint64_t bucket = c6_sync_espnow_get_epoch_us()
+                        / (uint64_t)CSI_MIN_PROCESS_INTERVAL_US;
+        take = (bucket != s_last_gate_bucket)
+            && ((now_us - s_last_process_us) >= CSI_MIN_PROCESS_INTERVAL_US / 2);
+        if (take) {
+            s_last_gate_bucket = bucket;
+        }
+    } else {
+        take = (now_us - s_last_process_us) >= CSI_MIN_PROCESS_INTERVAL_US;
+    }
+#else
+    take = (now_us - s_last_process_us) >= CSI_MIN_PROCESS_INTERVAL_US;
+#endif
+    if (!take) {
+        s_early_drop++;
+        return;
+    }
+    s_last_process_us = now_us;
+
     s_cb_count++;
 
     if (s_cb_count <= 3 || (s_cb_count % 100) == 0) {
@@ -301,9 +397,18 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
                  (unsigned long)s_cb_count, info->len,
                  info->rx_ctrl.rssi, info->rx_ctrl.channel);
     }
+#if CONFIG_SOC_WIFI_HE_SUPPORT
+    if ((s_cb_count % 1000) == 0) {
+        ESP_LOGI(TAG, "ADR-423 HE estimate: valid=%lu invalid=%lu policy=%d",
+                 (unsigned long)s_he_valid, (unsigned long)s_he_invalid, (int)CSI_HE_POLICY);
+    }
+#endif
 
     uint8_t frame_buf[CSI_MAX_FRAME_SIZE];
     size_t frame_len = csi_serialize_frame(info, frame_buf, sizeof(frame_buf));
+    if (he_action == CSI_HE_ACTION_TAG && frame_len > 19) {
+        frame_buf[19] |= CSI_FRAME_FLAG_HE_ESTIMATE_INVALID;  /* ADR-423 D1 */
+    }
 
     if (frame_len > 0) {
         /* Rate-limit UDP sends to avoid ENOMEM from lwIP pbuf exhaustion.
@@ -330,13 +435,18 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
      * while the on-device Tier 1/2 pipeline receives a uniform, sustainable
      * stream. Enqueuing every burst frame overloaded the unicore C6 DSP and
      * turned 30-40 callback pps into an irregular approximately 8 Hz subset. */
-    if (info->buf && info->len > 0) {
+    /* ADR-423 D1: a tagged (invalid-estimate) frame is streamed for study but
+     * never reaches presence/vitals/top-K. */
+    if (frame_len > CSI_HEADER_SIZE && he_action != CSI_HE_ACTION_TAG) {
         if (s_next_edge_enqueue_us == 0) {
             s_next_edge_enqueue_us = now_us;
         }
 
         if (now_us >= s_next_edge_enqueue_us) {
-            (void)edge_enqueue_csi((const uint8_t *)info->buf, (uint16_t)info->len,
+            /* Reuse the sanitized ADR-018 payload. Feeding info->buf here
+             * would reintroduce first_word_invalid artifacts on device. */
+            (void)edge_enqueue_csi(&frame_buf[CSI_HEADER_SIZE],
+                                   (uint16_t)(frame_len - CSI_HEADER_SIZE),
                                    (int8_t)info->rx_ctrl.rssi, info->rx_ctrl.channel);
 
             /* Preserve the configured sample clock instead of resetting it to
@@ -425,9 +535,9 @@ static void wifi_promiscuous_cb(void *buf, wifi_promiscuous_pkt_type_t type)
  * are sparse beacons (often non-OFDM DSSS), so wifi_csi_callback can starve to
  * yield=0pps -> DEGRADED -> motion/presence=0 (#521, #954).
  *
- * This guarantees a ~50 Hz OFDM unicast floor by pinging the STA's own gateway:
- * the router's ICMP echo replies are OFDM frames destined to this station, which
- * drive the CSI engine regardless of promiscuous filter state or ambient traffic.
+ * Ping the STA's gateway to request unicast traffic. Some APs send ICMP replies
+ * at 802.11b rates, which produce no CSI (#2287); this is not a guaranteed
+ * OFDM floor. Such APs need a LAN host sending unicast UDP to the node.
  * It is ADDITIVE — promiscuous capture (#396/#893) is left fully intact so
  * multistatic/multi-node sensing still hears other stations' frames. Mirrors
  * Espressif's esp-csi csi_recv_router reference.
@@ -459,6 +569,7 @@ static void csi_start_self_ping(void)
     cfg.target_addr     = target;
     cfg.count           = ESP_PING_COUNT_INFINITE;
     cfg.interval_ms     = CSI_SELF_PING_INTERVAL_MS;
+    cfg.timeout_ms      = CSI_SELF_PING_INTERVAL_MS;
     cfg.data_size       = 1;
     cfg.task_stack_size = 4096;
 
@@ -471,7 +582,7 @@ static void csi_start_self_ping(void)
 
     if (esp_ping_new_session(&cfg, &cbs, &s_self_ping) == ESP_OK && s_self_ping != NULL) {
         esp_ping_start(s_self_ping);
-        ESP_LOGI(TAG, "self-ping started -> %s @%dHz (CSI OFDM source, fix #521/#954)",
+        ESP_LOGI(TAG, "self-ping started -> %s @%dHz (CSI yield depends on AP reply rate, #2287)",
                  gw_str, CONFIG_CSI_SELF_PING_HZ);
     } else {
         ESP_LOGW(TAG, "self-ping: esp_ping_new_session failed");
@@ -692,6 +803,25 @@ uint16_t csi_collector_get_send_fail_count(void)
     return (f > 0xFFFFu) ? 0xFFFFu : (uint16_t)f;
 }
 
+uint32_t csi_collector_get_send_ok_count(void)
+{
+    return s_send_ok;
+}
+
+/* The gate here is fixed at compile time (mesh-aligned bucketing, falling
+ * back to elapsed time when unsynced), so there is no mode or period to
+ * report. Return the explicit sentinel rather than a number that reads as
+ * a real setting. */
+uint8_t csi_collector_get_gate_mode(void)
+{
+    return CSI_GATE_NOT_CONFIGURABLE;
+}
+
+uint8_t csi_collector_get_gate_seq_period(void)
+{
+    return CSI_GATE_NOT_CONFIGURABLE;
+}
+
 /* ---- ADR-029: Channel hopping ---- */
 
 void csi_collector_set_hop_table(const uint8_t *channels, uint8_t hop_count, uint32_t dwell_ms)
@@ -850,4 +980,10 @@ esp_err_t csi_inject_ndp_frame(void)
     }
 
     return err;
+}
+
+void csi_collector_get_he_validity(uint32_t *valid, uint32_t *invalid)
+{
+    if (valid)   *valid = s_he_valid;
+    if (invalid) *invalid = s_he_invalid;
 }

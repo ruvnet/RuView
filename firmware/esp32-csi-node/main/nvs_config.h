@@ -13,13 +13,17 @@
 
 #include <stdint.h>
 
+#include "config_limits.h"
+
 /** Maximum lengths for NVS string fields. */
 #define NVS_CFG_SSID_MAX     33
 #define NVS_CFG_PASS_MAX     65
 #define NVS_CFG_IP_MAX       16
 
-/** Maximum channels in the hop list (must match CSI_HOP_CHANNELS_MAX). */
-#define NVS_CFG_HOP_MAX      6
+/** Maximum channels in the hop list (must match CSI_HOP_CHANNELS_MAX).
+ *  Derived from the shared limit so the loader and the configuration API can
+ *  never disagree about how many channels the node may hop over. */
+#define NVS_CFG_HOP_MAX      CFG_LIMIT_HOP_COUNT_MAX
 
 /** Runtime configuration loaded from NVS or Kconfig defaults. */
 typedef struct {
@@ -62,7 +66,20 @@ typedef struct {
     char     zone_name[16];              /**< Zone name for this node (e.g. "lobby"). */
     uint16_t swarm_heartbeat_sec;        /**< Heartbeat interval (seconds, default 30). */
     uint16_t swarm_ingest_sec;           /**< Vector ingest interval (seconds, default 5). */
+
+    /* Onboard WS2812 "viz" LED. The default is a 40 Hz square-wave gamma
+     * stimulus at full LUT brightness, which is fine on a bench and hostile
+     * in a bedroom -- hence runtime selectable rather than Kconfig-only. */
+    uint8_t  led_mode;                   /**< 0=off, 1=steady colour, 2=40Hz flicker. */
+    uint8_t  led_brightness;             /**< Percent, 0-100, scales the colormap. */
 } nvs_config_t;
+
+#define LED_MODE_OFF     0
+#define LED_MODE_STEADY  1
+#define LED_MODE_FLICKER 2
+
+/** Live configuration, loaded once at boot by app_main(). */
+extern nvs_config_t g_nvs_config;
 
 /**
  * Load configuration from NVS, falling back to Kconfig defaults.

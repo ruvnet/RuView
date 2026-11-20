@@ -37,6 +37,31 @@ services:
       #   volumes: ["/path/to/models:/app/models"]
       #   MODELS_DIR=/app/models
       - MODELS_DIR=${MODELS_DIR:-data/models}
+      # Auth (issue #864). The entrypoint refuses to start (exit 64) unless
+      # RUVIEW_API_TOKEN is set. Export it before `docker compose up`:
+      #   export RUVIEW_API_TOKEN=$(openssl rand -hex 32)
+      # Bare names pass the host value through only when it is set.
+      - RUVIEW_API_TOKEN
+      # ESP32 UDP ingest (ADR-296, issue #2089). The UDP receiver defaults to
+      # 127.0.0.1, which cannot receive from the published 5005/udp port.
+      # Set ONE source guard and the entrypoint binds 0.0.0.0:
+      #   RUVIEW_UDP_ALLOW=<node-ip-or-cidr>  restrict sources (preferred)
+      #   RUVIEW_UDP_INSECURE_LAN=true        accept the spoofing risk
+      # Docker Desktop and OrbStack on macOS rewrite the source address to the
+      # bridge gateway, so a LAN-subnet allowlist drops every frame. There,
+      # allow the gateway instead:
+      #   docker network inspect <project>_default \
+      #     --format '{{(index .IPAM.Config 0).Gateway}}'
+      #   RUVIEW_UDP_ALLOW=<gateway>/32
+      # The gateway admits anything that reaches the published port, so keep
+      # 5005/udp off untrusted networks.
+      - RUVIEW_UDP_ALLOW
+      - RUVIEW_UDP_INSECURE_LAN
+      - RUVIEW_UDP_BIND
+      # Browsing the UI from another machine also needs the host name or IP
+      # in SENSING_ALLOWED_HOSTS (otherwise 421), and the TCP ports above
+      # published beyond 127.0.0.1.
+      - SENSING_ALLOWED_HOSTS
     security_opt:
       - no-new-privileges:true
     cap_drop:

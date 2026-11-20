@@ -17,21 +17,31 @@ for talking to a live RuView sensing-server over WebSocket or MQTT.
 
 ## Features
 
-- **17-keypoint pose** — full-body skeletal estimate from WiFi CSI, no camera
-- **Vital signs** — respiratory rate (6–30 BPM) and heart rate (40–120 BPM)
-  with a confidence score and clinical-grade / degraded / unreliable status
-- **Presence, person count, fall detection, motion** — fused outputs from
-  the same CSI stream
-- **10 semantic primitives** (HA-MIND) — someone-sleeping, possible-distress,
-  room-active, bathroom-occupied, fall-risk-elevated, bed-exit, … — ready
-  to wire into Home Assistant or Apple Home automations
+In the compiled wheel (runs offline, no server needed):
+
+- **Vital signs** — the Rust 3-stage pipeline: `CsiVitalPreprocessor`
+  (static-component suppression), `BreathingExtractor` (6–30 BPM) and
+  `HeartRateExtractor` (40–120 BPM), each estimate carrying a confidence
+  score and a valid / degraded / unreliable status
+- **Pose types** — `Keypoint`, `PoseEstimate`, `PersonPose`, `BoundingBox`
+  for the 17-keypoint skeletons a RuView sensing-server produces
 - **Beamforming Feedback (BFLD) support** — 802.11ac/ax/be compressed feedback
   matrices on top of the receiver-side CSI path
+- **Witness check** — `wifi_densepose.verify_witness()` re-runs the published
+  deterministic pipeline proof (ADR-117 §11.3)
 - **GIL-releasing DSP** — extract loops run with the GIL released, so a
   tokio-backed web server can call into the pipeline without stalling its
   event loop
-- **Tiny wheel** — ~240 KB compiled (one binary per OS/arch covers Python
-  3.10+ via the stable ABI)
+- **Small wheel** — under 400 KB compiled (one binary per OS/arch covers
+  Python 3.10+ via the stable ABI)
+
+With the `[client]` extra, from a live RuView sensing-server:
+
+- **Pose, presence, person count, fall detection, motion** — streamed over
+  WebSocket (`SensingClient`) or MQTT (`RuViewMqttClient`)
+- **10 semantic primitives** (HA-MIND) — someone-sleeping, possible-distress,
+  room-active, bathroom-occupied, fall-risk-elevated, bed-exit, … — ready
+  to wire into Home Assistant automations
 
 ## Install
 
@@ -66,6 +76,35 @@ Runnable examples: [`examples/reid_from_csi.py`](examples/reid_from_csi.py),
 [`examples/cross_room_calibrate.py`](examples/cross_room_calibrate.py),
 [`examples/mat_triage.py`](examples/mat_triage.py).
 
+## Quickstart
+
+Runs as-is after `pip install wifi-densepose`. It feeds 30 seconds of
+synthetic CSI through the Rust pipeline and prints the recovered rates
+(about 15 breaths/min and 72 beats/min):
+
+```python
+import math
+
+from wifi_densepose import BreathingExtractor, CsiVitalPreprocessor, HeartRateExtractor
+
+pre = CsiVitalPreprocessor.esp32_default()  # 56 subcarriers, EMA static suppression
+br = BreathingExtractor.esp32_default()     # 0.1-0.5 Hz band, 30 s window
+hr = HeartRateExtractor.esp32_default()     # 0.8-2.0 Hz band, 15 s window
+
+# 30 s of synthetic CSI at 100 Hz: 15 breaths/min (0.25 Hz) + 72 beats/min (1.2 Hz).
+for i in range(3000):
+    t = i / 100.0
+    a = 10.0 + 0.5 * math.sin(2 * math.pi * 0.25 * t) + 0.05 * math.sin(2 * math.pi * 1.2 * t)
+    residuals = pre.process([a] * 56)
+    breathing = br.extract(residuals, [])
+    heart = hr.extract(residuals, [])
+
+print("breathing:", breathing)
+print("heart:    ", heart)
+```
+
+The signal is synthetic; this shows the API, not accuracy on real CSI.
+
 ## Usage
 
 ### Extract breathing rate from a CSI stream
@@ -81,8 +120,22 @@ for residuals, weights in your_csi_source:  # one frame at a time
         print(f"{est.value_bpm:.1f} BPM  (confidence={est.confidence:.2f})")
 ```
 
-Heart rate is the same shape — `HeartRateExtractor.esp32_default()` with a
-0.8–2.0 Hz band-pass and a 15-second window.
+For heart rate, use `HeartRateExtractor.esp32_default()` with a 0.8–2.0 Hz
+bandpass and a 15-second window. Its second argument is `phases`, not the
+breathing extractor's `weights`:
+
+```python
+hr = HeartRateExtractor.esp32_default()
+est = hr.extract(residuals=residuals, phases=phases)
+# If phase measurements are unavailable, phases=[] uses equal weighting.
+```
+
+The current binding rejects the old `weights` keyword with `TypeError`.
+Heart-rate estimation requires a local autocorrelation peak; a declining
+breathing-only correlation is not treated as a pulse at the band edge.
+Additional filtering reduces respiratory leakage, while confidence remains
+capped by evidence from the original filter stage. Synthetic regression tests
+cover these cases; they do not establish accuracy on real CSI or medical use.
 
 ### Subscribe to a live sensing-server
 
@@ -112,7 +165,8 @@ listener.on(SemanticPrimitive.PossibleDistress, lambda e: alert(e))
 
 client = RuViewMqttClient(broker_host="homeassistant.local")
 client.on_message(
-    "homeassistant/+/wifi_densepose_+/+/state",
+    # MQTT `+` must fill a whole topic level; the listener skips non-RuView topics.
+    "homeassistant/+/+/+/state",
     listener.handle_mqtt_message,
 )
 client.start()
@@ -125,8 +179,8 @@ client.wait_connected()
 import numpy as np
 from wifi_densepose import BfldFrame, BfldKind
 
-# Parse compressed BFR from a Wireshark capture into a Complex64 ndarray ...
-fb = np.zeros((2, 1, 996), dtype=np.complex64)  # Nr=2 Nc=1 Nsc=996 for HE80
+# Parse compressed BFR from a Wireshark capture into a complex128 ndarray ...
+fb = np.zeros((2, 1, 996), dtype=np.complex128)  # Nr=2 Nc=1 Nsc=996 for HE80
 
 frame = BfldFrame.from_compressed_feedback(
     timestamp_ms=ts,

@@ -118,6 +118,12 @@ pub struct RfGaussian {
     pub first_seen_ns: u64,
     /// Last-updated timestamp, ns since epoch.
     pub timestamp_ns: u64,
+    /// Time up to which `confidence` has already been decayed, ns since
+    /// epoch. [`super::map::GaussianMap::decay`] only applies the interval
+    /// after `max(decayed_to_ns, timestamp_ns)`, so repeated calls compose
+    /// instead of compounding. Defaults to 0 for older serialized maps.
+    #[serde(default)]
+    pub decayed_to_ns: u64,
     /// Confidence e-folding time in seconds (decay clock).
     pub decay_tau_s: f64,
     /// Evidence provenance.
@@ -204,6 +210,7 @@ impl RfGaussian {
             confidence,
             first_seen_ns: timestamp_ns,
             timestamp_ns,
+            decayed_to_ns: timestamp_ns,
             decay_tau_s,
             provenance,
             source_receipts: Vec::new(),

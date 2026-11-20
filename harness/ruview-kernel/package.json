@@ -1,0 +1,67 @@
+{
+  "name": "@ruvnet/ruview-kernel",
+  "version": "0.1.0",
+  "description": "RuView portable compute kernel for Node and browsers: the ADR-021 vitals pipeline in Rust, shipped as zero-import WebAssembly with an optional napi-rs native backend and a byte-identical JSON ABI.",
+  "type": "module",
+  "bin": {
+    "ruview-kernel": "bin/cli.js"
+  },
+  "exports": {
+    ".": "./src/index.js",
+    "./cli": "./bin/cli.js",
+    "./wasm": "./src/wasm.js",
+    "./abi": "./src/abi.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "wasm/ruview_kernel.wasm",
+    "wasm/SHA256SUMS",
+    "native/*.node",
+    "native/SHA256SUMS",
+    "scripts/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "node ./scripts/build.mjs --wasm --napi",
+    "build:wasm": "node ./scripts/build.mjs --wasm",
+    "build:napi": "node ./scripts/build.mjs --napi",
+    "test": "node --test",
+    "test:security": "node --test test/abi.test.mjs test/security.test.mjs",
+    "test:e2e": "node --test test/e2e.test.mjs",
+    "doctor": "node ./bin/cli.js doctor",
+    "selftest": "node ./bin/cli.js selftest",
+    "parity": "node ./bin/cli.js parity",
+    "prepack": "node ./scripts/verify-artifacts.mjs --require-wasm"
+  },
+  "keywords": [
+    "ruview",
+    "wifi-sensing",
+    "csi",
+    "channel-state-information",
+    "vital-signs",
+    "webassembly",
+    "wasm",
+    "napi-rs",
+    "metaharness"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "license": "MIT",
+  "author": "ruvnet",
+  "homepage": "https://github.com/ruvnet/RuView#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ruvnet/RuView.git",
+    "directory": "harness/ruview-kernel"
+  },
+  "bugs": {
+    "url": "https://github.com/ruvnet/RuView/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

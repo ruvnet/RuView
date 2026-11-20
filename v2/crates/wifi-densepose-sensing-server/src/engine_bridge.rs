@@ -38,7 +38,7 @@ use wifi_densepose_bfld::{PrivacyClass, PrivacyMode};
 use wifi_densepose_engine::{AdapterInfo, EngineError, StreamingEngine, TrustedOutput};
 use wifi_densepose_geo::types::GeoRegistration;
 use wifi_densepose_signal::ruvsense::fusion_quality::CalibrationId;
-use wifi_densepose_signal::ruvsense::multistatic::MultistaticConfig;
+use wifi_densepose_signal::ruvsense::multistatic::{MultistaticConfig, PhaseFusion};
 use wifi_densepose_worldgraph::WorldId;
 
 use super::multistatic_bridge::node_frames_from_states_with_guard;
@@ -77,6 +77,8 @@ pub struct EngineBridge {
     engine_error_count: u64,
     /// Last time an engine error was actually logged (rate limiter).
     last_error_warn_at: Option<Instant>,
+    /// Phase-combining mode of the most recent successful cycle (#1752).
+    phase_fusion: Option<PhaseFusion>,
 }
 
 impl EngineBridge {
@@ -118,6 +120,7 @@ impl EngineBridge {
             demoted: false,
             engine_error_count: 0,
             last_error_warn_at: None,
+            phase_fusion: None,
         }
     }
 
@@ -130,6 +133,21 @@ impl EngineBridge {
     /// loop; see `WorldGraph::prune_semantic_states`).
     pub fn set_semantic_retention(&mut self, max_states: usize) {
         self.engine.set_semantic_retention(max_states);
+    }
+
+    /// Give the governed fuser the `--node-positions` map, keyed by node id.
+    /// The fuser resolves each frame's position by its `node_id`, so nodes
+    /// discovered later pick up their entry without another call; nodes with
+    /// no entry fuse at the origin.
+    #[must_use]
+    pub fn with_node_positions(mut self, positions: HashMap<u8, [f32; 3]>) -> Self {
+        self.engine.set_node_positions(positions);
+        self
+    }
+
+    /// Node positions the governed fuser is using, keyed by node id.
+    pub fn node_positions(&self) -> &HashMap<u8, [f32; 3]> {
+        self.engine.node_positions()
     }
 
     /// Switch the active privacy mode (operator/control-plane action).
@@ -218,6 +236,7 @@ impl EngineBridge {
                 self.recalibration_recommended = trust.recalibration_recommended;
                 self.effective_class = Some(trust.effective_class);
                 self.demoted = trust.demoted;
+                self.phase_fusion = Some(trust.phase_fusion);
                 Some(trust)
             }
             Err(e) => {
@@ -260,6 +279,12 @@ impl EngineBridge {
         self.demoted
     }
 
+    /// Phase-combining mode of the most recent successful cycle (#1752);
+    /// `None` until a governed cycle has run.
+    pub fn phase_fusion(&self) -> Option<PhaseFusion> {
+        self.phase_fusion
+    }
+
     /// Engine cycles that returned an error since startup.
     pub fn engine_error_count(&self) -> u64 {
         self.engine_error_count
@@ -299,6 +324,33 @@ mod tests {
         m
     }
 
+    fn configured_positions() -> HashMap<u8, [f32; 3]> {
+        [(0u8, [0.5, 0.0, 1.0]), (1u8, [4.0, 3.0, 1.0])]
+            .into_iter()
+            .collect()
+    }
+
+    #[test]
+    fn with_node_positions_reaches_the_governed_fuser() {
+        let bridge = EngineBridge::new(PrivacyMode::PrivateHome, 1, "r", "R", None)
+            .with_node_positions(configured_positions());
+        assert_eq!(bridge.node_positions(), &configured_positions());
+    }
+
+    #[test]
+    fn node_positions_survive_a_guard_config() {
+        let cfg = MultistaticConfig {
+            guard_interval_us: 200_000,
+            min_nodes: 1,
+            ..MultistaticConfig::default()
+        };
+        let mut bridge = EngineBridge::new(PrivacyMode::PrivateHome, 1, "r", "R", Some(cfg))
+            .with_node_positions(configured_positions());
+        assert_eq!(bridge.node_positions(), &configured_positions());
+        assert!(bridge.observe_cycle(&two_node_states(), 1_000).is_some());
+        assert_eq!(bridge.node_positions(), &configured_positions());
+    }
+
     #[test]
     fn empty_states_produce_no_belief() {
         let mut bridge = EngineBridge::new(PrivacyMode::PrivateHome, 1, "living_room", "Living Room", None);
@@ -306,6 +358,20 @@ mod tests {
         assert!(out.is_none());
         // No belief published, no sensor wired.
         assert_eq!(bridge.registered_node_count(), 0);
+    }
+
+    /// Issue #1752: the live amplitude-only path reports that phase was not
+    /// combined, with the reason, instead of implying coherent fusion.
+    #[test]
+    fn live_cycle_reports_amplitude_only_phase_fusion() {
+        use wifi_densepose_signal::ruvsense::multistatic::NonCoherentReason;
+        let mut bridge = EngineBridge::new(PrivacyMode::PrivateHome, 1, "living_room", "Living Room", None);
+        assert_eq!(bridge.phase_fusion(), None);
+        bridge.observe_cycle(&two_node_states(), 10_000).expect("cycle succeeds");
+        let mode = bridge.phase_fusion().expect("recorded after a cycle");
+        assert_eq!(mode, PhaseFusion::AmplitudeOnly(NonCoherentReason::PhaseUnavailable));
+        assert_eq!(mode.mode_str(), "amplitude_only");
+        assert_eq!(mode.reason().map(NonCoherentReason::as_str), Some("phase_unavailable"));
     }
 
     #[test]

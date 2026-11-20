@@ -1,0 +1,15 @@
+[package]
+name = "ruview-survey"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Node self-survey check mode: compare pairwise node ranges with configured node positions (ADR-381)"
+
+[dependencies]
+thiserror.workspace = true
+serde = { workspace = true, features = ["derive"] }
+
+[dev-dependencies]
+serde_json.workspace = true

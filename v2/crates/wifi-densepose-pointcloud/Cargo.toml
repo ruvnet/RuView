@@ -22,6 +22,8 @@ clap = { version = "4", features = ["derive"] }
 chrono = "0.4"
 dirs = "5"
 reqwest = { version = "0.12", features = ["json"], default-features = false }
+# Reference ADR-018 parser (esp32_parser) — single source of the frame layout.
+wifi-densepose-hardware = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }

@@ -11,7 +11,7 @@ Usage:
         --password "..." --target-ip 192.168.1.20
 
 Requirements:
-    pip install 'esptool>=5.0' nvs-partition-gen
+    pip install 'esptool>=5.0' esp-idf-nvs-partition-gen
     (or use the nvs_partition_gen.py bundled with ESP-IDF)
 
 ADDITIVE-BY-DEFAULT (issue #391, #574 phase 1):
@@ -28,6 +28,11 @@ ADDITIVE-BY-DEFAULT (issue #391, #574 phase 1):
         3. Generate + flash NVS from the merged state.
         4. Write the merged state back to the state file.
 
+    State is keyed by the board's MAC, read with esptool, so a board plugged
+    into a port another board used doesn't inherit its node_id (#1755).
+    Port-keyed files from earlier versions move to the board's record the
+    first time that board is provisioned.
+
     Net effect: partial reconfigure works the way users expect. Pass `--reset`
     to wipe both the state file AND the device NVS for first-time provisioning
     of a recycled board.
@@ -41,9 +46,12 @@ ADDITIVE-BY-DEFAULT (issue #391, #574 phase 1):
 
 import argparse
 import csv
+import getpass
 import io
 import json
 import os
+import stat
+import re
 import struct
 import subprocess
 import sys
@@ -60,6 +68,8 @@ NVS_PARTITION_SIZE = 0x6000  # 24 KiB
 CONFIG_VALUE_CHECKS = [
     ("ssid", bool),
     ("password", lambda value: value is not None),
+    ("ota_psk", lambda value: value is not None),
+    ("clear_ota_psk", bool),
     ("target_ip", bool),
     ("target_port", lambda value: value is not None),
     ("node_id", lambda value: value is not None),
@@ -110,6 +120,9 @@ MERGEABLE_ATTRS = [
     "seed_url", "seed_token", "zone", "swarm_hb", "swarm_ingest",
 ]
 
+# Cache only whether this tool armed OTA, never the firmware-upload credential.
+OTA_PSK_STATE_KEY = "_ota_psk_configured"
+
 
 def _default_state_dir() -> str:
     """Per-user config dir for provision-state JSON files."""
@@ -123,21 +136,205 @@ def _default_state_dir() -> str:
     return os.path.join(base, "wifi-densepose", "esp32-provision-state")
 
 
+_RESERVED_DEVICE_RE = re.compile(
+    r"^(con|prn|aux|nul|com[1-9]|lpt[1-9])$", re.IGNORECASE
+)
+
+
+def _unprefixed_state_name(port: str) -> str:
+    """Pre-reserved-name-fix state filename for `port` (no leading underscore)."""
+    safe = port.replace("/", "_").replace(":", "_").replace("\\", "_")
+    return f"{safe}.json"
+
+
 def _state_path_for(port: str, state_dir: str) -> str:
     """File path for a given serial port. Sanitize the port for filesystem use."""
     safe = port.replace("/", "_").replace(":", "_").replace("\\", "_")
+    if _RESERVED_DEVICE_RE.match(safe):
+        safe = f"_{safe}"
     return os.path.join(state_dir, f"{safe}.json")
+
+
+# State files hold the WiFi password and seed token in cleartext (#1754), so the
+# directory is owner-only and every file in it is 0600.
+STATE_DIR_MODE = 0o700
+STATE_FILE_MODE = 0o600
+
+# Values `--state` hides unless `--show-secrets` is passed (#1754).
+SECRET_ATTRS = ("password", "seed_token")
+
+
+def _restrict_mode(path: str, mode: int) -> None:
+    """chmod `path` to `mode` if it is a real file or dir owned by this user.
+
+    Never raises: a read-only or unusual filesystem must not block provisioning,
+    but a secret left readable by others is reported. Symlinks are not followed,
+    so a planted link can't redirect the chmod.
+    """
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        print(f"WARNING: could not stat {path}: {exc}", file=sys.stderr)
+        return
+    if stat.S_ISLNK(st.st_mode):
+        print(f"WARNING: not changing permissions through symlink {path}", file=sys.stderr)
+        return
+    if hasattr(os, "getuid") and st.st_uid != os.getuid():
+        print(f"WARNING: {path} is not owned by you; permissions left unchanged",
+              file=sys.stderr)
+        return
+    if stat.S_IMODE(st.st_mode) == mode:
+        return
+    try:
+        os.chmod(path, mode)
+    except OSError as exc:
+        print(f"WARNING: could not set {oct(mode)} on {path}: {exc}", file=sys.stderr)
+
+
+def harden_state_dir(state_dir: str) -> None:
+    """Make the state dir 0700 and its state/temp files 0600.
+
+    Covers files written by earlier versions of this script, which used the
+    default umask (0755 dir, 0644 files). POSIX only: chmod can't set
+    owner-only ACLs on Windows.
+    """
+    if sys.platform == "win32" or not os.path.isdir(state_dir):
+        return
+    _restrict_mode(state_dir, STATE_DIR_MODE)
+    try:
+        names = os.listdir(state_dir)
+    except OSError:
+        return
+    for name in names:
+        if name.endswith((".json", ".tmp")):
+            _restrict_mode(os.path.join(state_dir, name), STATE_FILE_MODE)
+
+
+def _write_private(path: str, data: bytes) -> None:
+    """Write a credential-bearing file (state, NVS CSV or binary) as 0600."""
+    flags = (os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+             | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
+    try:
+        fd = os.open(path, flags, STATE_FILE_MODE)
+    except OSError as exc:
+        # O_NOFOLLOW makes a pre-existing symlink fail here (ELOOP).
+        if os.path.islink(path):
+            raise SystemExit(
+                f"ERROR: refusing to write credentials through a symlink: {path}. "
+                f"Remove it and rerun.") from exc
+        raise
+    with os.fdopen(fd, "wb") as f:
+        # O_CREAT ignores the mode when the file already exists.
+        if hasattr(os, "fchmod"):
+            os.fchmod(f.fileno(), STATE_FILE_MODE)
+        f.write(data)
+
+
+def redact_secrets(state: dict) -> dict:
+    """Copy of `state` with secret values replaced by a fixed marker."""
+    shown = dict(state)
+    for name in SECRET_ATTRS:
+        if shown.get(name) is not None:
+            shown[name] = "(set)" if shown[name] else "(empty)"
+    return shown
+
+
+def read_password_file(path: str, allow_insecure: bool = False) -> str:
+    """Read the WiFi password from `path`, dropping one trailing newline.
+
+    Keeps the password out of argv and shell history (#1754). Refuses a file
+    that group or others can read unless `allow_insecure` is set. Raises
+    ValueError with a message meant for the user.
+    """
+    try:
+        with open(path, "rb") as f:
+            mode = stat.S_IMODE(os.fstat(f.fileno()).st_mode)
+            data = f.read()
+    except FileNotFoundError:
+        raise ValueError(f"--password-file {path} does not exist") from None
+    except OSError as exc:
+        raise ValueError(f"could not read --password-file {path}: {exc}") from None
+    if sys.platform != "win32" and mode & 0o044:
+        if not allow_insecure:
+            raise ValueError(
+                f"--password-file {path} is readable by group or others "
+                f"(mode {oct(mode)}). Run 'chmod 600 {path}', or pass "
+                f"--allow-insecure-password-file."
+            )
+        print(f"WARNING: --password-file {path} is readable by group or others "
+              f"(mode {oct(mode)}).", file=sys.stderr)
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        raise ValueError(f"--password-file {path} is not UTF-8 text") from None
+    if text.endswith("\r\n"):
+        text = text[:-2]
+    elif text.endswith("\n"):
+        text = text[:-1]
+    if not text:
+        raise ValueError(f"--password-file {path} is empty")
+    return text
+
+
+def validate_ota_psk(value: str) -> str:
+    """A 256-bit hex token matching the firmware's 65-byte NVS buffer."""
+    if not isinstance(value, str) or re.fullmatch(r"[0-9a-fA-F]{64}", value) is None:
+        raise ValueError("OTA PSK must contain exactly 64 hexadecimal characters")
+    return value
+
+
+def read_ota_psk_file(path: str) -> str:
+    """Read a bounded regular file; enforce POSIX privacy and refuse symlinks."""
+    try:
+        before = os.lstat(path)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError("--ota-psk-file must be a regular file, not a symlink")
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        flags |= getattr(os, "O_BINARY", 0)
+        with os.fdopen(os.open(path, flags), "rb") as stream:
+            opened = os.fstat(stream.fileno())
+            if (not stat.S_ISREG(opened.st_mode)
+                    or (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino)):
+                raise ValueError("--ota-psk-file changed while opening")
+            if sys.platform != "win32" and stat.S_IMODE(opened.st_mode) & 0o077:
+                raise ValueError("--ota-psk-file must be owner-only; run chmod 600 on it")
+            # 64 hex bytes plus an optional LF/CRLF; one extra byte detects overflow.
+            data = stream.read(67)
+    except OSError:
+        raise ValueError("could not open --ota-psk-file as a regular file") from None
+    try:
+        value = data.decode("ascii")
+    except UnicodeDecodeError:
+        raise ValueError("OTA PSK file must contain ASCII hexadecimal text") from None
+    if value.endswith("\r\n"):
+        value = value[:-2]
+    elif value.endswith("\n"):
+        value = value[:-1]
+    return validate_ota_psk(value)
 
 
 def load_state(port: str, state_dir: str) -> dict:
     """Return the merged-state dict for `port`, or `{}` if absent / unreadable."""
     path = _state_path_for(port, state_dir)
     if not os.path.isfile(path):
-        return {}
+        legacy = os.path.join(
+            state_dir, _unprefixed_state_name(port)
+        )
+        if legacy != path and os.path.isfile(legacy):
+            path = legacy
+        else:
+            return {}
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         if isinstance(data, dict):
+            if "ota_psk" in data:
+                # Some earlier external provisioners cached this credential.
+                # Drop it from inspection/merge without mutating a read-only
+                # request. The next successful state write scrubs the file.
+                data[OTA_PSK_STATE_KEY] = bool(data.pop("ota_psk"))
             return data
     except (OSError, json.JSONDecodeError) as exc:
         print(f"WARNING: could not read state file {path}: {exc}", file=sys.stderr)
@@ -145,15 +342,148 @@ def load_state(port: str, state_dir: str) -> dict:
 
 
 def save_state(port: str, state_dir: str, state: dict) -> str:
-    """Write `state` to the per-port file, creating dirs as needed. Returns path."""
-    os.makedirs(state_dir, exist_ok=True)
+    """Write `state` to the per-port file, creating dirs as needed. Returns path.
+
+    The file holds secrets, so it is written 0600 inside a 0700 dir (#1754).
+    """
+    state = dict(state)
+    if "ota_psk" in state:
+        state[OTA_PSK_STATE_KEY] = bool(state.pop("ota_psk"))
+    os.makedirs(state_dir, mode=STATE_DIR_MODE, exist_ok=True)
+    harden_state_dir(state_dir)
     path = _state_path_for(port, state_dir)
-    # Sort keys for deterministic on-disk content (easier to diff).
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2, sort_keys=True)
-        f.write("\n")
-    os.replace(tmp, path)
+    # mkstemp picks a unique name and opens it O_EXCL with mode 0600, so a
+    # stale temp file or a planted symlink can't receive the secret.
+    fd, tmp = tempfile.mkstemp(
+        dir=state_dir, prefix=os.path.basename(path) + ".", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            if hasattr(os, "fchmod"):
+                os.fchmod(f.fileno(), STATE_FILE_MODE)
+            # Sort keys for deterministic on-disk content (easier to diff).
+            json.dump(state, f, indent=2, sort_keys=True)
+            f.write("\n")
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    return path
+
+
+# ---------------------------------------------------------------------------
+# Board identity (#1755)
+# ---------------------------------------------------------------------------
+#
+# Serial port names get reused when boards are swapped, so a port-keyed state
+# file hands one board's node_id to the next. State is keyed by the chip's
+# base MAC instead. Each record also stores the MAC and the port it was last
+# written from, so --state can find it without opening the port.
+
+STATE_MAC_KEY = "_chip_mac"
+STATE_PORT_KEY = "_port"
+
+_ESPTOOL_MAC_RE = re.compile(
+    r"^\s*(BASE MAC|MAC):\s*((?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2})\s*$", re.MULTILINE
+)
+
+
+def normalize_mac(value: str):
+    """Return `value` as lowercase aa:bb:cc:dd:ee:ff, or None if it isn't a MAC."""
+    parts = re.split(r"[:-]", value.strip())
+    if len(parts) != 6 or not all(re.fullmatch(r"[0-9a-fA-F]{2}", p) for p in parts):
+        return None
+    return ":".join(p.lower() for p in parts)
+
+
+def parse_esptool_mac(output: str):
+    """Return the base MAC from `esptool read_mac` output, or None.
+
+    Most chips print one 6-byte "MAC:" line. EUI-64 chips (C5, C6, H2) print an
+    8-byte "MAC:" line, then "BASE MAC:" with the 6-byte address.
+    """
+    found = {label: mac.lower() for label, mac in _ESPTOOL_MAC_RE.findall(output)}
+    return found.get("BASE MAC") or found.get("MAC")
+
+
+def read_chip_mac(port: str, baud: int, chip: str):
+    """Read the connected board's base MAC with esptool. None if it can't."""
+    cmd = [
+        sys.executable, "-m", "esptool",
+        "--chip", chip,
+        "--port", port,
+        "--baud", str(baud),
+        "read_mac",
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    return parse_esptool_mac(result.stdout)
+
+
+def mac_state_key(mac: str) -> str:
+    """State-file key for a board, e.g. mac-aabbccddeeff."""
+    return "mac-" + mac.replace(":", "")
+
+
+def boards_last_on_port(port: str, state_dir: str) -> list:
+    """MACs of boards whose state was last written from `port`, newest first."""
+    if not os.path.isdir(state_dir):
+        return []
+    found = []
+    for name in os.listdir(state_dir):
+        if not (name.startswith("mac-") and name.endswith(".json")):
+            continue
+        data = load_state(name[:-len(".json")], state_dir)
+        mac = data.get(STATE_MAC_KEY)
+        if data.get(STATE_PORT_KEY) == port and mac:
+            found.append((os.path.getmtime(os.path.join(state_dir, name)), mac))
+    return [mac for _, mac in sorted(found, reverse=True)]
+
+
+def load_board_state(port: str, mac, state_dir: str):
+    """Return (prior state, legacy path) for the board `mac` on `port`.
+
+    Without a MAC this is the old port-keyed lookup. With one, the board's own
+    record wins. If it has none but a port-keyed file from an earlier version
+    exists, that file is returned for migration along with its path.
+    """
+    if mac is None:
+        return load_state(port, state_dir), None
+    prior = load_state(mac_state_key(mac), state_dir)
+    if prior:
+        return prior, None
+    legacy = _state_path_for(port, state_dir)
+    if os.path.isfile(legacy):
+        return load_state(port, state_dir), legacy
+    unprefixed = os.path.join(
+        state_dir, _unprefixed_state_name(port)
+    )
+    if unprefixed != legacy and os.path.isfile(unprefixed):
+        return load_state(port, state_dir), unprefixed
+    return {}, None
+
+
+def save_board_state(port: str, mac, state_dir: str, state: dict, legacy=None) -> str:
+    """Persist `state` under the board's MAC (or the port if the MAC is unknown).
+
+    A migrated port-keyed file is removed afterwards, so no other board on that
+    port can pick it up.
+    """
+    if mac is None:
+        return save_state(port, state_dir, state)
+    state = dict(state)
+    state[STATE_MAC_KEY] = mac
+    state[STATE_PORT_KEY] = port
+    path = save_state(mac_state_key(mac), state_dir, state)
+    if legacy and os.path.isfile(legacy):
+        os.unlink(legacy)
     return path
 
 
@@ -165,6 +495,8 @@ def merge_state_into_args(args, prior: dict) -> dict:
     in place so downstream `build_nvs_csv` sees the merged values.
     """
     merged = dict(prior)
+    if "ota_psk" in merged:
+        merged[OTA_PSK_STATE_KEY] = bool(merged.pop("ota_psk"))
     for name in MERGEABLE_ATTRS:
         cli_val = getattr(args, name, None)
         if cli_val is not None:
@@ -175,7 +507,7 @@ def merge_state_into_args(args, prior: dict) -> dict:
 
 
 def build_nvs_csv(args):
-    """Build an NVS CSV string for the csi_cfg namespace."""
+    """Build csi_cfg and the optional security/ota_psk namespace."""
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(["key", "type", "encoding", "value"])
@@ -234,16 +566,20 @@ def build_nvs_csv(args):
         writer.writerow(["swarm_hb", "data", "u16", str(args.swarm_hb)])
     if args.swarm_ingest is not None:
         writer.writerow(["swarm_ingest", "data", "u16", str(args.swarm_ingest)])
+    if getattr(args, "ota_psk", None) is not None:
+        writer.writerow(["security", "namespace", "", ""])
+        writer.writerow(["ota_psk", "data", "string", validate_ota_psk(args.ota_psk)])
     return buf.getvalue()
 
 
 def generate_nvs_binary(csv_content, size):
     """Generate an NVS partition binary from CSV using nvs_partition_gen.py."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f_csv:
-        f_csv.write(csv_content)
-        csv_path = f_csv.name
-
-    bin_path = csv_path.replace(".csv", ".bin")
+    # Both files carry the WiFi password. A private 0700 dir keeps the
+    # generator's output (written with the default umask) away from other users.
+    work_dir = tempfile.mkdtemp(prefix="provision-nvs-")
+    csv_path = os.path.join(work_dir, "nvs.csv")
+    bin_path = os.path.join(work_dir, "nvs.bin")
+    _write_private(csv_path, csv_content.encode("utf-8"))
 
     try:
         # Method 1: subprocess invocation (most reliable across package versions)
@@ -269,7 +605,7 @@ def generate_nvs_binary(csv_content, size):
             subprocess.check_call([  # nosemgrep: dangerous-subprocess-use-tainted-env-args
                 sys.executable, gen_script, "generate",
                 csv_path, bin_path, hex(size)
-            ])
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             with open(bin_path, "rb") as f:
                 return f.read()
 
@@ -282,6 +618,10 @@ def generate_nvs_binary(csv_content, size):
         for p in (csv_path, bin_path):
             if os.path.isfile(p):
                 os.unlink(p)
+        try:
+            os.rmdir(work_dir)
+        except OSError:
+            pass
 
 
 def flash_nvs(port, baud, nvs_bin, chip):
@@ -324,7 +664,26 @@ def main():
     )
     parser.add_argument("--baud", type=int, default=460800, help="Flash baud rate (default: 460800)")
     parser.add_argument("--ssid", help="WiFi SSID")
-    parser.add_argument("--password", help="WiFi password")
+    password_source = parser.add_mutually_exclusive_group()
+    password_source.add_argument("--password",
+                                 help="WiFi password. Visible in ps and shell history; "
+                                 "prefer --password-file.")
+    password_source.add_argument("--password-file", metavar="PATH",
+                                 help="Read the WiFi password from PATH (one trailing newline "
+                                 "is dropped). The file must not be readable by group or others.")
+    parser.add_argument("--allow-insecure-password-file", action="store_true",
+                        help="Accept a --password-file that group or others can read, with a "
+                        "warning (e.g. a read-only 0444 secrets mount).")
+    ota_source = parser.add_mutually_exclusive_group()
+    ota_source.add_argument("--ota-psk", metavar="HEX",
+                            help="OTA key: exactly 64 hex characters. Visible in process "
+                            "arguments/history; prefer --ota-psk-file. Never cached in state.")
+    ota_source.add_argument("--ota-psk-file", metavar="PATH",
+                            help="Read the 64-hex OTA key from a regular file. Requires "
+                            "owner-only POSIX permissions; protect Windows files with ACLs.")
+    ota_source.add_argument("--clear-ota-psk", action="store_true",
+                            help="Explicitly remove the OTA key during this NVS rewrite; "
+                            "firmware updates will be refused until a key is provisioned.")
     parser.add_argument("--target-ip", help="Aggregator host IP (e.g. 192.168.1.20)")
     parser.add_argument("--target-port", type=int, help="Aggregator UDP port (default: 5005)")
     parser.add_argument("--node-id", type=int, help="Node ID 0-255 (default: 1)")
@@ -360,31 +719,123 @@ def main():
                         "error when no prior state file exists. The script now merges "
                         "with prior state by default, so this flag is rarely needed.")
     parser.add_argument("--reset", action="store_true",
-                        help="Wipe this machine's per-port state file before merging. "
+                        help="Ignore this machine's per-port state file when merging; it is "
+                        "replaced after a successful flash. "
                         "Use for first-time provisioning of a recycled board where "
                         "previously-staged keys should NOT be re-applied.")
     parser.add_argument("--state-dir", default=_default_state_dir(),
                         help="Override the per-user state directory (default: per-OS user config dir).")
+    parser.add_argument("--mac", type=str,
+                        help="Board MAC (AA:BB:CC:DD:EE:FF) whose state to use. Normally read "
+                        "from the chip with esptool; --state and --dry-run never open the "
+                        "port, so pass it there to pick a board.")
     parser.add_argument("--state", action="store_true",
                         help="Print the merged state that WOULD be flashed for this port and exit. "
-                        "Useful for debugging which keys are about to land on the device.")
+                        "Useful for debugging which keys are about to land on the device. "
+                        "The WiFi password and seed token are shown as (set)/(empty).")
+    parser.add_argument("--show-secrets", action="store_true",
+                        help="With --state, print the WiFi password and seed token in clear.")
 
     args = parser.parse_args()
 
+    # State written by older versions may be 0644. Tighten it before any read
+    # or early exit (#1754).
+    harden_state_dir(args.state_dir)
+
+    try:
+        if args.ota_psk_file is not None:
+            args.ota_psk = read_ota_psk_file(args.ota_psk_file)
+        elif args.ota_psk is not None:
+            args.ota_psk = validate_ota_psk(args.ota_psk)
+            print("WARNING: --ota-psk is visible in process arguments and shell history; "
+                  "use --ota-psk-file instead.", file=sys.stderr)
+    except ValueError as exc:
+        parser.error(str(exc))
+
+    if args.password_file is not None:
+        try:
+            args.password = read_password_file(
+                args.password_file, args.allow_insecure_password_file)
+        except ValueError as exc:
+            parser.error(str(exc))
+    elif args.password is not None:
+        print("WARNING: --password is visible in ps and shell history; "
+              "use --password-file instead.", file=sys.stderr)
+    cli_ssid, cli_password = args.ssid, args.password
+    # --- Board identity (#1755) ---
+    # State is keyed by the chip's MAC so a board swapped onto a reused port
+    # doesn't inherit the previous board's node_id.
+    if args.mac is not None:
+        chip_mac = normalize_mac(args.mac)
+        if chip_mac is None:
+            parser.error(f"--mac must be in AA:BB:CC:DD:EE:FF format, got '{args.mac}'")
+    elif args.state:
+        # Inspection only: don't open the port; show the board last
+        # provisioned from it.
+        recent = boards_last_on_port(args.port, args.state_dir)
+        chip_mac = recent[0] if recent else None
+        if chip_mac:
+            print(f"Showing board {chip_mac}, last provisioned on {args.port}. "
+                  f"Pass --mac to pick another.", file=sys.stderr)
+    elif args.dry_run:
+        # No board involved; keep the port-keyed state as before.
+        chip_mac = None
+    else:
+        chip_mac = read_chip_mac(args.port, args.baud, args.chip)
+        if chip_mac:
+            print(f"Board MAC: {chip_mac}")
+        else:
+            print(f"WARNING: could not read the board's MAC with esptool, so state "
+                  f"stays keyed by port {args.port}. Pass --mac to key it by board.",
+                  file=sys.stderr)
+    legacy = None
+
     # --- Per-port state load + merge (additive-by-default, #391 / #574) ---
     if args.reset:
+        # Don't delete the state file here: validation below can still fail,
+        # and a failed run must not lose the record. A successful flash
+        # overwrites it with the reset (CLI-only) state.
         path = _state_path_for(args.port, args.state_dir)
         if os.path.isfile(path):
-            os.unlink(path)
-            print(f"--reset: removed state file {path}", file=sys.stderr)
+            print(f"--reset: ignoring state file {path}", file=sys.stderr)
         prior = {}
     else:
-        prior = load_state(args.port, args.state_dir)
+        prior, legacy = load_board_state(args.port, chip_mac, args.state_dir)
+        if legacy:
+            print(f"Using port-keyed state {legacy} for board {chip_mac}; it moves to "
+                  f"the board's own record when state is next saved. If this isn't the "
+                  f"board last provisioned on {args.port}, rerun with --reset.",
+                  file=sys.stderr)
     merged = merge_state_into_args(args, prior)
+    if args.ota_psk is not None:
+        merged[OTA_PSK_STATE_KEY] = True
+    elif args.clear_ota_psk:
+        merged[OTA_PSK_STATE_KEY] = False
+
+    # A new --ssid with no password given: ask for it on a terminal instead of
+    # requiring it on the command line. The saved password is reused only when
+    # it belongs to the same SSID. Without a terminal (scripts, CI) nothing is
+    # asked and the WiFi-credential check below applies as before.
+    if (not args.state and cli_ssid is not None and cli_password is None
+            and (prior.get("password") is None or prior.get("ssid") != cli_ssid)
+            and sys.stdin.isatty()):
+        args.password = getpass.getpass(f"WiFi password for {cli_ssid}: ")
+        merged["password"] = args.password
 
     if args.state:
-        print(json.dumps(merged, indent=2, sort_keys=True))
+        shown = merged if args.show_secrets else redact_secrets(merged)
+        print(json.dumps(shown, indent=2, sort_keys=True))
+        if shown != merged:
+            print("Secrets hidden; pass --show-secrets to print them.", file=sys.stderr)
         return
+
+    if args.ota_psk is None:
+        if merged.get(OTA_PSK_STATE_KEY) and not args.clear_ota_psk:
+            parser.error("OTA was previously configured. Resupply --ota-psk-file (keys "
+                         "are not cached), or pass --clear-ota-psk to disable OTA.")
+        print("WARNING: this rewrites the whole NVS partition without an OTA key. "
+              "OTA uploads will be disabled; supply --ota-psk-file to keep them enabled.",
+              file=sys.stderr)
 
     if not has_config_value(args):
         parser.error(
@@ -403,11 +854,12 @@ def main():
         ] if val is None or val == ""
     ]
     if wifi_trio_missing and not args.force_partial:
+        state_key = mac_state_key(chip_mac) if chip_mac else args.port
         parser.error(
             f"Missing required WiFi credentials after merging prior state: "
             f"{', '.join(wifi_trio_missing)}.\n"
             f"\n"
-            f"  No per-port state file at {_state_path_for(args.port, args.state_dir)}\n"
+            f"  No saved state at {_state_path_for(state_key, args.state_dir)}\n"
             f"  and the CLI didn't include them. Either pass --ssid + --password + --target-ip\n"
             f"  on this run, or add --force-partial to flash without WiFi.\n"
         )
@@ -484,11 +936,11 @@ def main():
     try:
         nvs_bin = generate_nvs_binary(csv_content, NVS_PARTITION_SIZE)
     except Exception as e:
-        print(f"\nError generating NVS binary: {e}", file=sys.stderr)
+        detail = str(e).replace(args.ota_psk, "(redacted)") if args.ota_psk else str(e)
+        print(f"\nError generating NVS binary: {detail}", file=sys.stderr)
         print("\nFallback: save CSV and flash manually with ESP-IDF tools.", file=sys.stderr)
         fallback_path = "nvs_config.csv"
-        with open(fallback_path, "w") as f:
-            f.write(csv_content)
+        _write_private(fallback_path, csv_content.encode("utf-8"))
         print(f"Saved NVS CSV to {fallback_path}", file=sys.stderr)
         print(f"Flash with: python $IDF_PATH/components/nvs_flash/"
               f"nvs_partition_generator/nvs_partition_gen.py generate "
@@ -497,22 +949,20 @@ def main():
 
     if args.dry_run:
         out = "nvs_provision.bin"
-        with open(out, "wb") as f:
-            f.write(nvs_bin)
+        _write_private(out, nvs_bin)
         print(f"NVS binary saved to {out} ({len(nvs_bin)} bytes)")
         print(f"Flash manually: python -m esptool --chip {args.chip} --port {args.port} "
               f"write_flash 0x9000 {out}")
-        # Persist merged state even on dry-run so a subsequent real flash from
-        # this machine sees the same staged config.
-        path = save_state(args.port, args.state_dir, merged)
-        print(f"State persisted to {path}")
+        # Don't persist state on dry-run: nothing reached the device, so the
+        # next real run must not merge on top of values that were never flashed.
+        print("Dry run: state file not updated.")
         return
 
     flash_nvs(args.port, args.baud, nvs_bin, args.chip)
     # Persist merged state after a successful flash so future partial
     # invocations from this machine merge on top of what's actually on the
     # device. This is the heart of the additive-by-default fix (#391/#574).
-    path = save_state(args.port, args.state_dir, merged)
+    path = save_board_state(args.port, chip_mac, args.state_dir, merged, legacy)
     print(f"State persisted to {path}")
 
 

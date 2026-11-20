@@ -35,13 +35,23 @@ pub(crate) struct MediatekCsiSnapshot {
 impl MediatekCsiSnapshot {
     pub(crate) fn from_frame(frame: &CsiFrame) -> Self {
         let synthetic = frame.flags.contains(CsiFlags::SYNTHETIC);
+        let calibrated = frame.flags.contains(CsiFlags::CALIBRATED);
         let (mean_amplitude, peak_amplitude) = amplitude_summary(frame);
         Self {
             event_type: "mediatek_csi",
+            // Provenance is decided by the frame's own flags, in this order, and
+            // never by which ingest path delivered it (ADR-267). SYNTHETIC is
+            // checked first and is not clearable by anything downstream: a
+            // simulated frame stays labelled simulated even when it also claims
+            // CALIBRATED, which the ADR-266 simulator does.
             source: if synthetic {
                 "mediatek:simulated"
-            } else {
+            } else if calibrated {
                 "mediatek"
+            } else {
+                // Real silicon, but nothing has validated this capture against a
+                // calibration. `wifi-densepose-mtk-bridge` emits exactly this class.
+                "mediatek:physical-unvalidated"
             },
             report_kind: match frame.report_kind {
                 ReportKind::Csi => "csi",
@@ -60,7 +70,7 @@ impl MediatekCsiSnapshot {
             ppdu_type: format!("{:?}", frame.ppdu_type).to_ascii_lowercase(),
             rssi_dbm: frame.payload.rssi_dbm().to_vec(),
             noise_floor_dbm: frame.noise_floor_dbm,
-            calibrated: frame.flags.contains(CsiFlags::CALIBRATED),
+            calibrated,
             synthetic,
             saturated: frame.flags.contains(CsiFlags::SATURATED),
             time_synchronized: frame.flags.contains(CsiFlags::TIME_SYNCHRONIZED),
@@ -114,6 +124,79 @@ mod tests {
         assert_eq!(snapshot.element_count, 1536);
         assert!(snapshot.mean_amplitude.unwrap() > 0.0);
         assert!(snapshot.peak_amplitude.unwrap() >= snapshot.mean_amplitude.unwrap());
+    }
+
+    /// A frame off real silicon that has not been calibrated must be
+    /// distinguishable from both a simulation and a validated capture.
+    /// `wifi-densepose-mtk-bridge` produces exactly this shape.
+    #[test]
+    fn physical_uncalibrated_frame_is_labelled_physical_unvalidated() {
+        let mut sim = MediatekCsiSimulator::new(SimulatorConfig::default()).unwrap();
+        let mut frame = sim.next_frame();
+        frame.flags = CsiFlags(0);
+        let snapshot = MediatekCsiSnapshot::from_frame(&frame);
+        assert_eq!(snapshot.source, "mediatek:physical-unvalidated");
+        assert!(!snapshot.synthetic);
+        assert!(!snapshot.calibrated);
+    }
+
+    /// Plain `"mediatek"` is reserved for calibrated physical frames.
+    #[test]
+    fn calibrated_physical_frame_keeps_the_plain_mediatek_label() {
+        let mut sim = MediatekCsiSimulator::new(SimulatorConfig::default()).unwrap();
+        let mut frame = sim.next_frame();
+        frame.flags = CsiFlags(CsiFlags::CALIBRATED);
+        let snapshot = MediatekCsiSnapshot::from_frame(&frame);
+        assert_eq!(snapshot.source, "mediatek");
+        assert!(snapshot.calibrated);
+        assert!(!snapshot.synthetic);
+    }
+
+    /// ADR-267: SYNTHETIC is not clearable by an ingest path. No combination of
+    /// other flags may promote a simulated frame out of `mediatek:simulated`.
+    #[test]
+    fn synthetic_frame_can_never_be_relabelled_as_physical() {
+        let mut sim = MediatekCsiSimulator::new(SimulatorConfig::default()).unwrap();
+        let base = sim.next_frame();
+        for extra in [
+            0,
+            CsiFlags::CALIBRATED,
+            CsiFlags::TIME_SYNCHRONIZED,
+            CsiFlags::SATURATED | CsiFlags::DROPPED_PREDECESSOR,
+            CsiFlags::CALIBRATED | CsiFlags::TIME_SYNCHRONIZED | CsiFlags::SATURATED,
+        ] {
+            let mut frame = base.clone();
+            frame.flags = CsiFlags(CsiFlags::SYNTHETIC | extra);
+            let snapshot = MediatekCsiSnapshot::from_frame(&frame);
+            assert_eq!(
+                snapshot.source, "mediatek:simulated",
+                "flags {:#06x} must stay simulated",
+                frame.flags.0
+            );
+            assert!(snapshot.synthetic);
+        }
+    }
+
+    /// The three labels are distinct, and all three still start with
+    /// `"mediatek"`, which is what the server's staleness check keys on.
+    #[test]
+    fn the_three_provenance_labels_are_distinct_and_all_prefixed_mediatek() {
+        let mut sim = MediatekCsiSimulator::new(SimulatorConfig::default()).unwrap();
+        let base = sim.next_frame();
+        let label = |flags: u16| {
+            let mut f = base.clone();
+            f.flags = CsiFlags(flags);
+            MediatekCsiSnapshot::from_frame(&f).source
+        };
+        let simulated = label(CsiFlags::SYNTHETIC | CsiFlags::CALIBRATED);
+        let calibrated = label(CsiFlags::CALIBRATED);
+        let physical = label(0);
+        assert_eq!(simulated, "mediatek:simulated");
+        assert_eq!(calibrated, "mediatek");
+        assert_eq!(physical, "mediatek:physical-unvalidated");
+        for l in [simulated, calibrated, physical] {
+            assert!(l.starts_with("mediatek"), "{l}");
+        }
     }
 
     #[test]

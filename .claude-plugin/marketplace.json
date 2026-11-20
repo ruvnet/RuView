@@ -10,6 +10,11 @@
       "name": "ruview",
       "source": "./plugins/ruview",
       "description": "End-to-end RuView toolkit: getting started, ESP32 hardware setup, configuration, sensing applications (presence / vitals / pose / sleep / MAT), camera-free + camera-supervised model training, advanced multistatic sensing, CLI / API / WASM, mmWave radar, and witness verification"
+    },
+    {
+      "name": "ruview-live",
+      "source": "./harness/ruview/mod",
+      "description": "Claude Code mod: /ruview opens a live pane with your CSI nodes (ESP32, Realtek) and ESPHome radar (presence, distance, device-reported vitals), refreshed on a timer, plus a one-line status. Read-only; ships inside @ruvnet/ruview. Mods are early access (CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1)."
     }
   ]
 }

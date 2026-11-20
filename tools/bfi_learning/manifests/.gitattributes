@@ -1,0 +1,2 @@
+# Download contracts pin exact manifest bytes across Windows and Linux checkouts.
+*.json -text

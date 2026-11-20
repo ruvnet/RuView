@@ -39,10 +39,36 @@ pub enum MultiBandError {
     DuplicateFrequency { freq_mhz: u32, idx: usize },
 }
 
+/// What a frame's phase vector is evidence of (issue #1752).
+///
+/// Phase from two radios can only be combined when both were measured against
+/// one reference. Independent ESP32 nodes each run a free crystal and pick a
+/// random PLL phase at every reset, so their phases are unrelated even when
+/// their timestamps agree to the frame. Mesh time sync aligns frames, not RF
+/// phase, and does not by itself justify [`PhaseReference::Shared`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PhaseReference {
+    /// No measured phase. The phase vector is a placeholder (for example the
+    /// amplitude-only sensing-server bridge) and must never be read as evidence.
+    #[default]
+    Unavailable,
+    /// Phase measured against this node's own oscillator. Meaningful within the
+    /// node, meaningless across nodes.
+    NodeLocal,
+    /// The source declares a shared clock or calibrated phase reference. Frames
+    /// carrying the same `id` may be combined coherently.
+    Shared {
+        /// Identifier of the shared reference (one per clock domain / array).
+        id: u32,
+    },
+}
+
 /// Fused multi-band CSI from one node at one time slot.
 ///
 /// Holds one canonical-56 row per channel, ordered by center frequency.
-/// The `coherence` field quantifies agreement across channels (0.0-1.0).
+/// The `coherence` field quantifies amplitude agreement across this node's
+/// channels (0.0-1.0). It says nothing about phase coherence with other
+/// nodes; that is carried by `phase_reference`.
 #[derive(Debug, Clone)]
 pub struct MultiBandCsiFrame {
     /// Originating node identifier (0-255).
@@ -55,6 +81,8 @@ pub struct MultiBandCsiFrame {
     pub frequencies_mhz: Vec<u32>,
     /// Cross-channel coherence score (0.0-1.0).
     pub coherence: f32,
+    /// What `channel_frames[*].phase` is evidence of (issue #1752).
+    pub phase_reference: PhaseReference,
 }
 
 /// Configuration for the multi-band fusion process.
@@ -165,6 +193,8 @@ impl MultiBandBuilder {
             channel_frames: self.frames,
             frequencies_mhz: self.frequencies,
             coherence,
+            // One node's own channels: measured phase, local reference only.
+            phase_reference: PhaseReference::NodeLocal,
         })
     }
 }
@@ -415,6 +445,7 @@ mod tests {
             channel_frames: vec![],
             frequencies_mhz: vec![],
             coherence: 1.0,
+            phase_reference: PhaseReference::Unavailable,
         };
         assert!(mean_amplitude(&frame).is_empty());
     }

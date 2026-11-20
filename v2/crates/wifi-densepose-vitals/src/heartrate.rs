@@ -46,6 +46,8 @@ const HR_PLAUSIBLE_MAX_BPM: f64 = 180.0;
 pub struct HeartRateExtractor {
     /// Per-sample filtered signal history (sliding window; O(1) push/pop).
     filtered_history: VecDeque<f64>,
+    /// First-stage evidence caps confidence; extra filtering can color noise.
+    single_stage_history: VecDeque<f64>,
     /// Sample rate in Hz.
     sample_rate: f64,
     /// Analysis window in seconds.
@@ -56,8 +58,8 @@ pub struct HeartRateExtractor {
     freq_low: f64,
     /// Cardiac band high cutoff (Hz) -- 2.0 Hz = 120 BPM.
     freq_high: f64,
-    /// IIR filter state.
-    filter_state: IirState,
+    /// Cascaded cardiac resonators suppress respiratory leakage before ACF.
+    filter_state: [IirState; 2],
     /// Minimum subcarriers required for reliable HR estimation.
     min_subcarriers: usize,
 }
@@ -74,12 +76,13 @@ impl HeartRateExtractor {
         let capacity = (sample_rate * window_secs) as usize;
         Self {
             filtered_history: VecDeque::with_capacity(capacity),
+            single_stage_history: VecDeque::with_capacity(capacity),
             sample_rate,
             window_secs,
             n_subcarriers,
             freq_low: 0.8,
             freq_high: 2.0,
-            filter_state: IirState::default(),
+            filter_state: [IirState::default(), IirState::default()],
             min_subcarriers: 4,
         }
     }
@@ -119,7 +122,7 @@ impl HeartRateExtractor {
         let phase_signal = compute_phase_coherence_signal(residuals, phases, n);
 
         // Apply cardiac-band IIR bandpass filter
-        let filtered = self.bandpass_filter(phase_signal);
+        let (single_stage, filtered) = self.bandpass_filter(phase_signal);
 
         // Defense-in-depth: a non-finite filter output (e.g. a diverged
         // resonator pole at a pathological sample rate) must never enter the
@@ -133,9 +136,11 @@ impl HeartRateExtractor {
         // push_back + pop_front for the sliding window (was a `Vec` with an
         // O(n) `remove(0)` per sample — ADR-157 §A1).
         self.filtered_history.push_back(filtered);
+        self.single_stage_history.push_back(single_stage);
         let max_len = (self.sample_rate * self.window_secs) as usize;
         if self.filtered_history.len() > max_len {
             self.filtered_history.pop_front();
+            self.single_stage_history.pop_front();
         }
 
         // Need at least 5 seconds of data for cardiac detection
@@ -155,6 +160,14 @@ impl HeartRateExtractor {
         if period_samples == 0 {
             return None;
         }
+
+        // A second filter stage sharpens periodic noise as well as real pulses.
+        // Use it to locate the period, but never increase confidence above the
+        // original stage's evidence at that SAME period. This prevents filtering
+        // alone from turning previously degraded noise into a Valid estimate.
+        let corroboration =
+            autocorrelation_at_lag(self.single_stage_history.make_contiguous(), period_samples);
+        let acf_peak = acf_peak.min(corroboration.max(0.0));
 
         let frequency_hz = self.sample_rate / period_samples as f64;
         let bpm = frequency_hz * 60.0;
@@ -190,10 +203,10 @@ impl HeartRateExtractor {
         })
     }
 
-    /// 2nd-order IIR bandpass filter (cardiac band: 0.8-2.0 Hz).
-    fn bandpass_filter(&mut self, input: f64) -> f64 {
-        let state = &mut self.filter_state;
-
+    /// Two cascaded 2nd-order resonators (cardiac band: 0.8-2.0 Hz).
+    /// The second stage attenuates strong respiratory components that otherwise
+    /// shift the cardiac ACF peak even when a heartbeat is present (#2057).
+    fn bandpass_filter(&mut self, input: f64) -> (f64, f64) {
         let omega_low = 2.0 * std::f64::consts::PI * self.freq_low / self.sample_rate;
         let omega_high = 2.0 * std::f64::consts::PI * self.freq_high / self.sample_rate;
         let bw = omega_high - omega_low;
@@ -210,35 +223,35 @@ impl HeartRateExtractor {
         let r = (1.0 - bw / 2.0).clamp(0.0, 0.9999);
         let cos_w0 = center.cos();
 
-        let output =
-            (1.0 - r) * (input - state.x2) + 2.0 * r * cos_w0 * state.y1 - r * r * state.y2;
+        let mut output = input;
+        let mut single_stage = 0.0;
+        for (stage, state) in self.filter_state.iter_mut().enumerate() {
+            let filtered =
+                (1.0 - r) * (output - state.x2) + 2.0 * r * cos_w0 * state.y1 - r * r * state.y2;
 
-        // Self-healing non-finite guard (ADR-158 §A1). A single non-finite
-        // sample — a NaN/inf residual from a corrupt CSI frame, or a transient
-        // overflow — would otherwise be written into `y1`/`y2` and poison the
-        // resonator recurrence *permanently*: every later output stays NaN, the
-        // `extract()` finite-check drops it, `acf0` never recomputes on fresh
-        // data, and heart-rate extraction is dead until `reset()`. Resetting the
-        // filter state here lets the resonator recover on the next clean frame;
-        // the 0.0 returned for this frame is still dropped by the caller's
-        // `is_finite()` check, so no spurious sample enters history.
-        if !output.is_finite() {
-            *state = IirState::default();
-            return 0.0;
+            // Reset both stages after corrupt input or overflow so later clean
+            // frames can recover (ADR-158). Retain the zero-sample fallback.
+            if !filtered.is_finite() {
+                self.filter_state = [IirState::default(), IirState::default()];
+                return (0.0, 0.0);
+            }
+            state.x2 = state.x1;
+            state.x1 = output;
+            state.y2 = state.y1;
+            state.y1 = filtered;
+            output = filtered;
+            if stage == 0 {
+                single_stage = filtered;
+            }
         }
-
-        state.x2 = state.x1;
-        state.x1 = input;
-        state.y2 = state.y1;
-        state.y1 = output;
-
-        output
+        (single_stage, output)
     }
 
     /// Reset all filter state and history.
     pub fn reset(&mut self) {
         self.filtered_history.clear();
-        self.filter_state = IirState::default();
+        self.single_stage_history.clear();
+        self.filter_state = [IirState::default(), IirState::default()];
     }
 
     /// Current number of samples in the history buffer.
@@ -252,6 +265,24 @@ impl HeartRateExtractor {
     pub fn band(&self) -> (f64, f64) {
         (self.freq_low, self.freq_high)
     }
+}
+
+/// Lag-zero-normalized evidence from the original single-stage filter.
+fn autocorrelation_at_lag(signal: &[f64], lag: usize) -> f64 {
+    if signal.is_empty() || lag >= signal.len() {
+        return 0.0;
+    }
+    let mean = signal.iter().sum::<f64>() / signal.len() as f64;
+    let energy = signal.iter().map(|x| (x - mean).powi(2)).sum::<f64>();
+    if !energy.is_finite() || energy < 1e-15 {
+        return 0.0;
+    }
+    signal
+        .iter()
+        .zip(&signal[lag..])
+        .map(|(x, y)| (x - mean) * (y - mean))
+        .sum::<f64>()
+        / energy
 }
 
 /// Compute a phase-coherence-weighted signal from residuals and phases.
@@ -323,11 +354,11 @@ fn autocorrelation_peak(
     }
 
     // Lag range corresponding to the cardiac band
-    let min_lag = (sample_rate / freq_high).floor() as usize; // highest freq = shortest period
+    let min_lag = (sample_rate / freq_high).floor() as usize;
     let max_lag = (sample_rate / freq_low).ceil() as usize; // lowest freq = longest period
     let max_lag = max_lag.min(n / 2);
 
-    if min_lag >= max_lag || min_lag >= n {
+    if min_lag == 0 || min_lag >= max_lag || min_lag >= n {
         return (0, 0.0);
     }
 
@@ -336,15 +367,19 @@ fn autocorrelation_peak(
 
     // Autocorrelation at lag 0 for normalisation
     let acf0: f64 = signal.iter().map(|&x| (x - mean) * (x - mean)).sum();
-    if acf0 < 1e-15 {
+    if !acf0.is_finite() || acf0 < 1e-15 {
         return (0, 0.0);
     }
 
-    // Search for the peak in the cardiac lag range
+    // Require a local maximum, including neighbors outside the admitted band.
+    // A slowly varying respiratory signal has a positive but falling ACF here;
+    // choosing its largest value would falsely pin HR to the upper band edge.
+    // Keep lag-zero normalization: overlap correction can favor a second or
+    // third cardiac period and halve an otherwise correct pulse estimate.
     let mut best_lag = 0;
-    let mut best_acf = f64::MIN;
+    let mut best_acf = 0.0;
 
-    for lag in min_lag..=max_lag {
+    let normalized_acf = |lag: usize| {
         let acf: f64 = signal
             .iter()
             .take(n - lag)
@@ -352,11 +387,18 @@ fn autocorrelation_peak(
             .map(|(i, &x)| (x - mean) * (signal[i + lag] - mean))
             .sum();
 
-        let normalized = acf / acf0;
-        if normalized > best_acf {
-            best_acf = normalized;
+        acf / acf0
+    };
+    let mut previous = normalized_acf(min_lag - 1);
+    let mut current = normalized_acf(min_lag);
+    for lag in min_lag..=max_lag {
+        let next = normalized_acf(lag + 1);
+        if current > previous && current >= next && current > best_acf {
+            best_acf = current;
             best_lag = lag;
         }
+        previous = current;
+        current = next;
     }
 
     if best_acf > 0.0 {
@@ -369,6 +411,107 @@ fn autocorrelation_peak(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn issue_2057_extra_filtering_does_not_promote_noise() {
+        let mut ext = HeartRateExtractor::new(56, 50.0, 15.0);
+        let mut seed = 38_u64;
+        let mut last = None;
+        for _ in 0..250 {
+            let residuals: Vec<_> = (0..56)
+                .map(|_| {
+                    seed = seed
+                        .wrapping_mul(6_364_136_223_846_793_005)
+                        .wrapping_add(1_442_695_040_888_963_407);
+                    0.01 * (2.0 * (seed >> 33) as f64 / (1_u64 << 31) as f64 - 1.0)
+                })
+                .collect();
+            last = ext.extract(&residuals, &[]);
+        }
+        let estimate = last.expect("fixture has a noise peak to evaluate");
+        assert!(
+            estimate.confidence < 0.6,
+            "filter-colored noise: {estimate:?}"
+        );
+        assert_ne!(estimate.status, VitalStatus::Valid);
+    }
+
+    fn synthetic_recording(
+        sample_rate: f64,
+        heart_hz: f64,
+        heart_amplitude: f64,
+        breath_amplitude: f64,
+    ) -> Option<VitalEstimate> {
+        let mut ext = HeartRateExtractor::new(56, sample_rate, 15.0);
+        let mut seed = 0x1234_5678_u64;
+        let mut last = None;
+        for i in 0..(sample_rate * 20.0) as usize {
+            let t = i as f64 / sample_rate;
+            let base = heart_amplitude * (std::f64::consts::TAU * heart_hz * t).sin()
+                + breath_amplitude * (std::f64::consts::TAU * 0.25 * t).sin();
+            let residuals: Vec<f64> = (0..56)
+                .map(|_| {
+                    seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+                    let uniform = (seed >> 32) as f64 / u32::MAX as f64;
+                    // Deterministic zero-mean noise with standard deviation 0.01.
+                    base + (uniform - 0.5) * 0.01 * 12.0_f64.sqrt()
+                })
+                .collect();
+            last = ext.extract(&residuals, &[]);
+        }
+        last
+    }
+
+    #[test]
+    fn issue_2057_breathing_without_heartbeat_is_not_confident_hr() {
+        for sample_rate in [50.0, 100.0] {
+            if let Some(estimate) = synthetic_recording(sample_rate, 1.2, 0.0, 0.1) {
+                assert!(
+                    estimate.confidence < 0.3,
+                    "breathing alone at {sample_rate} Hz produced {estimate:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn issue_2057_heartbeat_survives_stronger_breathing() {
+        for breath_amplitude in [0.02, 0.05, 0.10] {
+            let estimate = synthetic_recording(100.0, 1.2, 0.01, breath_amplitude)
+                .expect("synthetic 72 BPM pulse must remain detectable");
+            assert!(
+                (estimate.value_bpm - 72.0).abs() < 3.0,
+                "breath amplitude {breath_amplitude}: {estimate:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn issue_2057_monotonic_acf_is_not_a_cardiac_peak() {
+        let signal: Vec<_> = (0..1500)
+            .map(|i| (std::f64::consts::TAU * 0.25 * i as f64 / 100.0).sin())
+            .collect();
+        assert_eq!(autocorrelation_peak(&signal, 100.0, 0.8, 2.0), (0, 0.0));
+    }
+
+    #[test]
+    fn issue_2057_pulse_detection_preserves_band_edges() {
+        for sample_rate in [50.0, 100.0] {
+            for heart_hz in [0.8, 1.0, 1.2, 1.5, 1.8, 2.0] {
+                let estimate = synthetic_recording(sample_rate, heart_hz, 0.01, 0.0)
+                    .expect("in-band synthetic pulse must be detected");
+                assert_eq!(
+                    estimate.status,
+                    VitalStatus::Valid,
+                    "clean pulse must retain confidence: {estimate:?}"
+                );
+                assert!(
+                    (estimate.value_bpm - heart_hz * 60.0).abs() < 3.0,
+                    "{sample_rate} Hz sampling, {heart_hz} Hz pulse: {estimate:?}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn no_data_returns_none() {
@@ -419,6 +562,7 @@ mod tests {
         assert!(ext.history_len() > 0);
         ext.reset();
         assert_eq!(ext.history_len(), 0);
+        assert!(ext.single_stage_history.is_empty());
     }
 
     #[test]
@@ -506,12 +650,17 @@ mod tests {
         };
 
         let mut control = HeartRateExtractor::new(4, sr, 20.0);
-        feed_clean(&mut control);
-        assert!(control.history_len() > 0, "control clean run must accumulate history");
+        let expected = feed_clean(&mut control).expect("clean pulse should be detected");
+        assert!(
+            control.history_len() > 0,
+            "control clean run must accumulate history"
+        );
 
         let mut ext = HeartRateExtractor::new(4, sr, 20.0);
         ext.extract(&[f64::NAN, 0.1, 0.1, 0.1], &[0.0, 0.01, 0.02, 0.03]);
-        feed_clean(&mut ext);
+        let recovered = feed_clean(&mut ext).expect("clean pulse must recover after NaN");
+        assert!((recovered.value_bpm - expected.value_bpm).abs() < 1e-12);
+        assert!((recovered.confidence - expected.confidence).abs() < 1e-12);
         assert!(
             ext.history_len() > 0,
             "HR extractor must recover and refill history after a NaN frame (got {})",
@@ -583,7 +732,10 @@ mod tests {
             "history should have accumulated samples"
         );
         for (i, &v) in ext.filtered_history.iter().enumerate() {
-            assert!(v.is_finite(), "filtered_history[{i}] must be finite, got {v}");
+            assert!(
+                v.is_finite(),
+                "filtered_history[{i}] must be finite, got {v}"
+            );
         }
     }
 

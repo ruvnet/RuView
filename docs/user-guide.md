@@ -20,13 +20,20 @@ WiFi DensePose turns commodity WiFi signals into real-time human pose estimation
    - [Simulated Mode (No Hardware)](#simulated-mode-no-hardware)
    - [Windows WiFi (RSSI Only)](#windows-wifi-rssi-only)
    - [ESP32-S3 (Full CSI)](#esp32-s3-full-csi)
+   - [ESP32-C5 (Experimental CSI target)](#esp32-c5-experimental-csi-target)
    - [ESP32 Multistatic Mesh (Advanced)](#esp32-multistatic-mesh-advanced)
+   - [MediaTek Router CSI (Experimental)](#mediatek-router-csi-experimental)
    - [Connect Mesh Data to the Dashboard and Observatory](#connect-mesh-data-to-the-dashboard-and-observatory)
    - [Cognitum Spaces activation](#cognitum-spaces-activation)
    - [Cognitum Seed Integration (ADR-069)](#cognitum-seed-integration-adr-069)
 5. [REST API Reference](#rest-api-reference)
 6. [WebSocket Streaming](#websocket-streaming)
-7. [Web UI](#web-ui)
+7. [RuView npm toolkit (`@ruvnet/ruview`)](#ruview-npm-toolkit-ruvnetruview)
+   - [Hardware from the command line](#hardware-from-the-command-line)
+   - [MCP for agents, ChatGPT and MCP Apps](#mcp-for-agents-chatgpt-and-mcp-apps)
+   - [Claude Code mod: live sensing pane](#claude-code-mod-live-sensing-pane)
+   - [Homecore and the vitals kernel](#homecore-and-the-vitals-kernel)
+8. [Web UI](#web-ui)
 8. [Vital Sign Detection](#vital-sign-detection)
 9. [CLI Reference](#cli-reference)
 10. [Observatory Visualization](#observatory-visualization)
@@ -104,7 +111,7 @@ Multi-architecture image (amd64 + arm64). Works on Intel/AMD and Apple Silicon M
 | `simulated` | Generate synthetic CSI frames (no hardware required) |
 | `wifi` | Host Wi-Fi RSSI (not available inside containers) |
 
-Example: `docker run -e CSI_SOURCE=esp32 -p 3000:3000 -p 5005:5005/udp ruvnet/wifi-densepose:latest`
+Example: `docker run -e RUVIEW_API_TOKEN -e CSI_SOURCE=esp32 -e RUVIEW_UDP_ALLOW=<node-ip-or-cidr> -p 127.0.0.1:3000:3000 -p 5005:5005/udp ruvnet/wifi-densepose:latest`. The container exits with code 64 unless `RUVIEW_API_TOKEN` is set, and receives no ESP32 frames until a UDP source guard is set; see [Receiving ESP32 frames in Docker](#receiving-esp32-frames-in-docker).
 
 ### From Source (Rust)
 
@@ -256,8 +263,9 @@ Non-interactive:
 ### 30-Second Demo (Docker)
 
 ```bash
-# Pull and run
-docker run -p 3000:3000 -p 3001:3001 ruvnet/wifi-densepose:latest
+# Pull and run (the container exits with code 64 without an API token)
+export RUVIEW_API_TOKEN=$(openssl rand -hex 32)
+docker run -p 127.0.0.1:3000:3000 -p 127.0.0.1:3001:3001 -e RUVIEW_API_TOKEN ruvnet/wifi-densepose:latest
 
 # Open the UI in your browser
 # http://localhost:3000
@@ -297,7 +305,11 @@ All endpoints return JSON. In simulated mode, data is generated from a determini
 
 ## Data Sources
 
-The `--source` flag controls where CSI data comes from.
+The `--source` flag controls where CSI data comes from. Valid values are
+`auto`, `esp32`, `wifi`, and `simulated` (alias `simulate`), plus the vendor
+feeds `mediatek`, `qualcomm`, `realtek` (RTL8720F radar), and `realtek_csi`
+(RTL8721Dx CSI), which bind the UDP receiver like `esp32`. Any other value
+stops the server at startup with an error that lists them.
 
 ### Simulated Mode (No Hardware)
 
@@ -330,26 +342,24 @@ docker run --network host ruvnet/wifi-densepose:latest --source wifi --tick-ms 5
 
 ### macOS WiFi (RSSI Only)
 
-Uses CoreWLAN via a Swift helper binary. macOS Sonoma 14.4+ redacts real BSSIDs; the adapter generates deterministic synthetic MACs so the multi-BSSID pipeline still works.
+Uses CoreWLAN via a Swift helper binary. macOS Sonoma 14.4+ redacts real BSSIDs; the adapter generates deterministic synthetic MACs so the multi-BSSID pipeline still works. On macOS, `--source wifi` selects the CoreWLAN scanner; there is no separate `macos` value.
 
 ```bash
 # Compile the Swift helper (once)
 swiftc -O archive/v1/src/sensing/mac_wifi.swift -o mac_wifi
 
 # Run natively
-./target/release/sensing-server --source macos --http-port 3000 --ws-port 3001 --tick-ms 500
+./target/release/sensing-server --source wifi --http-port 3000 --ws-port 3001 --tick-ms 500
 ```
 
 See [ADR-025](adr/ADR-025-macos-corewlan-wifi-sensing.md) for details.
 
 ### Linux WiFi (RSSI Only)
 
-Uses `iw dev <iface> scan` to capture RSSI. Requires `CAP_NET_ADMIN` (root) for active scans; use `scan dump` for cached results without root.
-
-```bash
-# Run natively (requires root for active scanning)
-sudo ./target/release/sensing-server --source linux --http-port 3000 --ws-port 3001 --tick-ms 500
-```
+The sensing server does not have a Linux RSSI source yet. `--source wifi`
+on Linux runs the Windows `netsh` scanner, which is not present there, and
+`--source linux` is rejected at startup. Use an ESP32 node (`--source esp32`)
+on Linux.
 
 ### ESP32-S3 (Full CSI)
 
@@ -357,13 +367,75 @@ Real Channel State Information at 20 Hz with 56-192 subcarriers. Required for po
 
 ```bash
 # From source
-./target/release/sensing-server --source esp32 --udp-port 5005 --http-port 3000 --ws-port 3001
+./target/release/sensing-server --source esp32 --udp-port 5005 --http-port 3000 --ws-port 3001 \
+  --udp-bind 0.0.0.0 --udp-allow <node-ip-or-cidr>
 
 # Docker (use CSI_SOURCE environment variable)
-docker run -p 3000:3000 -p 3001:3001 -p 5005:5005/udp -e CSI_SOURCE=esp32 ruvnet/wifi-densepose:latest
+docker run -p 127.0.0.1:3000:3000 -p 127.0.0.1:3001:3001 -p 5005:5005/udp \
+  -e RUVIEW_API_TOKEN -e CSI_SOURCE=esp32 -e RUVIEW_UDP_ALLOW=<node-ip-or-cidr> \
+  ruvnet/wifi-densepose:latest
 ```
 
 The ESP32 nodes stream binary CSI frames over UDP to port 5005. See [Hardware Setup](#esp32-s3-mesh) for flashing instructions.
+
+The server only listens for those frames on `127.0.0.1` unless you tell it otherwise (ADR-296), so a native run needs `--udp-bind 0.0.0.0` to hear nodes on your network, plus `--udp-allow` with their IP or subnet (for example `192.168.1.0/24`). Without them the server starts fine but no node ever shows up. If you'd rather accept frames from any source on a trusted network, use `--udp-insecure-lan` instead of `--udp-allow`.
+
+#### Receiving ESP32 frames in Docker
+
+The sensing server binds its UDP receiver to `127.0.0.1` by default (ADR-296). Inside a container that address cannot receive anything from a published `5005/udp` port, so no node ever appears. The image's entrypoint binds UDP on `0.0.0.0` only when you set a source guard, and prints a note at startup when you have not:
+
+| Variable | Effect |
+|----------|--------|
+| `RUVIEW_API_TOKEN` | Required. Without it (or `RUVIEW_ALLOW_UNAUTHENTICATED=1`) the container exits with code 64. |
+| `RUVIEW_UDP_ALLOW=<ip-or-cidr>` | Accept frames only from these sources. Preferred. |
+| `RUVIEW_UDP_INSECURE_LAN=true` | Accept frames from any source. The UDP data plane is not authenticated, so only use this on a trusted network. |
+| `RUVIEW_UDP_BIND` | Explicit UDP bind address. Overrides the entrypoint's choice. |
+| `SENSING_ALLOWED_HOSTS=<host-ip>` | Needed to open the UI from another machine; otherwise the server answers 421. That also requires publishing the TCP ports beyond `127.0.0.1`. |
+
+**macOS (Docker Desktop, OrbStack):** datagrams reach the container from the Docker bridge gateway, not from the node's LAN address, so an allowlist that names your LAN subnet drops every frame. Allow the gateway instead:
+
+```bash
+export RUVIEW_API_TOKEN=$(openssl rand -hex 32)
+GW=$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}')
+docker run --rm -d --name ruview \
+  -p 127.0.0.1:3000:3000 -p 127.0.0.1:3001:3001 -p 5005:5005/udp \
+  -e RUVIEW_API_TOKEN -e CSI_SOURCE=esp32 -e RUVIEW_UDP_ALLOW="$GW/32" \
+  ruvnet/wifi-densepose:latest
+curl -s -H "Authorization: Bearer $RUVIEW_API_TOKEN" localhost:3000/api/v1/nodes
+```
+
+Allowing the gateway admits anything that can reach the published port, so keep `5005/udp` off untrusted networks. Node identity still comes from the frame payload. With Docker Compose the service runs on the project network (`<project>_default`), so inspect that network's gateway rather than `bridge`. Docker Desktop on Windows has a related source-address problem; see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+
+### ESP32-C5 (Experimental CSI target)
+
+The C5 profile is headless: 2.4 GHz association, 240 MHz application CPU,
+8 Hz edge DSP and a 4 MB OTA layout. Use the `c5` variant, ESP-IDF 6.0.2
+for the reproducible build, and esptool 5.3 or newer. This profile does not
+enable 5 GHz or PSRAM. No C5 speedup or sensing-accuracy claim is established.
+C5 also skips default mmWave probing: S3's GPIO17/18 sensor pair conflicts
+with C5 flash/PSRAM. Do not reuse S3 sensor pin assignments on C5.
+Real-board tests confirmed boot and decoded CSI transport, but the tested AP
+did not consistently sustain the 20 packets/s acceptance target, including
+with additional traffic. Check cadence in your deployment; a successful install alone
+does not qualify sensing accuracy or long-run reliability.
+
+Identify the exact board and production chip, confirm at least 4 MB flash,
+and save a private full-flash backup before installation. C5's bootloader
+address is **`0x2000`**, unlike S3/C6. Verify checksums and inspect the plan:
+
+```sh
+node harness/ruview/bin/cli.js flash-plan --port COM8 --bundle ./c5-bundle --variant c5
+```
+
+Choose your board's actual port. A CP210x listing identifies the USB bridge,
+not the ESP chip. If identification receives no serial data, hold BOOT, tap
+RESET, release BOOT, then retry. After flashing and provisioning, require
+positive `CSI cb #1` (or later) callbacks and sustained valid sink packets.
+Initialization messages alone are not hardware validation. Keep credentials
+and raw captures private.
+
+See the [C5 installation instructions](../firmware/esp32-csi-node/README.md#esp32-c5-candidate-installation-and-qualification)
+and [comparison and qualification record](validation/2026-10-28-esp32-c5-candidate.md).
 
 ### ESP32 Multistatic Mesh (Advanced)
 
@@ -371,7 +443,8 @@ For higher accuracy with through-wall tracking, deploy 3-6 ESP32-S3 nodes in a *
 
 ```bash
 # Start the aggregator with multistatic mode
-./target/release/sensing-server --source esp32 --udp-port 5005 --http-port 3000 --ws-port 3001
+./target/release/sensing-server --source esp32 --udp-port 5005 --http-port 3000 --ws-port 3001 \
+  --udp-bind 0.0.0.0 --udp-allow <node-ip-or-cidr>
 ```
 
 The mesh uses a **Time-Division Multiplexing (TDM)** protocol so nodes take turns transmitting, avoiding self-interference. Key features:
@@ -386,6 +459,16 @@ The mesh uses a **Time-Division Multiplexing (TDM)** protocol so nodes take turn
 
 See [ADR-029](adr/ADR-029-ruvsense-multistatic-sensing-mode.md) and [ADR-032](adr/ADR-032-multistatic-mesh-security-hardening.md) for the full design.
 
+### MediaTek Router CSI (Experimental)
+
+An OpenWrt router with an MT7981B + MT7976C radio (tested on a Wavlink WL-WN586X3 Rev A) can report CSI through MediaTek's vendor CSI patch. A host-side bridge converts it to MTC1 (ADR-267) for the sensing server:
+
+```bash
+./target/release/sensing-server --source mediatek --udp-port 5005 --http-port 3000 --ws-port 3001
+```
+
+Frames are labelled `mediatek:physical-unvalidated`. The presence and activity outputs on this source are uncalibrated heuristics with no sensing-quality validation. CSI exists only while associated clients transmit. See the [MediaTek Router CSI guide](mediatek-router-csi.md) for the OpenWrt build, arming CSI, the bridge, and limitations.
+
 ### Connect Mesh Data to the Dashboard and Observatory
 
 If a standalone `aggregator` command prints live packets, the ESP32 fleet is already reaching that host. To visualize the same data, stop the standalone aggregator and run `sensing-server` on that same host and UDP port. The sensing server is the aggregator used by the REST API, WebSocket stream, dashboard, and Observatory.
@@ -396,18 +479,24 @@ cd v2
 cargo run -p wifi-densepose-sensing-server -- \
   --source esp32 \
   --udp-port 5005 \
+  --udp-bind 0.0.0.0 \
+  --udp-allow <node-ip-or-cidr> \
   --http-port 3000 \
   --ws-port 3001 \
-  --ui-path ../../ui
+  --ui-path ../ui
 
 # Docker
 docker run --rm \
+  -e RUVIEW_API_TOKEN \
   -e CSI_SOURCE=esp32 \
-  -p 3000:3000 \
-  -p 3001:3001 \
+  -e RUVIEW_UDP_ALLOW=<node-ip-or-cidr> \
+  -p 127.0.0.1:3000:3000 \
+  -p 127.0.0.1:3001:3001 \
   -p 5005:5005/udp \
   ruvnet/wifi-densepose:latest
 ```
+
+On macOS Docker the allowlist must name the bridge gateway; see [Receiving ESP32 frames in Docker](#receiving-esp32-frames-in-docker).
 
 Open the UI from the sensing server, not from a local file:
 
@@ -420,9 +509,19 @@ Use these checks before debugging the browser:
 
 ```bash
 curl http://localhost:3000/health
+curl http://localhost:3000/api/v1/status
 curl http://localhost:3000/api/v1/nodes
 curl http://localhost:3000/api/v1/sensing/latest
 ```
+
+`/api/v1/status` reports whether frames are actually arriving:
+
+| `source_state` | Meaning |
+|---|---|
+| `disconnected` | A live source is configured but no frame has arrived yet. `waiting_for_frames` is `true` and `last_frame_age_ms` is `null`. |
+| `live_unverified` | Frames are arriving. `last_frame_age_ms` is under 5000. |
+| `stale` | Frames arrived, then stopped for more than 5 seconds. For a hardware source, `source` gains an `:offline` suffix (for example `esp32:offline`). |
+| `synthetic` | Simulated data. Never shown as live. |
 
 If the ESP32 nodes are provisioned with `--target-ip <AGGREGATOR_HOST>`, that IP must be the machine running `sensing-server`. Only one process can receive UDP `:5005` at a time, so leave the standalone hardware `aggregator` off while the dashboard or Observatory is live.
 
@@ -451,8 +550,8 @@ authority. Versioned collections are `sites`, `buildings`, `floors`,
 The dependency-free contributor harness exposes the same read path:
 
 ```bash
-npx @ruvnet/ruview@0.5.0 spaces --resource alerts --limit 25
-npx @ruvnet/ruview@0.5.0 mcp start
+npx @ruvnet/ruview@0.9.1 spaces --resource alerts --limit 25
+npx @ruvnet/ruview@0.9.1 mcp start
 ```
 
 Its MCP tool is `ruview_spaces_list`. MCP reads are OAuth-only, use the fixed
@@ -581,6 +680,8 @@ Base URL: `http://localhost:3000` (Docker) or `http://localhost:8080` (binary de
 | `GET` | `/api/v1/nodes/:id/sync` | Single-node mesh sync snapshot (or 404) | `{"offset_us":1163565,"is_leader":false,...}` |
 | `GET` | `/api/v1/mesh/metrics` | ADR-110 mesh state in Prometheus exposition format ([iter 36](adr/ADR-110-esp32-c6-firmware-extension.md)) | `wifi_densepose_mesh_offset_us{node="9"} 1163565\n…` |
 | `GET` | `/api/field` | ADR-262 P3 — latest **signed RuField `FieldEvent`s** from the live sensing cycle, plus the signer pubkey + a `dev_signing_key` flag. Only egress-safe (P1/P2) events are surfaced; identity/biometric (P4/P5) and raw (P0) are held edge-local | `{"spec":"rufield","signer_pubkey_hex":"…","dev_signing_key":true,"events":[…]}` |
+
+Recording and model files live under the server's `--data-dir` (env `RUVIEW_DATA_DIR`, default `data`, resolved against the directory the server was started from): recordings in `<data-dir>/recordings/`, `.rvf` models in `<data-dir>/models/` unless `MODELS_DIR` is set, and the adaptive classifier in `<data-dir>/adaptive_model.json`.
 
 ### RuField surface (ADR-262 P3)
 
@@ -838,15 +939,18 @@ Full design + operator guide: [`docs/integrations/home-assistant.md`](integratio
 sensing-server --mqtt --mqtt-host <broker> --mqtt-tls --privacy-mode
 ```
 
-`--privacy-mode` strips heart rate, breathing rate, and pose keypoints from MQTT **and** Matter — they never reach the wire. Semantic primitives stay published because they're inferred *states* server-side, not biometric *values*. This is the architectural win that makes ADR-115 healthcare- and enterprise-deployable.
+`--privacy-mode` (env `RUVIEW_PRIVACY_MODE`) is a server-wide flag. It withholds heart rate, breathing rate, and pose keypoints from every output:
+
+- REST responses: the fields are removed from every JSON body (`/api/v1/sensing/latest`, `/api/v1/vital-signs`, `/api/v1/edge-vitals`, `/api/v1/pose/current`, ...). `/api/v1/pose/current?view=both|refined` returns `403` with `"code": "privacy_mode"`.
+- WebSocket streams: `/ws/sensing` and `/api/v1/stream/pose` frames are filtered the same way.
+- Recordings started with `POST /api/v1/recording/start` are written already filtered.
+- MQTT and Matter: those entities are neither announced nor published.
+
+Presence, motion, person count, zones and the coarse posture label are still served, and semantic primitives stay published because they're inferred *states*, not biometric *values*. Some of those states (sleeping, possible distress) are derived from vitals, so they are still health-related information. Privacy mode reduces what leaves the server. It does not by itself make a deployment compliant with any regulation.
 
 ### Matter Bridge (Apple Home / Google Home / Alexa / SmartThings)
 
-```bash
-sensing-server --matter --matter-setup-file /var/run/ruview-matter.txt
-```
-
-Open `/var/run/ruview-matter.txt` for the Matter pairing QR / 11-digit setup code. Scan it from Apple Home / Google Home / your HA Matter integration. RuView appears as a Bridged Device with one occupancy endpoint per node + per zone, plus a momentary switch for fall events.
+Not available yet. The `--matter` and `--matter-setup-file` flags from ADR-115 are defined in the crate's library CLI, but the `sensing-server` binary doesn't accept them (`error: unexpected argument '--matter' found`), so there's no way to start the Matter bridge today. Use the MQTT integration above for Home Assistant in the meantime.
 
 Detailed entity reference, blueprint catalog, troubleshooting recipe matrix: see [`docs/integrations/home-assistant.md`](integrations/home-assistant.md).
 
@@ -955,6 +1059,164 @@ RVAGENT_HTTP_TOKEN=secret npx @ruvnet/rvagent http --port 3001
 ```
 
 Source: [`tools/ruview-mcp/`](../tools/ruview-mcp/README.md). Tracking issue: [#787](https://github.com/ruvnet/RuView/issues/787). Full ADR: [ADR-124](adr/ADR-124-rvagent-mcp-ruvector-npm-integration.md).
+
+---
+
+## RuView npm toolkit (`@ruvnet/ruview`)
+
+`@ruvnet/ruview` is RuView's operator toolkit on npm. It has no runtime
+dependencies and runs on Node 20+. It is tested on Windows and Linux. One tool
+registry serves:
+- a CLI;
+- an MCP server (stdio, or HTTP for ChatGPT);
+- a typed SDK;
+- a Claude Code mod.
+
+Every result is honest about what it is:
+- **MEASURED** when it comes from live packets on your machine;
+- **SYNTHETIC** for simulators and self-tests;
+- **device-reported** for values a radar's own firmware computes, which are
+  not validated against a reference.
+
+```bash
+npx @ruvnet/ruview@0.9.1 --help
+npx @ruvnet/ruview@0.9.1 doctor          # what works on this machine, with fixes
+```
+
+In a terminal, commands print a formatted view. Pipes and `--json` print JSON,
+for scripts.
+
+### Hardware from the command line
+
+Run these on the machine the hardware is plugged into.
+
+```bash
+# What is plugged in (USB VID:PID → ESP32, Realtek RTL8721Dx, radar, LiDAR)
+npx @ruvnet/ruview@0.9.1 devices
+
+# CSI nodes streaming to this machine (UDP 5005): ESP32 ADR-018 frames and
+# Realtek RAC1 frames, per node rate, loss, RSSI and CSI shape
+npx @ruvnet/ruview@0.9.1 esp32 --seconds 10
+npx @ruvnet/ruview@0.9.1 esp32 --watch                 # live view, redrawn every few seconds
+npx @ruvnet/ruview@0.9.1 esp32 --seconds 45 --analyze  # live CSI through the vitals kernel
+
+# A board's serial console, without resetting it
+npx @ruvnet/ruview@0.9.1 monitor --port COM9
+npx @ruvnet/ruview@0.9.1 monitor --port COM10 --baud 1500000   # Realtek Ameba
+
+# 60 GHz / 24 GHz radar: raw UART, or an ESPHome kit on your network
+npx @ruvnet/ruview@0.9.1 mmwave --port COM5 --model auto
+npx @ruvnet/ruview@0.9.1 mmwave --source esphome --host 192.168.1.50
+
+# Flash ESP32 firmware: plan first, then write with --confirm (records boot evidence)
+npx @ruvnet/ruview@0.9.1 flash-plan --port COM16 --bundle firmware/esp32-csi-node/release_bins/c6-adr110 --variant c6
+npx @ruvnet/ruview@0.9.1 flash --port COM16 --bundle firmware/esp32-csi-node/release_bins/c6-adr110 --variant c6 --confirm
+```
+
+**What the alerts mean:**
+
+| Alert | Meaning |
+|---|---|
+| `heartbeat-only sender` | A board is alive but sends no CSI. On a Realtek board, run `monitor --baud 1500000`. If it shows `lack of csi buf`, the board ran out of CSI report buffers (`csi_buffer_starvation`). Reset it. |
+| `port_in_use` | The sensing server already holds UDP 5005. Stop it, or capture on another port your nodes target. |
+| `no_decodable_packets` | Packets arrived, but none were in a known RuView format. Check the sender. |
+| `seqReordered` / `seqStrays` | Out-of-order or stray sequence numbers. These are not counted as loss. |
+
+**ESPHome radar kits** (for example the Seeed MR60BHA2): the kit's firmware
+owns the radar, so read it over the network with `--source esphome`.
+- If the kit cannot join your WiFi, it starts a fallback hotspot. Join it and
+  set your network in its captive portal, at `http://192.168.4.1`.
+- Only private-network addresses are accepted.
+- Encrypted or password-protected ESPHome APIs are reported as unsupported.
+
+### MCP for agents, ChatGPT and MCP Apps
+
+```bash
+# Claude Code, Codex or any MCP client (stdio)
+claude mcp add ruview -- npx -y @ruvnet/ruview@0.9.1 mcp start
+
+# HTTP, for ChatGPT and remote clients
+export RUVIEW_MCP_TOKEN="$(node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))")"
+RUVIEW_MCP_GRANTS=device-access npx @ruvnet/ruview@0.9.1 mcp start --http --port 8790
+```
+
+**Connecting ChatGPT.** Clients that can send headers use
+`Authorization: Bearer <token>`. ChatGPT connectors cannot, so:
+1. Expose the port over HTTPS, with a tunnel or reverse proxy.
+2. Add `https://<your-host>/mcp/<token>` as the connector URL.
+
+**Least authority:**
+- Hardware tools need the `device-access` grant.
+- The HTTP transport binds to localhost by default.
+- It refuses unknown browser origins.
+- It never allows flashing or calibration, whatever grants are set.
+
+Node captures, radar reads, device scans and doctor results render in the
+**RuView console**: a widget that ChatGPT and other MCP Apps hosts show inline,
+with a Refresh button that re-runs the tool.
+
+### Claude Code mod: live sensing pane
+
+The package ships `ruview-live`, a Claude Code mod. `/ruview` opens a pane
+beside the conversation, refreshed on a timer, showing:
+- your CSI nodes;
+- an optional ESPHome radar;
+- alerts.
+
+It also keeps a status line such as `RuView · 2 nodes · radar present`.
+
+Keys `1`, `2` and `3` switch between three views (ADR-378):
+- **Overview**: the cards.
+- **CSI waterfall**: per-subcarrier amplitude over time, labelled MEASURED or
+  SYNTHETIC; `n` cycles nodes.
+- **Radar**: a range fan with an animated ping, plus heart, breathing and
+  distance charts. The values are device-reported and not validated, and the
+  kit reports range, not bearing.
+
+The two live views draw in terminal cells and animate in place.
+
+```bash
+npx @ruvnet/ruview@0.9.1 mod           # prints the mod's path in your install and how to load it
+claude --plugin-dir "<that path>"       # try it for one session
+# or from the RuView marketplace, inside Claude Code:
+#   /plugin marketplace add ruvnet/RuView
+#   /plugin install ruview-live@ruview
+```
+
+| In Claude Code | Does |
+|---|---|
+| `/ruview` | Open or close the pane |
+| `/ruview refresh` | Run one capture now; the result goes in the status line |
+| `/ruview off` | Close the pane |
+| `/ruview waterfall` / `/ruview radar` | Open on that view |
+
+**Settings** (`claude plugin configure ruview-live`): `udpPort`, `radarHost`,
+`refreshSeconds`, `captureSeconds` and `liveRefreshSeconds` (live views,
+default 4 s).
+
+The mod only runs the package's read-only CLI commands. Mods are early access:
+if `/ruview` is missing, start Claude Code with
+`CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`.
+
+### Homecore and the vitals kernel
+
+```bash
+npx homecore@0.1.0 guidance --topic plugins --query Wasmtime   # Homecore developer metaharness
+npx @ruvnet/ruview-kernel@0.1.0 selftest                       # vitals pipeline as WASM (SYNTHETIC self-test)
+```
+
+`esp32 --analyze` uses the kernel when it is installed. Its heart and breathing
+estimates carry "no reference measurement": they show the signal path works,
+not that the readings are accurate.
+
+Design records:
+- [ADR-373](adr/ADR-373-host-device-access-layer.md): device access;
+- [ADR-375](adr/ADR-375-ruview-mcp-apps-console-http-transport-and-terminal-ui.md):
+  MCP Apps console, HTTP transport and terminal UI;
+- [ADR-376](adr/ADR-376-ruview-umbrella-npm-package.md): the one-install
+  `ruview` package, pending the npm name;
+- [ADR-377](adr/ADR-377-ruview-live-claude-code-mod.md): the Claude Code mod.
+- [ADR-378](adr/ADR-378-ruview-live-showcase-views.md): the mod's CSI waterfall and radar views (keys 1/2/3, `esp32 --spectrum`).
 
 ---
 
@@ -1114,12 +1376,15 @@ The Rust sensing server binary accepts the following flags:
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--source` | `auto` | Data source: `auto`, `simulate`, `wifi`, `esp32` |
+| `--source` | `auto` | Data source: `auto`, `esp32`, `wifi`, `simulated` (alias `simulate`), `mediatek`, `qualcomm`, `realtek`, `realtek_csi`. Other values are rejected at startup |
 | `--http-port` | `8080` | HTTP port for REST API and UI |
 | `--ws-port` | `8765` | WebSocket port |
 | `--udp-port` | `5005` | UDP port for ESP32 CSI frames |
-| `--ui-path` | (none) | Path to UI static files directory |
-| `--tick-ms` | `50` | Simulated frame interval (milliseconds) |
+| `--udp-bind` | `127.0.0.1` | Address the UDP receiver listens on. Use `0.0.0.0` to receive frames from nodes on your network; that also needs `--udp-allow` or `--udp-insecure-lan` |
+| `--udp-allow` | (none) | Comma-separated IPs/CIDRs allowed to send CSI frames, e.g. `192.168.1.0/24` |
+| `--udp-insecure-lan` | off | Accept frames from any source on a routable bind (the UDP data plane is not authenticated) |
+| `--ui-path` | `../ui` | Path to UI static files directory (falls back to `./ui` or `../../ui` if it doesn't exist) |
+| `--tick-ms` | `100` | Simulated frame interval (milliseconds) |
 | `--benchmark` | off | Run vital sign benchmark (1000 frames) and exit |
 | `--train` | off | Train a model from dataset |
 | `--dataset` | (none) | Path to dataset directory (MM-Fi or Wi-Pose) |
@@ -1135,10 +1400,11 @@ The Rust sensing server binary accepts the following flags:
 
 ```bash
 # Simulated mode with UI (development)
-./target/release/sensing-server --source simulate --http-port 3000 --ws-port 3001 --ui-path ../../ui
+./target/release/sensing-server --source simulate --http-port 3000 --ws-port 3001 --ui-path ../ui
 
 # ESP32 hardware mode
-./target/release/sensing-server --source esp32 --udp-port 5005
+./target/release/sensing-server --source esp32 --udp-port 5005 \
+  --udp-bind 0.0.0.0 --udp-allow <node-ip-or-cidr>
 
 # Windows WiFi RSSI
 ./target/release/sensing-server --source wifi --tick-ms 500
@@ -1331,7 +1597,7 @@ curl -X POST http://localhost:3000/api/v1/recording/start \
 curl -X POST http://localhost:3000/api/v1/recording/stop
 ```
 
-Recordings are saved as JSONL files in `data/recordings/`. Filenames must start with `train_` and contain a class keyword:
+Recordings are saved as JSONL files in `recordings/` under the server's `--data-dir` (default `data`, so `data/recordings/` relative to the directory the server was started from). Filenames must start with `train_` and contain a class keyword:
 
 | Filename pattern | Class |
 |-----------------|-------|
@@ -1348,7 +1614,7 @@ Train the adaptive classifier from your labeled recordings:
 curl -X POST http://localhost:3000/api/v1/adaptive/train
 ```
 
-The server trains a multiclass logistic regression on 15 features using mini-batch SGD (200 epochs). Training completes in under 1 second for typical recording sets. The trained model is saved to `data/adaptive_model.json` and automatically loaded on server restart.
+The server trains a multiclass logistic regression on 15 features using mini-batch SGD (200 epochs). Training completes in under 1 second for typical recording sets. The trained model is saved to `adaptive_model.json` in the `--data-dir` (default `data/adaptive_model.json`) and automatically loaded on server restart.
 
 **Check model status:**
 
@@ -1368,7 +1634,7 @@ Once trained, the adaptive model runs automatically:
 
 1. Each CSI frame is classified using the learned weights instead of static thresholds
 2. Model confidence is blended with smoothed threshold confidence (70/30 split)
-3. The model persists across server restarts (loaded from `data/adaptive_model.json`)
+3. The model persists across server restarts (loaded from `<data-dir>/adaptive_model.json`)
 
 **Tips for better accuracy:**
 
@@ -1483,7 +1749,8 @@ The pipeline runs 10 phases:
 ### Step 3: Use the Trained Model
 
 ```bash
-./target/release/sensing-server --model model.rvf --progressive --source esp32
+./target/release/sensing-server --model model.rvf --progressive --source esp32 \
+  --udp-bind 0.0.0.0 --udp-allow <node-ip-or-cidr>
 ```
 
 Progressive loading enables instant startup (Layer A loads in <5ms with basic inference), with full model loading in the background.
@@ -1683,31 +1950,53 @@ A 3-6 node ESP32-S3 mesh provides full CSI at 20 Hz. Total cost: ~$54 for a 3-no
 
 **Flashing firmware:**
 
-Pre-built binaries are available at [Releases](https://github.com/ruvnet/RuView/releases):
+Use versioned bundles from [Releases](https://github.com/ruvnet/RuView/releases),
+not the historical binaries in `firmware/esp32-csi-node/release_bins/`.
+The 0.8.16 prerelease adds conservative MR60BHA2 identification to the prior
+USB identity, OTA provisioning, and CSI reliability fixes.
+It has CI build/host-test coverage; new physical-board qualification remains
+pending. The previous stable firmware is 0.8.8.
 
 | Release | What It Includes | Tag |
 |---------|-----------------|-----|
-| [v0.7.0](https://github.com/ruvnet/RuView/releases/tag/v0.7.0-esp32) | **Latest — ADR-110 firmware-side substrate closed.** Adds ESP-NOW mesh substrate with quantified ≤100 µs alignment (104.1 µs smoothed stdev, 3.95× suppression, 99.56 % cross-board match measured live), 32-byte sync-packet UDP emission with operator-tunable cadence, ADR-018 byte 19 bit 4 wire-fix sourced from working ESP-NOW path, Python SyncPacketParser stub for host wiring ([WITNESS-LOG-110 §A0.7-§A0.13](WITNESS-LOG-110.md)) | `v0.7.0-esp32` |
+| [v0.8.16](https://github.com/ruvnet/RuView/releases/tag/v0.8.16-esp32) | **Prerelease:** conservative MR60BHA2 identification; CI/host-test coverage, without new physical firmware qualification | `v0.8.16-esp32` |
+| [v0.8.14](https://github.com/ruvnet/RuView/releases/tag/v0.8.14-esp32) | **Prerelease:** corrected C6 base-MAC identity, OTA key provisioning without a host key cache; physical qualification pending | `v0.8.14-esp32` |
+| [v0.8.8](https://github.com/ruvnet/RuView/releases/tag/v0.8.8-esp32) | Previous stable firmware: consistent occupancy and rate-aware C6 processing; see [release evidence](releases/v0.8.8-esp32.md) | `v0.8.8-esp32` |
+| [v0.7.0](https://github.com/ruvnet/RuView/releases/tag/v0.7.0-esp32) | Historical ADR-110 firmware-side substrate: ESP-NOW synchronization and sync-packet UDP emission ([WITNESS-LOG-110 §A0.7-§A0.13](WITNESS-LOG-110.md)) | `v0.7.0-esp32` |
 | [v0.6.9](https://github.com/ruvnet/RuView/releases/tag/v0.6.9-esp32) | Sync-packet UDP emission, `CONFIG_C6_SYNC_EVERY_N_FRAMES` tunable cadence | `v0.6.9-esp32` |
 | [v0.6.8](https://github.com/ruvnet/RuView/releases/tag/v0.6.8-esp32) | ESP-NOW EMA-smoothed cross-board offset (3.95× suppression, 104 µs stdev) | `v0.6.8-esp32` |
 | [v0.6.7](https://github.com/ruvnet/RuView/releases/tag/v0.6.7-esp32) | Real LP-core motion-gate RISC-V program (B4 code path complete) + Wi-Fi 6 soft-AP with TWT Responder for two-board iTWT benches (B1/B2 unblock) | `v0.6.7-esp32` |
-| [v0.5.0](https://github.com/ruvnet/RuView/releases/tag/v0.5.0-esp32) | **Stable (S3 mesh, recommended)** — mmWave sensor fusion (MR60BHA2/LD2410 auto-detect), 48-byte fused vitals, all v0.4.3.1 fixes | `v0.5.0-esp32` |
+| [v0.5.0](https://github.com/ruvnet/RuView/releases/tag/v0.5.0-esp32) | Historical S3 mesh release — mmWave sensor fusion (MR60BHA2/LD2410 auto-detect), 48-byte fused vitals, all v0.4.3.1 fixes | `v0.5.0-esp32` |
 | [v0.4.3.1](https://github.com/ruvnet/RuView/releases/tag/v0.4.3.1-esp32) | Fall detection fix ([#263](https://github.com/ruvnet/RuView/issues/263)), 4MB flash ([#265](https://github.com/ruvnet/RuView/issues/265)), watchdog fix ([#266](https://github.com/ruvnet/RuView/issues/266)) | `v0.4.3.1-esp32` |
 | [v0.4.1](https://github.com/ruvnet/RuView/releases/tag/v0.4.1-esp32) | CSI build fix, compile guard, AMOLED display, edge intelligence ([ADR-057](../docs/adr/ADR-057-firmware-csi-build-guard.md)) | `v0.4.1-esp32` |
 | [v0.3.0-alpha](https://github.com/ruvnet/RuView/releases/tag/v0.3.0-alpha-esp32) | Alpha — adds on-device edge intelligence (ADR-039) | `v0.3.0-alpha-esp32` |
 | [v0.2.0](https://github.com/ruvnet/RuView/releases/tag/v0.2.0-esp32) | Raw CSI streaming, TDM, channel hopping, QUIC mesh | `v0.2.0-esp32` |
 
-> **Important:** Always use **v0.4.3.1 or later**. Earlier versions have false fall detection alerts (v0.4.2 and below) and CSI disabled in the build config (pre-v0.4.1).
+For 0.8.14, select the correct archive, verify its release `SHA256SUMS.txt`,
+extract into a separate directory, then verify the enclosed checksums:
+
+| Archive | Board configuration |
+|---------|---------------------|
+| `esp32-csi-node-firmware-8mb.tar.gz` | ESP32-S3 display build, 8 MB flash |
+| `esp32-csi-node-firmware-4mb.tar.gz` | ESP32-S3 headless build, 4 MB layout |
+| `esp32-csi-node-firmware-c6-4mb.tar.gz` | ESP32-C6 research target, 4 MB layout |
+
+Bare 8 MB DevKitC boards need the source `sdkconfig.defaults.devkitc` overlay;
+do not use the display build. See the [firmware guide](../firmware/esp32-csi-node/README.md#0-download-a-versioned-firmware-bundle)
+for board selection, C6 filenames, backup and OTA guidance.
 
 ```bash
-# Flash an ESP32-S3 with 8MB flash (most boards)
+# From the extracted ESP32-S3 display / 8 MB bundle:
 python -m esptool --chip esp32s3 --port COM7 --baud 460800 \
   write-flash --flash-mode dio --flash-size 8MB --flash-freq 80m \
   0x0 bootloader.bin 0x8000 partition-table.bin \
   0xf000 ota_data_initial.bin 0x20000 esp32-csi-node.bin
 ```
 
-**4MB flash boards** (e.g. ESP32-S3 SuperMini 4MB): download `esp32-csi-node-s3-4mb.bin` + `partition-table-s3-4mb.bin` from the [v0.6.7 release](https://github.com/ruvnet/RuView/releases/tag/v0.6.7-esp32) (882 KB binary, 52 % partition slack) and use `--flash-size 4MB`:
+**4 MB headless S3 boards:** use the matching application and partition table
+from `esp32-csi-node-firmware-4mb.tar.gz` on the
+[0.8.16 prerelease](https://github.com/ruvnet/RuView/releases/tag/v0.8.16-esp32)
+and select `--flash-size 4MB`:
 
 ```bash
 python -m esptool --chip esp32s3 --port COM7 --baud 460800 \
@@ -1724,18 +2013,11 @@ python firmware/esp32-csi-node/provision.py --port COM7 \
 ```
 
 Replace `192.168.1.20` with the IP of the machine running the sensing server.
+To enable authenticated OTA updates, add `--ota-psk-file` with a private
+64-hex key file. The key must be resupplied on later NVS writes; it is never
+cached in host state. See [OTA key provisioning](../firmware/esp32-csi-node/README.md#ota-key-provisioning).
 
-**Mesh key provisioning (secure mode):**
-
-For multistatic mesh deployments with authenticated beacons (ADR-032), provision a shared mesh key:
-
-```bash
-python firmware/esp32-csi-node/provision.py --port COM7 \
-  --ssid "YourWiFi" --password "YourPassword" --target-ip 192.168.1.20 \
-  --mesh-key "$(openssl rand -hex 32)"
-```
-
-All nodes in a mesh must share the same 256-bit mesh key for HMAC-SHA256 beacon authentication. The key is stored in ESP32 NVS flash and zeroed on firmware erase.
+**Mesh key provisioning:** ADR-032 describes giving every node in a multistatic mesh a shared mesh key, but that isn't wired up yet. `provision.py` has no `--mesh-key` option and the firmware doesn't read a mesh key from NVS, so there's nothing to provision for now.
 
 ### ESP32-C6 (Wi-Fi 6 + 802.15.4 research target — ADR-110)
 
@@ -1881,11 +2163,14 @@ Binary size: 990 KB (8MB flash, 52% free) or 773 KB (4MB flash). v0.5.0 adds mmW
 **Start the aggregator:**
 
 ```bash
-# From source
-./target/release/sensing-server --source esp32 --udp-port 5005 --http-port 3000 --ws-port 3001
+# From source (--udp-bind/--udp-allow let it hear nodes on your network)
+./target/release/sensing-server --source esp32 --udp-port 5005 --http-port 3000 --ws-port 3001 \
+  --udp-bind 0.0.0.0 --udp-allow <node-ip-or-cidr>
 
-# Docker (use CSI_SOURCE environment variable)
-docker run -p 3000:3000 -p 3001:3001 -p 5005:5005/udp -e CSI_SOURCE=esp32 ruvnet/wifi-densepose:latest
+# Docker (see "Receiving ESP32 frames in Docker" for the UDP source guard)
+docker run -p 127.0.0.1:3000:3000 -p 127.0.0.1:3001:3001 -p 5005:5005/udp \
+  -e RUVIEW_API_TOKEN -e CSI_SOURCE=esp32 -e RUVIEW_UDP_ALLOW=<node-ip-or-cidr> \
+  ruvnet/wifi-densepose:latest
 ```
 
 See [ADR-018](../docs/adr/ADR-018-esp32-dev-implementation.md), [ADR-029](../docs/adr/ADR-029-ruvsense-multistatic-sensing-mode.md), and [Tutorial #34](https://github.com/ruvnet/RuView/issues/34).
@@ -2148,19 +2433,19 @@ WiFi sensing can monitor health metrics without any wearable or camera:
 
 ```bash
 # Sleep quality monitoring (run overnight)
-node scripts/sleep-monitor.js --port 5006 --bind 192.168.1.20
+node scripts/sleep-monitor.js --port 5006
 
 # Breathing disorder pre-screening
-node scripts/apnea-detector.js --port 5006 --bind 192.168.1.20
+node scripts/apnea-detector.js --port 5006
 
 # Stress detection via heart rate variability
-node scripts/stress-monitor.js --port 5006 --bind 192.168.1.20
+node scripts/stress-monitor.js --port 5006
 
 # Walking analysis + tremor detection
-node scripts/gait-analyzer.js --port 5006 --bind 192.168.1.20
+node scripts/gait-analyzer.js --port 5006
 
-# Replay on recorded data (no live hardware needed)
-node scripts/sleep-monitor.js --replay data/recordings/*.csi.jsonl
+# Replay one recording (no live hardware needed)
+node scripts/sleep-monitor.js --replay data/recordings/<recording>.csi.jsonl
 ```
 
 > **Note:** These are pre-screening tools, not medical devices. Consult a healthcare professional for diagnosis.
@@ -2214,12 +2499,16 @@ For production deployments with both Rust and Python services:
 
 ```bash
 cd docker
+export RUVIEW_API_TOKEN=$(openssl rand -hex 32)
+export RUVIEW_UDP_ALLOW=<node-ip-or-cidr>   # macOS Docker: <gateway>/32
 docker compose up
 ```
 
 This starts:
 - Rust sensing server on ports 3000 (HTTP), 3001 (WS), 5005 (UDP)
 - Python legacy server on ports 8080 (HTTP), 8765 (WS)
+
+The sensing server exits with code 64 when `RUVIEW_API_TOKEN` is unset. Without `RUVIEW_UDP_ALLOW` or `RUVIEW_UDP_INSECURE_LAN=true` it starts but receives no ESP32 frames. `docker/docker-compose.yml` passes these variables through from your shell, along with `RUVIEW_UDP_BIND` and `SENSING_ALLOWED_HOSTS`. See [Receiving ESP32 frames in Docker](#receiving-esp32-frames-in-docker).
 
 ---
 
@@ -2603,7 +2892,8 @@ The server applies a 3-stage smoothing pipeline (ADR-048). If readings are still
 
 - Verify the sensing server is running: `curl http://localhost:3000/health`
 - Access Observatory via the server URL: `http://localhost:3000/ui/observatory.html` (not a file:// URL)
-- If a standalone `aggregator` command is already listening on UDP `:5005`, stop it and run `sensing-server --source esp32 --udp-port 5005` instead; the Observatory reads the server WebSocket, not the standalone aggregator output
+- If a standalone `aggregator` command is already listening on UDP `:5005`, stop it and run `sensing-server --source esp32 --udp-port 5005 --udp-bind 0.0.0.0 --udp-allow <node-ip-or-cidr>` instead; the Observatory reads the server WebSocket, not the standalone aggregator output
+- On a native run, make sure the server was started with `--udp-bind 0.0.0.0` and `--udp-allow` (or `--udp-insecure-lan`). It listens on `127.0.0.1` by default, so frames from your nodes never reach it otherwise
 - Verify the ESP32 nodes are provisioned to the IP address of the machine running `sensing-server`
 - Hard refresh with Ctrl+Shift+R to clear cached settings
 - The auto-detect probes `/health` on the same origin — cross-origin won't work

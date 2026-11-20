@@ -51,7 +51,7 @@ test('MCP handshake: initialize reports the package.json version; list endpoints
 
     s.send({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
     const tools = (await s.next(2)).result.tools;
-    assert.equal(tools.length, 9);
+    assert.equal(tools.length, 22);
     for (const t of tools) assert.match(t.name, /^[a-zA-Z0-9_-]{1,64}$/, `advertised name not host-safe: ${t.name}`);
     const guidance = tools.find((tool) => tool.name === 'ruview_guidance');
     assert.ok(guidance);
@@ -64,7 +64,8 @@ test('MCP handshake: initialize reports the package.json version; list endpoints
     assert.equal(spaces.annotations.openWorldHint, true);
 
     s.send({ jsonrpc: '2.0', id: 3, method: 'resources/list' });
-    assert.deepEqual((await s.next(3)).result, { resources: [] });
+    const resources = (await s.next(3)).result.resources;
+    assert.deepEqual(resources.map((r) => [r.uri, r.mimeType]), [['ui://ruview/console-v1.html', 'text/html;profile=mcp-app']]);
     s.send({ jsonrpc: '2.0', id: 4, method: 'prompts/list' });
     assert.deepEqual((await s.next(4)).result, { prompts: [] });
 

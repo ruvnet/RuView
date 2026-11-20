@@ -19,6 +19,12 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_4mb.csv"
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
 
+# Native USB/JTAG is the interactive onboarding console on C6 boards. ESP-IDF
+# secondary consoles mirror output only and cannot receive RUVIEW_HELLO_V1.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+# CONFIG_ESP_CONSOLE_UART_DEFAULT is not set
+# CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG is not set
+
 # ── CSI (required) ──
 CONFIG_ESP_WIFI_CSI_ENABLED=y
 
@@ -77,3 +83,26 @@ CONFIG_FREERTOS_TIMER_TASK_STACK_DEPTH=8192
 # ── Power: keep CPU at max 160 MHz (C6 ceiling) for DSP throughput ──
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_160=y
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=160
+
+# ADR-110 D1 / ruvnet/RuView#762: the 802.15.4 RX path never delivers a
+# protocol frame on IDF v5.4. Upstream tested five configurations -- channel
+# 15 and 26, OpenThread on and off, promiscuous on and off, PAN-matched and
+# broadcast -- and every one gave rx=0 with TX at 100% reliability. ESP-NOW
+# shipped as the workaround and is what this firmware actually syncs on
+# (measured 99.56% cross-board delivery, 104 us smoothed offset).
+#
+# The C6 has a single 2.4 GHz transceiver shared by WiFi, BLE and 802.15.4,
+# so leaving the 15.4 stack running costs coexistence time-slicing against
+# the CSI capture that is the entire point of the node -- beaconing every
+# 100 ms and listening on a radio that provably returns nothing. Disable it
+# and give the airtime back to WiFi, which matters most at nine nodes where
+# the 50 Hz receive gate is already the binding constraint.
+#
+# Safe to turn off: the ADR-018 byte 19 bit 4 "sync valid" flag is ORed from
+# both transports and the 15.4 branch is #ifdef-gated on this symbol, so the
+# working ESP-NOW path keeps setting it.
+CONFIG_C6_TIMESYNC_ENABLE=n
+
+# Node mDNS discovery: C6 4 MB image has headroom (~1088 KiB with it,
+# 1152 KiB gate; MEASURED on COM11, IDF v5.4).
+CONFIG_CSI_NODE_MDNS=y

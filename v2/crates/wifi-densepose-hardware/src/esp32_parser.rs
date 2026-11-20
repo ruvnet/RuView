@@ -79,8 +79,13 @@ pub fn ruview_sibling_packet_name(magic: u32) -> Option<&'static str> {
 /// ADR-018 header size in bytes (before I/Q data).
 const HEADER_SIZE: usize = 20;
 
-/// Maximum valid subcarrier count for ESP32 (80 MHz bandwidth).
-const MAX_SUBCARRIERS: usize = 256;
+/// Maximum I/Q pairs in one frame (all antennas together). The firmware
+/// serializes into `CSI_MAX_FRAME_SIZE = CSI_HEADER_SIZE + 4 * 256 * 2`
+/// (`firmware/esp32-csi-node/main/csi_collector.h`) and drops anything larger,
+/// so a frame never carries more than 2048 I/Q bytes = 1024 pairs. Real
+/// ESP32-S3 frames carry up to 306 subcarriers on one antenna (merged
+/// LLTF/HT-LTF buffers), which the old 256-subcarrier cap rejected.
+const MAX_IQ_PAIRS: usize = 1024;
 
 /// Maximum antenna count for ESP32.
 const MAX_ANTENNAS: u8 = 4;
@@ -152,10 +157,11 @@ impl Esp32CsiParser {
                     message: "Failed to read subcarrier count".into(),
                 })? as usize;
 
-        if n_subcarriers > MAX_SUBCARRIERS {
+        let max_subcarriers = MAX_IQ_PAIRS / n_antennas as usize;
+        if n_subcarriers > max_subcarriers {
             return Err(ParseError::InvalidSubcarrierCount {
                 count: n_subcarriers,
-                max: MAX_SUBCARRIERS,
+                max: max_subcarriers,
             });
         }
 
@@ -252,7 +258,13 @@ impl Esp32CsiParser {
         // HT/legacy keeps the count heuristic, with 64 included in the 20 MHz
         // bucket: ESP32 HT20 CSI delivers the full 64-bin FFT grid (live
         // capture evidence: 148-byte frames = 64 subcarriers on a 20 MHz
-        // channel, issue #1005).
+        // channel, issue #1005). Larger counts come from merged LLTF/HT-LTF
+        // buffers (e.g. 192 = 3 x 64, 306) on 20/40 MHz channels; ESP32-family
+        // radios do not use 80/160 MHz, so anything above 64 maps to 40 MHz.
+        //
+        // CLAIMED: the "HT/legacy count above 64 means 40 MHz" rule is inferred
+        // from the datasheet, not measured on these frames. ESP32-C5/C6 are not
+        // separately covered by it.
         let bandwidth = if ppdu_type.is_he() {
             if adr018_flags.bw40 || n_subcarriers > 256 {
                 Bandwidth::Bw40
@@ -262,9 +274,7 @@ impl Esp32CsiParser {
         } else {
             match n_subcarriers {
                 0..=64 => Bandwidth::Bw20,
-                65..=128 => Bandwidth::Bw40,
-                129..=242 => Bandwidth::Bw80,
-                _ => Bandwidth::Bw160,
+                _ => Bandwidth::Bw40,
             }
         };
 
@@ -413,15 +423,16 @@ mod tests {
 
     #[test]
     fn adr110_flags_round_trip_all_bits() {
-        // All known flag bits set: bw40 (0x01) + STBC (0x04) + LDPC (0x08) + 15.4-sync (0x10) = 0x1D
-        let data = build_test_frame_with_he(6, 1, &[(0, 0); 56], 1, 0x1D);
+        // All known flag bits set: bw40 + STBC + LDPC + sync + sanitized prefix = 0x3D.
+        let data = build_test_frame_with_he(6, 1, &[(0, 0); 56], 1, 0x3D);
         let (frame, _) = Esp32CsiParser::parse_frame(&data).unwrap();
         assert!(frame.metadata.adr018_flags.bw40);
         assert!(frame.metadata.adr018_flags.stbc);
         assert!(frame.metadata.adr018_flags.ldpc);
         assert!(frame.metadata.adr018_flags.ieee802154_sync_valid);
+        assert!(frame.metadata.adr018_flags.first_word_sanitized);
         // Round-trip the encoder
-        assert_eq!(frame.metadata.adr018_flags.to_byte(), 0x1D);
+        assert_eq!(frame.metadata.adr018_flags.to_byte(), 0x3D);
     }
 
     #[test]
@@ -575,5 +586,60 @@ mod tests {
         assert_eq!(frame.metadata.n_subcarriers, 4);
         assert_eq!(frame.subcarrier_count(), 12); // 3 antennas * 4 subcarriers
         assert_eq!(frame.metadata.antenna_config.rx_antennas, 3);
+    }
+
+    // ── Real-hardware subcarrier counts ──────────────────────────────────────
+
+    #[test]
+    fn s3_306_subcarrier_single_antenna_frame_parses() {
+        // ESP32-S3 nodes on firmware 0.8.12 at 2432 MHz emit 1-antenna frames
+        // with 306 subcarriers (612 I/Q bytes) alongside 192/128/64 counts.
+        let pairs: Vec<(i8, i8)> = (0..306)
+            .map(|k| ((k % 7) as i8, -((k % 5) as i8)))
+            .collect();
+        let data = build_test_frame(2, 1, &pairs);
+        assert_eq!(data.len(), HEADER_SIZE + 612);
+        let (frame, consumed) = Esp32CsiParser::parse_frame(&data).expect("306-sc frame");
+        assert_eq!(consumed, data.len());
+        assert_eq!(frame.metadata.n_subcarriers, 306);
+        assert_eq!(frame.subcarrier_count(), 306);
+        assert_eq!(frame.metadata.rssi_dbm, -50);
+    }
+
+    #[test]
+    fn ht_bandwidth_never_exceeds_40mhz_for_esp32_counts() {
+        // ESP32-family radios use 20/40 MHz channels. Merged-LTF buffers
+        // (192 = 3 x 64, 306) must not be classified as 80/160 MHz.
+        for &n in &[64usize, 128, 188, 192, 306] {
+            let pairs = vec![(1i8, 1i8); n];
+            let (frame, _) = Esp32CsiParser::parse_frame(&build_test_frame(1, 1, &pairs))
+                .unwrap_or_else(|e| panic!("{n}-sc frame: {e}"));
+            let bw = frame.metadata.bandwidth;
+            assert!(
+                matches!(bw, Bandwidth::Bw20 | Bandwidth::Bw40),
+                "{n} subcarriers classified as {bw:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn iq_pairs_beyond_firmware_buffer_are_rejected() {
+        // Firmware CSI_MAX_FRAME_SIZE leaves 2048 I/Q bytes = 1024 pairs.
+        let max = vec![(0i8, 0i8); MAX_IQ_PAIRS];
+        assert!(Esp32CsiParser::parse_frame(&build_test_frame(1, 1, &max)).is_ok());
+        let over = vec![(0i8, 0i8); MAX_IQ_PAIRS + 1];
+        assert!(matches!(
+            Esp32CsiParser::parse_frame(&build_test_frame(1, 1, &over)),
+            Err(ParseError::InvalidSubcarrierCount { .. })
+        ));
+        // The bound is on total pairs: 2 antennas x 600 subcarriers = 1200.
+        let two_ant = vec![(0i8, 0i8); 1200];
+        assert!(matches!(
+            Esp32CsiParser::parse_frame(&build_test_frame(1, 2, &two_ant)),
+            Err(ParseError::InvalidSubcarrierCount {
+                count: 600,
+                max: 512
+            })
+        ));
     }
 }

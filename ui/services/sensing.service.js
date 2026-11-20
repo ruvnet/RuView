@@ -1,4 +1,4 @@
-import { withWsTicket } from './ws-ticket.js';
+import { resolveWsUrl, probeWsAuthRequired } from './ws-ticket.js';
 import { apiService } from './api.service.js';
 /**
  * Sensing WebSocket Service
@@ -37,7 +37,40 @@ const MAX_RECONNECT_ATTEMPTS = 20;
 const SIM_FALLBACK_AFTER_ATTEMPTS = 5;
 const SIMULATION_INTERVAL = 500; // ms
 
-class SensingService {
+export const SIM_FALLBACK_STORAGE_KEY = 'ruview-client-simulation';
+
+/**
+ * Whether the client may invent sensing frames when the server is unreachable.
+ *
+ * Default **off**, deliberately. The generated frames are plausible — presence
+ * derived from `Math.sin(t * 0.3)` crossing a fixed threshold produces a steady
+ * absent/present_still alternation that reads exactly like a real classifier
+ * struggling at its decision boundary. A reader with no reason to suspect the
+ * server had dropped will diagnose the sensing pipeline, and be wrong. That is
+ * not a hypothetical: it cost a full debugging session on 2026-08-28, chasing a
+ * "flip-flop" that was this function all along while the server sat at a
+ * perfectly steady presence=true.
+ *
+ * For an instrument, "no signal" is the honest reading and a useful one.
+ * Synthetic motion is only appropriate for a demo, so it must be asked for:
+ * `?simulate=1`, or `localStorage['ruview-client-simulation'] = 'true'`.
+ *
+ * Repository rule: never present synthetic output as measurement (CLAUDE.md).
+ */
+function clientSimulationAllowed() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('simulate') === '1') return true;
+    if (params.get('simulate') === '0') return false;
+  } catch { /* no window/location — non-browser test context */ }
+  try {
+    return localStorage.getItem(SIM_FALLBACK_STORAGE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+export class SensingService {
   constructor() {
     /** @type {WebSocket|null} */
     this._ws = null;
@@ -46,13 +79,24 @@ class SensingService {
     this._reconnectAttempt = 0;
     this._reconnectTimer = null;
     this._simTimer = null;
-    // Connection state: disconnected | connecting | connected | reconnecting | simulated
+    // Guards the await window inside `_connect()` (see the comment there).
+    this._connectInFlight = false;
+    // Bumped per connect attempt and by `stop()`; lets a socket recognise that
+    // it has been abandoned and stop driving reconnect state.
+    this._connectEpoch = 0;
+    // Connection state: disconnected | connecting | connected | reconnecting |
+    // simulated | auth-required
     this._state = 'disconnected';
+    // #2099: why the server refused us, while in `auth-required`:
+    //   'missing'  — the server needs a token and the browser has none
+    //   'rejected' — the stored token was refused
+    this._authRequired = null;
     // Data-source label exposed to the UI:
-    //   "live"              — real ESP32 hardware connected
+    //   "live"              — live measurements (see serverSource for modality)
     //   "server-simulated"  — server is running but using synthetic data (no hardware)
     //   "reconnecting"      — WebSocket disconnected, retrying
     //   "simulated"         — client-side fallback simulation (server unreachable)
+    //   "auth-required"     — the server refused us for lack of a valid token
     this._dataSource = 'reconnecting';
     // The raw source string from the server (e.g. "esp32", "simulated", "simulate")
     this._serverSource = null;
@@ -72,6 +116,10 @@ class SensingService {
 
   /** Stop the service entirely. */
   stop() {
+    // Invalidate any attempt still inside its await window, so a socket opened
+    // after this call does not resurrect the service.
+    this._connectEpoch++;
+    this._connectInFlight = false;
     this._clearTimers();
     if (this._ws) {
       this._ws.close(1000, 'client stop');
@@ -111,10 +159,21 @@ class SensingService {
   }
 
   /**
+   * #2099: null, or why the server refused the stream —
+   * 'missing' (no token in this browser) or 'rejected' (stored token refused).
+   */
+  get authRequired() {
+    return this._authRequired;
+  }
+
+  /**
    * Current data source label.
-   * "live"         — frames are arriving from the real ESP32 over WebSocket
+   * "live"         — live measurements are arriving over WebSocket
    * "reconnecting" — WebSocket disconnected; actively retrying, no frames emitted
-   * "simulated"    — max reconnect attempts exhausted; emitting synthetic frames
+   * "unreachable"  — retries exhausted, client simulation off; NO frames emitted
+   *                  and whatever is on screen is the last live reading, stale
+   * "simulated"    — client simulation explicitly enabled and running; every
+   *                  frame on screen is invented
    */
   get dataSource() {
     return this._dataSource;
@@ -129,27 +188,74 @@ class SensingService {
   // reconnects would fail on the second attempt.
   async _connect() {
     if (this._ws && this._ws.readyState <= WebSocket.OPEN) return;
+    // The readyState guard above cannot stand alone: this function awaits
+    // ticket minting before it assigns `this._ws`, so two callers entering
+    // during that window BOTH pass the guard and BOTH open a socket. The
+    // second assignment orphans the first — a socket nobody references, still
+    // open on the server, whose `onclose` fires later and calls
+    // `_scheduleReconnect()` even though a healthy socket is live. That walks
+    // `_reconnectAttempt` upward with no outage and eventually trips the
+    // simulation fallback. Observed on the server as connect/disconnect churn
+    // on every page load.
+    if (this._connectInFlight) return;
+    this._connectInFlight = true;
+
+    // Identifies this attempt for the lifetime of its socket. `stop()` and any
+    // superseding attempt bump it, so a late event from an abandoned socket is
+    // recognised and ignored rather than driving reconnect state.
+    const epoch = ++this._connectEpoch;
 
     this._setState('connecting');
 
     let url = SENSING_WS_URL;
+    let authRequired = null;
     try {
-      url = await withWsTicket(SENSING_WS_URL);
+      ({ url, authRequired } = await resolveWsUrl(SENSING_WS_URL));
     } catch {
       // Ticket minting is best-effort: against a server with auth off, or one
       // predating ADR-272, connecting without a ticket is correct.
     }
 
+    if (epoch !== this._connectEpoch) {
+      // Superseded or stopped while minting. The ticket is single-use and now
+      // spent; the current attempt mints its own.
+      this._connectInFlight = false;
+      return;
+    }
+
+    if (authRequired) {
+      // #2099: the stored token was refused. Retrying with it cannot succeed.
+      this._connectInFlight = false;
+      this._enterAuthRequired(authRequired);
+      return;
+    }
+    const ticketed = url !== SENSING_WS_URL;
+    let opened = false;
+
+    let ws;
     try {
-      this._ws = new WebSocket(url);
+      ws = new WebSocket(url);
     } catch (err) {
       console.warn('[Sensing] WebSocket constructor failed:', err.message);
+      this._connectInFlight = false;
       this._fallbackToSimulation();
       return;
     }
 
-    this._ws.onopen = () => {
+    this._ws = ws;
+    this._connectInFlight = false;
+
+    /** True while `ws` is still the socket this service is driving. */
+    const isCurrent = () => epoch === this._connectEpoch && this._ws === ws;
+
+    ws.onopen = () => {
+      if (!isCurrent()) {
+        ws.close(1000, 'superseded');
+        return;
+      }
       console.info('[Sensing] Connected to', SENSING_WS_URL);
+      opened = true;
+      this._authRequired = null;
       this._reconnectAttempt = 0;
       this._stopSimulation();
       this._setState('connected');
@@ -158,7 +264,8 @@ class SensingService {
       this._detectServerSource();
     };
 
-    this._ws.onmessage = (evt) => {
+    ws.onmessage = (evt) => {
+      if (!isCurrent()) return;
       try {
         const data = JSON.parse(evt.data);
         this._handleData(data);
@@ -167,14 +274,24 @@ class SensingService {
       }
     };
 
-    this._ws.onerror = () => {
+    ws.onerror = () => {
       // onerror is always followed by onclose, so we handle reconnect there
     };
 
-    this._ws.onclose = (evt) => {
+    ws.onclose = (evt) => {
+      if (!isCurrent()) {
+        // An abandoned socket closing is not an outage. Reconnect state
+        // belongs to whichever attempt is current.
+        console.debug('[Sensing] Ignoring close from superseded socket');
+        return;
+      }
       console.info('[Sensing] Connection closed (code=%d)', evt.code);
       this._ws = null;
-      if (evt.code !== 1000) {
+      if (evt.code !== 1000 && !opened && !ticketed) {
+        // #2099: a refused upgrade looks like any other failure from here, so
+        // ask the server whether it wants a token before retrying forever.
+        void this._handleRefusedConnect(epoch);
+      } else if (evt.code !== 1000) {
         this._scheduleReconnect();
       } else {
         this._setState('disconnected');
@@ -183,19 +300,65 @@ class SensingService {
     };
   }
 
+  async _handleRefusedConnect(epoch) {
+    const reason = await probeWsAuthRequired();
+    // stop(), reconnect() or another attempt took over during the probe.
+    if (epoch !== this._connectEpoch || this._ws) return;
+    if (reason) {
+      this._enterAuthRequired(reason);
+    } else {
+      this._scheduleReconnect();
+    }
+  }
+
+  /**
+   * #2099: stop the retry loop and say why. Nothing is retried until the user
+   * supplies a token (QuickSettings reloads the page on save) or asks for a
+   * reconnect.
+   */
+  _enterAuthRequired(reason) {
+    console.warn('[Sensing] Server requires an API token (%s); not retrying', reason);
+    this._clearTimers();
+    this._reconnectAttempt = 0;
+    this._authRequired = reason;
+    this._setState('auth-required');
+    this._setDataSource('auth-required');
+  }
+
+  /** Retry now, e.g. from the header's reconnect button. */
+  reconnect() {
+    this._clearTimers();
+    this._authRequired = null;
+    this._reconnectAttempt = 0;
+    void this._connect();
+  }
+
   _scheduleReconnect() {
+    // A retry is already pending; stacking timers would multiply the attempt
+    // count for a single outage.
+    if (this._reconnectTimer) return;
+
     if (this._reconnectAttempt >= MAX_RECONNECT_ATTEMPTS) {
-      console.warn('[Sensing] Max reconnect attempts (%d) reached, switching to simulation', MAX_RECONNECT_ATTEMPTS);
-      this._fallbackToSimulation();
-      return;
+      if (clientSimulationAllowed()) {
+        console.warn('[Sensing] Max reconnect attempts (%d) reached, switching to simulation', MAX_RECONNECT_ATTEMPTS);
+        this._fallbackToSimulation();
+        return;
+      }
+      // With simulation off there is nothing to give up *for*: keep retrying at
+      // the ceiling delay so the UI recovers by itself when the server returns,
+      // rather than requiring a hard refresh.
+      this._setDataSource('unreachable');
     }
 
     const delay = RECONNECT_DELAYS[Math.min(this._reconnectAttempt, RECONNECT_DELAYS.length - 1)];
-    this._reconnectAttempt++;
+    // Hold at the cap rather than counting into the thousands over a long
+    // outage; the delay is already saturated and the number is only read by a
+    // human in the console.
+    this._reconnectAttempt = Math.min(this._reconnectAttempt + 1, MAX_RECONNECT_ATTEMPTS);
     console.info('[Sensing] Reconnecting in %dms (attempt %d/%d)', delay, this._reconnectAttempt, MAX_RECONNECT_ATTEMPTS);
 
     this._setState('reconnecting');
-    this._setDataSource('reconnecting');
+    if (this._dataSource !== 'unreachable') this._setDataSource('reconnecting');
 
     this._reconnectTimer = setTimeout(() => {
       this._reconnectTimer = null;
@@ -205,13 +368,23 @@ class SensingService {
     // Only start simulation after several failed attempts so a brief hiccup
     // does not immediately switch the UI to "SIMULATED DATA".
     if (this._reconnectAttempt >= SIM_FALLBACK_AFTER_ATTEMPTS && this._state !== 'simulated') {
-      this._fallbackToSimulation();
+      if (clientSimulationAllowed()) {
+        this._fallbackToSimulation();
+      } else {
+        // Say "the server is gone" instead of inventing a room.
+        this._setDataSource('unreachable');
+      }
     }
   }
 
   // ---- Simulation fallback -----------------------------------------------
 
   _fallbackToSimulation() {
+    if (!clientSimulationAllowed()) {
+      this._setDataSource('unreachable');
+      this._scheduleReconnect();
+      return;
+    }
     this._setState('simulated');
     this._setDataSource('simulated');
     if (this._simTimer) return; // already running
@@ -332,12 +505,13 @@ class SensingService {
    * `source_state`) to the UI data-source label.
    */
   _applyServerSource(rawSource, sourceState) {
+    const sourceChanged = rawSource !== this._serverSource;
     this._serverSource = rawSource;
     // ADR-295: only the verified/unverified live states may show "live"; any
     // synthetic/stale/disconnected state must not.
     if (sourceState) {
       if (sourceState === 'live_verified' || sourceState === 'live_unverified') {
-        this._setDataSource('live');
+        this._setDataSource('live', sourceChanged);
       } else if (sourceState === 'synthetic') {
         this._setDataSource('server-simulated');
       } else {
@@ -345,8 +519,9 @@ class SensingService {
       }
       return;
     }
-    if (rawSource === 'esp32' || rawSource === 'wifi' || rawSource === 'live') {
-      this._setDataSource('live');
+    if (rawSource === 'esp32' || rawSource === 'wifi' || rawSource === 'live' ||
+        (typeof rawSource === 'string' && rawSource.startsWith('wifi:'))) {
+      this._setDataSource('live', sourceChanged);
     } else if (rawSource === 'simulated' || rawSource === 'simulate') {
       this._setDataSource('server-simulated');
     } else {
@@ -360,6 +535,14 @@ class SensingService {
     return this._serverSource;
   }
 
+  /** A modality label; a live connection alone does not establish ESP32 use. */
+  get liveSourceLabel() {
+    const source = typeof this._serverSource === 'string' ? this._serverSource : '';
+    if (source === 'wifi' || source?.startsWith('wifi:')) return 'HOST WIFI (RSSI ONLY)';
+    if (source === 'esp32' || source?.startsWith('esp32:')) return 'ESP32 HARDWARE';
+    return 'SOURCE UNSPECIFIED';
+  }
+
   // ---- Data handling -----------------------------------------------------
 
   _handleData(data) {
@@ -369,8 +552,8 @@ class SensingService {
     // can react if the server switches between esp32 ↔ simulated at runtime.
     if (data.source && this._state === 'connected') {
       const raw = data.source;
-      if (raw !== this._serverSource) {
-        this._applyServerSource(raw);
+      if (raw !== this._serverSource || data.source_state) {
+        this._applyServerSource(raw, data.source_state);
       }
     }
 
@@ -419,10 +602,10 @@ class SensingService {
   /**
    * Update the dataSource label and notify state listeners so the UI can
    * react without needing a separate subscription.
-   * @param {'live'|'server-simulated'|'reconnecting'|'simulated'} source
+   * @param {'live'|'server-simulated'|'reconnecting'|'unreachable'|'simulated'|'auth-required'} source
    */
-  _setDataSource(source) {
-    if (source === this._dataSource) return;
+  _setDataSource(source, sourceChanged = false) {
+    if (source === this._dataSource && !sourceChanged) return;
     this._dataSource = source;
     // Re-use the same state-listener channel — listeners receive the
     // connection state but can read dataSource via service.dataSource.

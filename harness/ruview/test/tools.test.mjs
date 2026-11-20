@@ -93,7 +93,7 @@ test('summarize gives PASS/finding text', () => {
 
 test('registry exposes the documented tools with schemas (underscore-canonical)', () => {
   const names = Object.keys(TOOLS);
-  for (const n of ['ruview_onboard', 'ruview_claim_check', 'ruview_verify', 'ruview_node_monitor', 'ruview_calibrate', 'ruview_node_flash', 'ruview_guidance', 'ruview_spaces_list', 'ruview_memory_search']) {
+  for (const n of ['ruview_onboard', 'ruview_claim_check', 'ruview_verify', 'ruview_node_monitor', 'ruview_calibrate', 'ruview_node_flash', 'ruview_guidance', 'ruview_spaces_list', 'ruview_memory_search', 'ruview_kernel_selftest', 'ruview_doctor', 'ruview_firmware_plan', 'ruview_firmware_ports', 'ruview_train', 'ruview_train_plan', 'ruview_train_gate', 'ruview_devices_scan', 'ruview_esp32_capture', 'ruview_mmwave_read', 'ruview_lidar_read', 'ruview_host_list', 'ruview_host_run']) {
     assert.ok(names.includes(n), `missing ${n}`);
     assert.equal(TOOLS[n].inputSchema.type, 'object');
     assert.match(n, /^[a-zA-Z0-9_-]{1,64}$/, 'canonical names must satisfy host tool-name regexes');
@@ -143,11 +143,13 @@ test('node_monitor fails closed without a port', async () => {
   assert.equal(r.reason, 'no_port');
 });
 
-test('node_flash refuses without confirm (mutating guard)', async () => {
+test('node_flash needs a bundle and never writes without confirm (mutating guard)', async () => {
   const r = await runTool('ruview_node_flash', { port: 'COM8', variant: 's3-8mb' });
   assert.equal(r.ok, false);
-  // either not-confirmed (win32) or unsupported_platform (posix) — both fail-closed
-  assert.ok(['not_confirmed', 'unsupported_platform'].includes(r.reason));
+  assert.equal(r.reason, 'invalid_arguments');
+  const plan = await runTool('ruview_node_flash', { port: 'COM8', bundle: '/definitely/missing' });
+  assert.equal(plan.ok, false);
+  assert.equal(plan.reason, 'bundle_missing');
 });
 
 test('verify fails closed when not in a RuView repo', async () => {

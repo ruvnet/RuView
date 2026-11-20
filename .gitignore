@@ -3,7 +3,9 @@ CLAUDE.local.md
 
 # ESP32 firmware build artifacts and local config (contains WiFi credentials)
 firmware/esp32-csi-node/build/
+firmware/esp32-csi-node/build-*/
 firmware/esp32-csi-node/sdkconfig
+firmware/esp32-csi-node/sdkconfig.*-release*
 firmware/esp32-csi-node/sdkconfig.defaults
 firmware/esp32-csi-node/sdkconfig.old
 # Downloaded WASM3 source (fetched at configure time)
@@ -17,11 +19,16 @@ firmware/esp32-csi-node/sdkconfig.defaults.bak
 firmware/esp32-hello-world/sdkconfig.old
 
 # Host-built firmware test binaries (compiled from test/*.c, not source)
-firmware/esp32-csi-node/test/test_adr110
-firmware/esp32-csi-node/test/test_vitals
-firmware/esp32-csi-node/test/fuzz_serialize
-firmware/esp32-csi-node/test/fuzz_edge
-firmware/esp32-csi-node/test/fuzz_nvs
+# Compiled host-test and fuzz binaries. The Makefile writes them beside their
+# sources, so they land in a tracked directory. Ignore them by SHAPE rather
+# than by name: every source here carries an extension and no binary does.
+#
+# This replaced a hand-maintained list of five targets, which had gone stale --
+# test_csi_sanitize, test_mmwave_detect and test_thermal were all built by
+# `make host_tests`, ignored by nothing, and got committed by accident.
+firmware/esp32-csi-node/test/test_*
+firmware/esp32-csi-node/test/fuzz_*
+!firmware/esp32-csi-node/test/*.*
 firmware/esp32-csi-node/test/*.exe
 firmware/esp32-csi-node/test/*.obj
 
@@ -311,3 +318,12 @@ v2/crates/wifi-densepose-sensing-server/data/
 # ADR-324: wasm-bindgen output for ruview-offaxis is generated locally
 # (see the crate README); never commit generated artifacts.
 v2/crates/ruview-offaxis/pkg/
+
+# fal.ai visual-teacher LoRA training data/weights -- regenerable, never
+# commit training images or model weights (ADR-353)
+scripts/fal-visual-teacher/training-data/
+scripts/fal-visual-teacher/training-data.zip
+scripts/fal-visual-teacher/output/
+
+# Trained adaptive classifier (auto-created at runtime; #2135)
+/v2/data/adaptive_model.json

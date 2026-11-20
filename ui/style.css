@@ -1804,7 +1804,11 @@ canvas {
   flex-direction: column;
   gap: var(--space-12);
   overflow-y: auto;
+  /* Without this, `overflow-y: auto` alone still resolves the x axis to auto,
+     so anything marginally too wide scrolls sideways instead of wrapping. */
+  overflow-x: hidden;
   max-height: 600px;
+  min-width: 0;
 }
 
 .sensing-card {
@@ -1812,6 +1816,10 @@ canvas {
   border: 1px solid var(--color-card-border);
   border-radius: var(--radius-md);
   padding: var(--space-12);
+  /* Flex items default to min-width:auto, which refuses to shrink below their
+     content — one wide child then widens the whole 320px column and puts a
+     horizontal scrollbar on the panel. Cards must shrink to the column. */
+  min-width: 0;
 }
 
 .sensing-card-title {

@@ -214,6 +214,28 @@ impl EntityKind {
         )
     }
 
+    /// False for entities the sensing broadcast has no source for. They are
+    /// not announced, so Home Assistant never shows an entity that can only
+    /// stay "unknown" (issue #2085):
+    ///
+    /// - zone occupancy, bathroom occupied, bed exit, room transition: the
+    ///   broadcast carries no zones, and nothing loads a zone-tag map;
+    /// - meeting in progress: needs a 1–20 % motion level, but per-node motion
+    ///   is a three-level classification (absent / still / moving);
+    /// - pose: the broadcast's `pose_keypoints` is never populated, and the
+    ///   `persons[].keypoints` skeletons are synthesized, not measured.
+    pub fn has_server_source(self) -> bool {
+        !matches!(
+            self,
+            EntityKind::ZoneOccupancy
+                | EntityKind::BathroomOccupied
+                | EntityKind::BedExit
+                | EntityKind::MultiRoomTransition
+                | EntityKind::MeetingInProgress
+                | EntityKind::PoseKeypoints
+        )
+    }
+
     /// Human-readable HA entity name shown in the UI.
     pub fn display_name(self) -> &'static str {
         match self {
@@ -467,6 +489,9 @@ impl<'a> DiscoveryBuilder<'a> {
 
         all.into_iter()
             .filter(|e| {
+                if !e.has_server_source() {
+                    return false;
+                }
                 if privacy_mode && e.is_biometric() {
                     return false;
                 }
@@ -572,12 +597,30 @@ mod tests {
     }
 
     #[test]
-    fn enabled_entities_default_excludes_pose_and_includes_all_others() {
+    fn enabled_entities_default_includes_every_sourced_entity() {
         let entities = DiscoveryBuilder::enabled_entities(false, false, &[]);
         assert!(!entities.contains(&EntityKind::PoseKeypoints));
         assert!(entities.contains(&EntityKind::Presence));
         assert!(entities.contains(&EntityKind::HeartRate));
         assert!(entities.contains(&EntityKind::SomeoneSleeping));
+        assert_eq!(entities.len(), 15);
+    }
+
+    #[test]
+    fn unsourced_entities_are_never_announced() {
+        // #2085: announcing these left them "unknown" in HA forever.
+        let entities = DiscoveryBuilder::enabled_entities(false, true, &[]);
+        for e in [
+            EntityKind::ZoneOccupancy,
+            EntityKind::BathroomOccupied,
+            EntityKind::BedExit,
+            EntityKind::MultiRoomTransition,
+            EntityKind::MeetingInProgress,
+            EntityKind::PoseKeypoints,
+        ] {
+            assert!(!e.has_server_source());
+            assert!(!entities.contains(&e), "{e:?} announced without a source");
+        }
     }
 
     #[test]
@@ -588,7 +631,7 @@ mod tests {
         }
         // Semantic primitives must remain available (ADR-115 §3.12.3).
         assert!(entities.contains(&EntityKind::SomeoneSleeping));
-        assert!(entities.contains(&EntityKind::BathroomOccupied));
+        assert!(entities.contains(&EntityKind::PossibleDistress));
     }
 
     #[test]

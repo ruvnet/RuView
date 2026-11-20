@@ -1,0 +1,43 @@
+{
+  "name": "ruview-live",
+  "version": "0.1.0",
+  "description": "RuView live sensing in Claude Code: /ruview opens a pane beside the transcript with three views: an overview of your CSI nodes (ESP32, Realtek) and 60 GHz radar (rates, loss, RSSI, presence, device-reported vitals, alerts), a live CSI amplitude waterfall, and a radar range fan with vitals charts, all drawn in terminal cells. Reads only; runs the @ruvnet/ruview CLI it ships beside.",
+  "author": {
+    "name": "ruvnet",
+    "url": "https://github.com/ruvnet/RuView"
+  },
+  "homepage": "https://github.com/ruvnet/RuView",
+  "license": "MIT",
+  "userConfig": {
+    "udpPort": {
+      "type": "number",
+      "title": "UDP port",
+      "description": "Port your CSI nodes stream to (the sensing server's default is 5005). The pane listens briefly on each refresh; it reports port_in_use when the sensing server holds it.",
+      "default": 5005
+    },
+    "radarHost": {
+      "type": "string",
+      "title": "Radar kit host",
+      "description": "IP or hostname of an ESPHome radar kit (e.g. a Seeed MR60BHA2) on your private network. Empty skips the radar.",
+      "default": ""
+    },
+    "refreshSeconds": {
+      "type": "number",
+      "title": "Refresh interval (s)",
+      "description": "Seconds between refreshes while the pane is open (minimum 5).",
+      "default": 15
+    },
+    "captureSeconds": {
+      "type": "number",
+      "title": "Capture window (s)",
+      "description": "Seconds each refresh listens for node packets and radar states (1-10).",
+      "default": 3
+    },
+    "liveRefreshSeconds": {
+      "type": "number",
+      "title": "Live view refresh (s)",
+      "description": "Seconds between refreshes in the waterfall and radar views (2-60).",
+      "default": 4
+    }
+  }
+}

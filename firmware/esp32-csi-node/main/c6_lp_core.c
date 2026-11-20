@@ -13,7 +13,7 @@
  *      `ulp_embed_binary(...)` in main/CMakeLists.txt from lp_core/main.c.
  *
  *   2. DISABLED — falls back to plain deep-sleep + GPIO wake-up
- *      (`esp_deep_sleep_enable_gpio_wakeup`). No debounce, no
+ *      (ESP-IDF deep-sleep GPIO wake API). No debounce, no
  *      sub-10 µA floor, but no LP toolchain dependency either.
  *      This is the path the v0.6.6 firmware shipped with.
  *
@@ -26,6 +26,7 @@
 #if defined(CONFIG_IDF_TARGET_ESP32C6) && defined(CONFIG_ULP_COPROC_TYPE_LP_CORE)
 
 #include "c6_lp_core.h"
+#include "esp_idf_version.h"
 #include "esp_log.h"
 #include "esp_sleep.h"
 #include "driver/rtc_io.h"
@@ -134,10 +135,17 @@ esp_err_t c6_lp_core_arm(int wake_gpio, bool active_high)
 #else
     /* --- Fallback path: plain deep-sleep GPIO wakeup (~10 µA floor) --- */
     uint64_t mask = 1ULL << wake_gpio;
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
+    esp_sleep_gpio_wake_up_mode_t mode = active_high
+        ? ESP_GPIO_WAKEUP_GPIO_HIGH
+        : ESP_GPIO_WAKEUP_GPIO_LOW;
+    esp_err_t err = esp_sleep_enable_gpio_wakeup_on_hp_periph_powerdown(mask, mode);
+#else
     esp_deepsleep_gpio_wake_up_mode_t mode = active_high
         ? ESP_GPIO_WAKEUP_GPIO_HIGH
         : ESP_GPIO_WAKEUP_GPIO_LOW;
     esp_err_t err = esp_deep_sleep_enable_gpio_wakeup(mask, mode);
+#endif
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "enable_gpio_wakeup failed: %s", esp_err_to_name(err));
         return err;

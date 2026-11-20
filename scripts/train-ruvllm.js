@@ -1166,11 +1166,21 @@ async function main() {
   // We iterate over triplets, compute gradients via computeGradient(), and apply
   // them to update the encoder's w2 layer (the embedding projection layer).
   console.log('  Applying gradient updates to encoder weights...');
+  // Same bug class as lossHistory: contrastiveResult.durationMs times the
+  // no-op contrastiveTrainer.train() baseline pass above, not this loop --
+  // the actual gradient-update work. Time it here instead.
+  const contrastiveLoopStart = Date.now();
 
   const contrastiveLr = CONFIG.learningRate;
   const contrastiveEpochs = CONFIG.epochs;
   let initialContrastiveLoss = 0;
   let finalContrastiveLoss = 0;
+  // Real per-epoch loss from the loop that actually updates encoder.w2 below —
+  // NOT contrastiveResult.history, which comes from contrastiveTrainer.train()
+  // above and never touches the encoder (see its own comment). Exporting that
+  // instead of this produced a flat, meaningless lossHistory in the published
+  // model's training-metrics.json.
+  const realContrastiveLossHistory = [];
 
   // Compute initial loss
   for (const triplet of triplets) {
@@ -1230,7 +1240,9 @@ async function main() {
       if (CONFIG.verbose) console.log(`    Epoch ${epoch + 1}/${contrastiveEpochs}: loss=${epochLoss.toFixed(6)}`);
     }
     finalContrastiveLoss = epochLoss;
+    realContrastiveLossHistory.push({ epoch: epoch + 1, loss: epochLoss });
   }
+  const realContrastiveDurationMs = Date.now() - contrastiveLoopStart;
 
   // Re-encode all features with updated encoder
   console.log('  Re-encoding features with updated encoder...');
@@ -1494,10 +1506,15 @@ async function main() {
   const exportModel = {
     metadata: {
       name: 'wifi-densepose-csi-embedding',
-      version: '1.0.0',
+      version: '2.0.1',
       architecture: 'csi-encoder-8-64-128',
       training: {
-        steps: contrastiveResult.history.length * contrastiveTrainer.getTripletCount(),
+        // Real epoch count and real per-epoch triplet-update count, reported
+        // separately rather than pre-multiplied into one "steps" figure --
+        // that reads as optimizer steps, but every triplet with loss>0 gets
+        // an immediate direct weight update here, not a batched gradient step.
+        epochs: realContrastiveLossHistory.length,
+        tripletUpdatesPerEpoch: triplets.length,
         loss: contrastiveResult.finalLoss,
         learningRate: CONFIG.learningRate,
       },
@@ -1609,8 +1626,14 @@ async function main() {
       initialLoss: contrastiveResult.initialLoss,
       finalLoss: contrastiveResult.finalLoss,
       improvement: contrastiveResult.improvement,
-      durationMs: contrastiveResult.durationMs,
-      lossHistory: contrastiveResult.history,
+      // Real wall-clock of the actual gradient loop -- contrastiveResult.durationMs
+      // timed the no-op baseline pass instead, same bug as lossHistory above.
+      durationMs: realContrastiveDurationMs,
+      // The real per-epoch loss from the loop that actually updates the
+      // encoder (see realContrastiveLossHistory above) -- contrastiveResult.history
+      // comes from a separate, non-weight-updating baseline pass and was flat/
+      // meaningless here.
+      lossHistory: realContrastiveLossHistory,
     },
     taskHeads: taskTrainingData.length > 0 ? {
       samples: labeledCount,

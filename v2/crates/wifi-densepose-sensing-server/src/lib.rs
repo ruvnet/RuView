@@ -9,6 +9,7 @@
 //! - Real-time CSI introspection / low-latency tap (`introspection`, ADR-099)
 
 pub mod bearer_auth;
+pub mod bootstrap_baseline;
 pub mod browser_session;
 pub mod ws_ticket;
 pub mod cli;
@@ -17,6 +18,8 @@ pub mod discovery;
 pub mod edge_registry;
 pub mod error_response;
 pub mod host_validation;
+/// #864/ADR-296: refuse a routable HTTP bind with API auth off.
+pub mod http_bind;
 /// ADR-297: per-node vs. fused room inference, with deterministic fusion.
 pub mod inference;
 pub mod introspection;
@@ -26,6 +29,8 @@ pub mod mqtt;
 pub mod path_safety;
 /// ADR-323: fail-closed pose physics integration and raw/refined view selection.
 pub mod pose_physics;
+/// #2094: server-wide `--privacy-mode` filter for REST, WebSocket and recordings.
+pub mod privacy_filter;
 /// ADR-295: canonical source-provenance state machine (synthetic can never
 /// present as live).
 pub mod provenance;
@@ -37,11 +42,15 @@ pub mod rufield_surface;
 pub mod rvf_container;
 pub mod rvf_pipeline;
 pub mod semconv;
+/// #2087: measured stream rate and WebSocket client count.
+pub mod stream_stats;
 pub mod telemetry;
 #[allow(dead_code)]
 pub mod trainer;
 /// ADR-296: UDP data-plane bind scope decision + source IP/CIDR allowlist.
 pub mod udp_bind;
+/// ADR-380: loopback raw-datagram tee for second consumers of the CSI stream.
+pub mod udp_tee;
 pub mod vital_signs;
 /// ADR-270 Mist and NETGEAR telemetry providers.
 pub mod vendor_mist_netgear;

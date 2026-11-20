@@ -62,6 +62,9 @@ pub mod qualcomm_csi;
 /// ADR-264 host-side framing for Realtek RTL8720F CFR and FMCW radar reports.
 /// This module has no dependency on the vendor SDK.
 pub mod rtl8720f;
+/// ADR-323 vendor-neutral Realtek RTL8721Dx (AmebaDplus) 1x1 CSI framing and
+/// simulator. This module has no dependency on the vendor SDK.
+pub mod realtek_csi;
 
 pub use bridge::CsiData;
 pub use csi_frame::{

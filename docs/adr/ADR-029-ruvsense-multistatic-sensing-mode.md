@@ -4,6 +4,7 @@
 |-------|-------|
 | **Status** | Proposed |
 | **Date** | 2026-03-02 |
+| **Updated** | 2026-10-04 — multistatic fusion combines phase across nodes only when every frame declares the same shared phase reference; independent ESP32 nodes and the amplitude-only server bridge fuse amplitude only and report the reason (`phase_fusion` in `/health/ready`, issue #1752). |
 | **Deciders** | ruv |
 | **Codename** | **RuvSense** -- RuVector-Enhanced Sensing for Multistatic Fidelity |
 | **Relates to** | ADR-012 (ESP32 Mesh), ADR-014 (SOTA Signal Processing), ADR-016 (RuVector Training), ADR-017 (RuVector Signal+MAT), ADR-018 (ESP32 Implementation), ADR-024 (AETHER Embeddings), ADR-026 (Survivor Track Lifecycle), ADR-027 (MERIDIAN Generalization) |

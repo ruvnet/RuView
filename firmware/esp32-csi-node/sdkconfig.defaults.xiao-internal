@@ -1,0 +1,4 @@
+# Seeed XIAO ESP32-C6 internal ceramic antenna test overlay.
+# Keeps RF-switch control enabled so the boot log proves the selected path.
+CONFIG_C6_XIAO_ANTENNA_SELECT=y
+CONFIG_C6_XIAO_ANTENNA_INTERNAL=y

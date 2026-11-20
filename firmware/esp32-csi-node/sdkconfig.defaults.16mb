@@ -1,0 +1,41 @@
+# ESP32-C6 CSI Node - 16MB Flash SDK Configuration
+# For boards with 16MB flash (e.g. ESP32-C6 DevKitC-1 N16).
+#
+# Layered on top of sdkconfig.defaults.esp32c6, which keeps a 4MB layout
+# because 4MB C6 devkits are the common case and must not be silently
+# repartitioned by inheriting this.
+#
+# Build:
+#   idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.esp32c6;sdkconfig.defaults.16mb" build
+#
+# Confirm before flashing a deployed node: /ota/status must report
+# max_size 4194304. Writing a smaller table over a 16MB node relocates NVS
+# and destroys its provisioning.
+
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_16mb.csv"
+
+# Firmware rollback: an OTA'd image boots PENDING_VERIFY and must confirm
+# itself, or the bootloader reverts on the next boot. main/ota_health.c does
+# the confirming (IP + one CSI frame within OTA_HEALTH_TIMEOUT_S), ADR-379.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# Coredump to flash. The 64K `coredump` partition has existed in
+# partitions_16mb.csv since the 16MB layout was written and has never held
+# anything, because the build defaulted to
+# CONFIG_ESP_COREDUMP_ENABLE_TO_NONE=y. A panic therefore left no stack trace
+# on a fleet whose faults are all remote.
+#
+# Complementary to the on-node log, not a substitute: a coredump captures a
+# CRASH, and the log's boot record captures a HANG followed by a watchdog
+# reset -- which is the failure this fleet actually sees.
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y
+CONFIG_ESP_COREDUMP_LOGS=y
+
+# The `storage` FAT volume (8000K) that node_log.c mounts. Reserved in the
+# same partition table and likewise never used until now.
+CONFIG_WL_SECTOR_SIZE_4096=y

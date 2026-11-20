@@ -11,7 +11,7 @@ build-backend = "maturin"
 [project]
 name = "wifi-densepose"
 version = "2.0.0"
-description = "WiFi-based human pose estimation, vital sign extraction, and ambient intelligence from Channel State Information (CSI). PyO3 bindings for the Rust core."
+description = "WiFi CSI sensing for Python: Rust-compiled breathing and heart-rate DSP, pose and keypoint types, and WebSocket/MQTT clients for a RuView sensing-server."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -71,7 +71,7 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/ruvnet/RuView"
+Homepage = "https://ruv.io"
 Repository = "https://github.com/ruvnet/RuView"
 Issues = "https://github.com/ruvnet/RuView/issues"
 Documentation = "https://github.com/ruvnet/RuView/tree/main/docs"

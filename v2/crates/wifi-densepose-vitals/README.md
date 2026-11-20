@@ -21,12 +21,18 @@ resource-constrained edge deployments alongside ESP32 hardware.
 2. **Breathing extraction** (`BreathingExtractor`) -- Bandpass filtering at 0.1--0.5 Hz with
    zero-crossing analysis for respiratory rate estimation.
 3. **Heart rate extraction** (`HeartRateExtractor`) -- Bandpass filtering at 0.8--2.0 Hz with
-   autocorrelation peak detection and inter-subcarrier phase coherence weighting.
+   two cascaded resonators, local autocorrelation peak detection and inter-subcarrier
+   phase coherence weighting. Confidence is capped by the first stage's evidence at
+   the selected period so additional filtering cannot promote weak noise to `Valid`.
 4. **Anomaly detection** (`VitalAnomalyDetector`) -- Z-score analysis using Welford running
    statistics for real-time clinical alerts (apnea, tachycardia, bradycardia).
 
 Results are stored in a `VitalSignStore` with configurable retention for historical trend
 analysis.
+
+Heart-rate regression fixtures include breathing without a heartbeat, mixed
+breathing and pulse signals, noise, and pulses at the cardiac band edges. These
+are synthetic software checks, not real-CSI accuracy or clinical validation.
 
 ### Feature flags
 

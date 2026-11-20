@@ -298,7 +298,7 @@ function parseFeatureUdp(buf) {
   const nodeId = buf.readUInt8(4);
   const features = [];
   for (let i = 0; i < 8; i++) {
-    features.push(buf.readFloatLE(12 + i * 4));
+    features.push(buf.readFloatLE(16 + i * 4));
   }
   return { timestamp: Date.now() / 1000, nodeId, features };
 }

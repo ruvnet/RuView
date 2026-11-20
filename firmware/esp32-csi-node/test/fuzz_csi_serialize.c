@@ -90,6 +90,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     info.rx_ctrl.sig_mode      = legacy_inputs & 0x03;
     info.rx_ctrl.cwb           = (legacy_inputs >> 2) & 0x01;
     info.rx_ctrl.stbc          = (legacy_inputs >> 3) & 0x01;
+    info.first_word_invalid    = (test_case & 0x80) != 0;
 
     /* Use remaining fuzz data as I/Q buffer content. */
     uint16_t iq_len;
@@ -135,6 +136,17 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     /* Basic sanity: result must be 0 (error) or <= out_len. */
     if (result > out_len) {
         __builtin_trap();  /* Buffer overflow detected. */
+    }
+    if (result >= CSI_HEADER_SIZE + iq_len && info.first_word_invalid && iq_len > 0) {
+        size_t invalid_len = iq_len < 4 ? iq_len : 4;
+        for (size_t i = 0; i < invalid_len; i++) {
+            if (out_buf[CSI_HEADER_SIZE + i] != 0) {
+                __builtin_trap();  /* Invalid hardware prefix escaped sanitation. */
+            }
+        }
+        if ((out_buf[19] & CSI_FLAG_FIRST_WORD_SANITIZED) == 0) {
+            __builtin_trap();  /* Sanitized payload must carry provenance. */
+        }
     }
 
     /* --- Test case 1: NULL info pointer --- */

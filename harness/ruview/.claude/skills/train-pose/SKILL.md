@@ -24,6 +24,17 @@ or temporal leakage. Example honest result (ADR-181):
 - **in-browser** (ADR-181) — WebGPU/WASM trainer; the active backend is shown as a badge
   (honest about what's executing).
 
+## Run it through the harness (ADR-371)
+
+```
+npx @ruvnet/ruview train-plan --mode pose-smoke            # command, cwd, outputs; runs nothing
+npx @ruvnet/ruview train --mode pose-smoke --confirm       # SYNTHETIC pipeline smoke (libtorch 2.11 for tch 0.24)
+npx @ruvnet/ruview train --mode pose --data-dir <in-repo MM-Fi dir> --confirm
+npx @ruvnet/ruview train-gate --file eval-report.json      # mean-pose baseline + leakage gate
+```
+
+The gate returns the only acceptable claim sentence. Quote nothing it fails.
+
 ## Before you publish a number
 
 1. Run the mean-pose baseline on the same split.
