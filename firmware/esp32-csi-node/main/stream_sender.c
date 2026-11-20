@@ -6,6 +6,7 @@
  */
 
 #include "stream_sender.h"
+#include "radar_fused_route.h"
 
 #include <string.h>
 #include "esp_log.h"
@@ -18,6 +19,11 @@ static const char *TAG = "stream_sender";
 
 static int s_sock = -1;
 static struct sockaddr_in s_dest_addr;
+static struct sockaddr_in s_radar_addr;
+static bool s_radar_enabled;
+static bool s_radar_requested;
+static uint8_t s_radar_node_id;
+static int64_t s_radar_last_send_us = -1;
 
 /**
  * ENOMEM backoff state.
@@ -45,6 +51,9 @@ static int64_t s_last_success_us = 0;
 
 static int sender_init_internal(const char *ip, uint16_t port)
 {
+    s_radar_enabled = false;
+    s_radar_requested = false;
+    s_radar_last_send_us = -1;
     s_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (s_sock < 0) {
         ESP_LOGE(TAG, "Failed to create socket: errno %d", errno);
@@ -74,6 +83,37 @@ int stream_sender_init(void)
 int stream_sender_init_with(const char *ip, uint16_t port)
 {
     return sender_init_internal(ip, port);
+}
+
+int stream_sender_configure_radar(uint16_t port, uint8_t node_id)
+{
+    s_radar_requested = port != 0;
+    s_radar_enabled = false;
+    s_radar_last_send_us = -1;
+    if (port == 0) return 0;
+    if (s_sock < 0 || port < 1024 || port == ntohs(s_dest_addr.sin_port)) return -1;
+    s_radar_addr = s_dest_addr;
+    s_radar_addr.sin_port = htons(port);
+    s_radar_node_id = node_id;
+    s_radar_enabled = true;
+    ESP_LOGI(TAG, "MR60 fused-only split destination enabled on port %u", port);
+    return 0;
+}
+
+int stream_sender_send_radar_fused(const uint8_t *data, size_t len)
+{
+    if (!s_radar_requested) return stream_sender_send(data, len);
+    if (!s_radar_enabled || s_sock < 0 || !ruview_mr60_fused_packet(data, len, s_radar_node_id)) return -1;
+    const int64_t now = esp_timer_get_time();
+    /* At most two radar datagrams/second, independent of CSI sampling rate. */
+    if (s_radar_last_send_us >= 0 &&
+        (now < s_radar_last_send_us || now - s_radar_last_send_us < 500000)) return -1;
+    const int sent = sendto(s_sock, data, len, 0,
+                           (const struct sockaddr *)&s_radar_addr, sizeof(s_radar_addr));
+    if (sent != (int)len) return -1; /* No bulk fallback on failure. */
+    s_radar_last_send_us = now;
+    s_last_success_us = now;
+    return sent;
 }
 
 int stream_sender_send(const uint8_t *data, size_t len)
@@ -167,6 +207,9 @@ int64_t stream_sender_last_success_us(void)
 
 void stream_sender_deinit(void)
 {
+    s_radar_enabled = false;
+    s_radar_requested = false;
+    s_radar_last_send_us = -1;
     if (s_sock >= 0) {
         close(s_sock);
         s_sock = -1;

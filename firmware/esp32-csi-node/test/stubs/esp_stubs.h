@@ -19,6 +19,7 @@
 /* ---- esp_err.h ---- */
 typedef int esp_err_t;
 #define ESP_OK          0
+#define ESP_ERR_NVS_NOT_FOUND 0x1102
 #define ESP_FAIL        (-1)
 #define ESP_ERR_NO_MEM      0x101
 #define ESP_ERR_INVALID_ARG 0x102
@@ -199,6 +200,8 @@ static inline esp_err_t nvs_get_blob(nvs_handle_t h, const char *k, void *v, siz
 
 /* ---- stream_sender stubs (defined in esp_stubs.c) ---- */
 int stream_sender_send(const uint8_t *data, size_t len);
+int stream_sender_send_radar_fused(const uint8_t *data, size_t len);
+int stream_sender_configure_radar(uint16_t port, uint8_t node_id);
 int stream_sender_init(void);
 int stream_sender_init_with(const char *ip, uint16_t port);
 void stream_sender_deinit(void);

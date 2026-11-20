@@ -263,3 +263,25 @@ clean:
 		test_thermal test_csi_sanitize test_c6_antenna test_serial_onboarding \
 		test_ota_health test_onboarding_identity test_config_rules test_edge_stbc test_edge_current_grid test_csi_he_gate test_node_mdns test_self_ping test_config_recovery
 	rm -rf corpus_serialize/ corpus_edge/ corpus_nvs/
+
+# Production parser/snapshot: stale UART and independent measurement expiry.
+.PHONY: test_mmwave_freshness run_mmwave_freshness
+test_mmwave_freshness: test_mmwave_freshness.c $(MAIN_DIR)/mmwave_sensor.c $(MAIN_DIR)/mmwave_sensor.h
+	cc -std=c99 -Wall -Wextra -Wno-unused-function -Wno-unused-parameter -Istubs -I$(MAIN_DIR) -ffunction-sections $< $(DEAD_STRIP_LDFLAGS) -lm -o $@
+run_mmwave_freshness: test_mmwave_freshness
+	./test_mmwave_freshness
+host_tests: run_mmwave_freshness
+
+.PHONY: test_radar_fused_route run_radar_fused_route
+test_radar_fused_route: test_radar_fused_route.c $(MAIN_DIR)/stream_sender.c $(MAIN_DIR)/radar_fused_route.h
+	cc -std=c99 -Wall -Wextra -Istubs -I$(MAIN_DIR) $< -lm -o $@
+run_radar_fused_route: test_radar_fused_route
+	./test_radar_fused_route
+host_tests: run_radar_fused_route
+
+.PHONY: test_radar_nvs run_radar_nvs
+test_radar_nvs: test_radar_nvs.c $(MAIN_DIR)/nvs_config.c $(STUBS_SRC)
+	cc -std=c99 -Wall -Wextra -Istubs -I$(MAIN_DIR) $< $(STUBS_SRC) -lm -o $@
+run_radar_nvs: test_radar_nvs
+	./test_radar_nvs
+host_tests: run_radar_nvs

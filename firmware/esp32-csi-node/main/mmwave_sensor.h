@@ -71,7 +71,10 @@ esp_err_t mmwave_sensor_init(int uart_tx_pin, int uart_rx_pin);
  * Get a snapshot of the current mmWave state (thread-safe copy).
  *
  * @param state  Output state struct.
- * @return true if valid data is available (sensor detected and running).
+ * Expired/unseen presence and present-without-fresh-range withhold the snapshot.
+ * Optional expired vital rates use zero (unavailable). False means unavailable,
+ * not an observed empty room; sensor identity is retained for fresh recovery.
+ * @return true if a representable, fresh radar observation is available.
  */
 bool mmwave_sensor_get_state(mmwave_state_t *state);
 

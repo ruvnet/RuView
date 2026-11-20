@@ -31,6 +31,7 @@ typedef struct {
     char     wifi_password[NVS_CFG_PASS_MAX];
     char     target_ip[NVS_CFG_IP_MAX];
     uint16_t target_port;
+    uint16_t radar_fused_port; /**< Optional same-IP MR60 fused-only port; 0 = legacy routing. */
     uint8_t  node_id;
 
     /* ADR-029: Channel hopping and TDM configuration */

@@ -30,6 +30,17 @@ int stream_sender_send(const uint8_t *data, size_t len)
     return (int)len;
 }
 
+int stream_sender_send_radar_fused(const uint8_t *data, size_t len)
+{
+    return stream_sender_send(data, len);
+}
+
+int stream_sender_configure_radar(uint16_t port, uint8_t node_id)
+{
+    (void)port; (void)node_id;
+    return 0;
+}
+
 int stream_sender_init(void)
 {
     return 0;
