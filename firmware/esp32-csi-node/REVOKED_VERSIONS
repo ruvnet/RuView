@@ -1,0 +1,2 @@
+# Firmware versions clients must refuse to flash, one per line (e.g. 0.8.15).
+# Read by the publish job and passed to release_manifest.py generate --revokes.

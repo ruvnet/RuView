@@ -1,0 +1,44 @@
+name: Firmware release verify
+
+# Anyone with Actions access can check a published firmware release against the
+# committed public key (RuView#2394). Read-only: it never signs, uploads or edits.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Firmware release tag to verify (v<semver>-esp32)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  verify-release:
+    name: Verify firmware release ${{ inputs.tag }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+
+      - name: Install the Ed25519 dependency
+        run: python -m pip install --disable-pip-version-check cryptography==46.0.7
+
+      - name: Verify archives, offsets and the manifest signature
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          python firmware/esp32-csi-node/tools/release_manifest.py verify-release \
+            --tag "$TAG" --repo "$REPOSITORY" \
+            --public-key firmware/esp32-csi-node/release-signing/public-key.ed25519.b64
