@@ -145,7 +145,23 @@ pub async fn exchange_code(
     parse_token_response(resp).await
 }
 
-/// `POST /oauth/token`, `grant_type=refresh_token`.
+/// Upper bound on one refresh request, connect to last body byte. A request
+/// that hangs must end, and is then treated as spent (see the store).
+pub const REFRESH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
+fn refresh_timeout() -> std::time::Duration {
+    // Tests shorten it; release builds never read the environment for it.
+    #[cfg(test)]
+    if let Some(ms) = std::env::var("RUVIEW_TEST_REFRESH_TIMEOUT_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+    {
+        return std::time::Duration::from_millis(ms);
+    }
+    REFRESH_TIMEOUT
+}
+
+/// `POST /oauth/token`, `grant_type=refresh_token`. Bounded by [`REFRESH_TIMEOUT`].
 ///
 /// **Identity rotates refresh tokens with reuse detection.** The response
 /// carries a NEW refresh token and spends the old one; presenting a spent token
@@ -164,6 +180,7 @@ pub async fn refresh(
 ) -> Result<TokenResponse, OAuthError> {
     let resp = http
         .post(format!("{}/oauth/token", auth_base_url()))
+        .timeout(refresh_timeout())
         .form(&[
             ("grant_type", "refresh_token"),
             ("refresh_token", refresh_token),

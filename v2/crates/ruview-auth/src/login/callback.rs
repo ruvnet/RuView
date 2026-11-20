@@ -6,6 +6,7 @@
 //! `src/oauth/{callback_server,browser}.rs`.
 
 use std::net::SocketAddr;
+#[cfg(not(test))]
 use std::process::Stdio;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -111,15 +112,28 @@ fn parse_callback_query(path_and_query: &str) -> CallbackResult {
 /// Success means the launcher was spawned, not that a window appeared — which
 /// cannot be determined in general. Callers must print the URL regardless.
 pub fn open_browser(url: &str) -> std::io::Result<()> {
-    let (cmd, args): (&str, Vec<&str>) = if cfg!(target_os = "macos") {
-        ("open", vec![url])
+    let (cmd, args) = browser_command(url);
+    launch(cmd, &args)
+}
+
+/// The launcher command for `url` on this platform.
+fn browser_command(url: &str) -> (&'static str, Vec<String>) {
+    if cfg!(target_os = "macos") {
+        ("open", vec![url.to_string()])
     } else if cfg!(target_os = "windows") {
         // The empty title argument stops `start` treating a quoted URL as the
         // window title.
-        ("cmd", vec!["/c", "start", "", url])
+        (
+            "cmd",
+            vec!["/c".into(), "start".into(), String::new(), url.to_string()],
+        )
     } else {
-        ("xdg-open", vec![url])
-    };
+        ("xdg-open", vec![url.to_string()])
+    }
+}
+
+#[cfg(not(test))]
+fn launch(cmd: &str, args: &[String]) -> std::io::Result<()> {
     std::process::Command::new(cmd)
         .args(args)
         .stdin(Stdio::null())
@@ -128,6 +142,20 @@ pub fn open_browser(url: &str) -> std::io::Result<()> {
         .spawn()
         .map(|_| ())
 }
+
+/// Test builds never start a process, so no test can open a tab in the
+/// developer's browser. The command that would have run is recorded instead.
+#[cfg(test)]
+fn launch(cmd: &str, args: &[String]) -> std::io::Result<()> {
+    LAUNCHED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .push((cmd.to_string(), args.to_vec()));
+    Ok(())
+}
+
+#[cfg(test)]
+static LAUNCHED: std::sync::Mutex<Vec<(String, Vec<String>)>> = std::sync::Mutex::new(Vec::new());
 
 /// Does this process look like it has no usable browser?
 ///
@@ -188,9 +216,11 @@ mod tests {
             let mut s = tokio::net::TcpStream::connect(("127.0.0.1", port))
                 .await
                 .unwrap();
-            s.write_all(b"GET /oauth/callback?code=real&state=st HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
-                .await
-                .unwrap();
+            s.write_all(
+                b"GET /oauth/callback?code=real&state=st HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+            )
+            .await
+            .unwrap();
             let mut buf = vec![0u8; 4096];
             let n = s.read(&mut buf).await.unwrap();
             String::from_utf8_lossy(&buf[..n]).to_string()
@@ -215,9 +245,16 @@ mod tests {
     }
 
     #[test]
-    fn opening_a_browser_never_panics_even_with_no_launcher_present() {
-        // CI containers have no xdg-open; that is a handled condition, not a
-        // failure — the caller prints the URL either way.
-        let _ = open_browser("http://127.0.0.1:1/nope");
+    fn opening_a_browser_records_the_launcher_command_instead_of_running_it() {
+        let url = "http://127.0.0.1:1/nope";
+        open_browser(url).unwrap();
+        let launched = LAUNCHED.lock().unwrap_or_else(|e| e.into_inner());
+        let (cmd, args) = launched.last().expect("open_browser recorded a command");
+        let (want_cmd, want_args) = browser_command(url);
+        assert_eq!((cmd.as_str(), args), (want_cmd, &want_args));
+        if cfg!(target_os = "linux") {
+            assert_eq!(cmd, "xdg-open");
+            assert_eq!(args, &[url.to_string()]);
+        }
     }
 }
