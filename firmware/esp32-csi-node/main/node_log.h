@@ -58,7 +58,8 @@ extern "C" {
 #define NODE_LOG_EV_SEND_FAIL_RATE  4
 /* Uplink watchdog firing (main.c), written just before its esp_restart().
  * a = (rule<<24) | stalled_s (24 bits): rule 1 = no accepted bulk send for the
- * timeout, rule 2 = < 5 % of bulk sends accepted for the timeout.
+ * timeout, rule 2 = < 5 % of bulk sends accepted for the timeout, rule 3 =
+ * associated with no gateway self-ping answered for the timeout.
  * b = seconds since the priority path last got through (-1 = never). */
 #define NODE_LOG_EV_WATCHDOG        5
 /* 6, 7: reserved (used by other features in a downstream fleet; the ids are
@@ -75,6 +76,13 @@ extern "C" {
  *      [15:8]  peers_degraded (u8, saturating)
  *      [7:0]   peers_valid    (u8, saturating) */
 #define NODE_LOG_EV_LINK_WD         8
+/* 9, 10: reserved (used by other features in a downstream fleet). */
+/* Station IP changes (main.c event_handler). a = NODE_LOG_IP_GOT (b = the
+ * IPv4 address, network byte order, as esp_ip4_addr_t.addr) or
+ * NODE_LOG_IP_LOST (b = 0; IDF raises it after the IP-lost timer expires). */
+#define NODE_LOG_EV_IP             11
+#define NODE_LOG_IP_GOT             1
+#define NODE_LOG_IP_LOST            2
 
 /** Mount the FAT volume and open the ring. Call once at boot, after NVS is up
  *  (the boot counter lives there).

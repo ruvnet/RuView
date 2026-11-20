@@ -325,6 +325,19 @@ static void compute_percentiles(const uint16_t *hist, uint32_t success,
 
 /* ----------------------------------------------------------------- tick -- */
 
+static uint32_t s_win_ping_success;
+static bool     s_win_associated;
+static bool     s_win_pending;
+
+bool link_watchdog_take_window(uint32_t *ping_success, bool *associated)
+{
+    if (!s_win_pending) return false;
+    s_win_pending = false;
+    *ping_success = s_win_ping_success;
+    *associated   = s_win_associated;
+    return true;
+}
+
 void link_watchdog_tick(void)
 {
     if (!s_inited) return;
@@ -360,6 +373,13 @@ void link_watchdog_tick(void)
         .ping_success  = success,
         .associated    = associated,
     };
+
+    /* Hand the raw window to the uplink watchdog's dead-path rule (main.c),
+     * which acts regardless of linkwd mode -- guard 1 below discards exactly
+     * the windows that rule needs. Same task as main.c's loop, so no lock. */
+    s_win_ping_success = success;
+    s_win_associated   = associated;
+    s_win_pending      = true;
 
     int64_t boot_grace_us = (int64_t)s_core.cfg.boot_grace_s * 1000000LL;
     lwd_inhibits_t inh = {
@@ -479,6 +499,13 @@ void link_watchdog_ping_timeout_cb(esp_ping_handle_t hdl, void *args)
 }
 
 bool link_watchdog_is_degraded(void) { return false; }
+
+bool link_watchdog_take_window(uint32_t *ping_success, bool *associated)
+{
+    (void)ping_success;
+    (void)associated;
+    return false;
+}
 
 void link_watchdog_note_peer(const uint8_t mac[6], uint64_t now_us, bool degraded)
 {

@@ -156,11 +156,18 @@ static void event_handler(void *arg, esp_event_base_t event_base,
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
+        /* Whether DHCP completed after a rejoin is otherwise unknowable from
+         * node_log. b = the address, network byte order. */
+        node_log_event(NODE_LOG_EV_IP, NODE_LOG_IP_GOT,
+                       (int32_t)event->ip_info.ip.addr);
         s_retry_num = 0;
         ota_health_note_got_ip();
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
         /* Proof that a pending config trial produced a usable network. */
         config_trial_notify_connected();
+    } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_LOST_IP) {
+        ESP_LOGW(TAG, "Lost IP");
+        node_log_event(NODE_LOG_EV_IP, NODE_LOG_IP_LOST, 0);
     }
 }
 
@@ -183,9 +190,10 @@ static void event_handler(void *arg, esp_event_base_t event_base,
  * never reached the network does not reboot-loop while the AP is down; the
  * unbounded reconnect above owns that case.
  *
- * The decision (two rules: no bulk send at all, or < 5 % of bulk sends
- * accepted, each for the whole timeout) lives in uplink_wd_core.c so it is
- * host-tested; see its header for why rule 2 exists. */
+ * The decision (three rules, each for the whole timeout: no bulk send at all;
+ * < 5 % of bulk sends accepted; associated with no gateway ping answered)
+ * lives in uplink_wd_core.c so it is host-tested; see its header for why
+ * rules 2 and 3 exist. */
 static void uplink_watchdog_fire(uint8_t rule, int64_t stalled_s)
 {
     /* Packing documented in node_log.h next to NODE_LOG_EV_WATCHDOG. The
@@ -219,6 +227,20 @@ static void uplink_watchdog_tick(void)
     if (rule != UWD_RULE_NONE) {
         uplink_watchdog_fire(rule, stalled_s);
     }
+
+    /* Rule 3: associated, sends accepted, but no gateway ping answered for
+     * the whole timeout -- the shape rules 1-2 cannot see. Fed by the ADR-427
+     * link watchdog's windows, so inert unless CONFIG_LINK_WATCHDOG is set. */
+    static uwd_path_state_t s_path;
+    uint32_t ping_ok;
+    bool assoc;
+    if (link_watchdog_take_window(&ping_ok, &assoc)) {
+        rule = uwd_path_step(&s_path, esp_timer_get_time(), ping_ok, assoc,
+                             CONFIG_UPLINK_WATCHDOG_TIMEOUT_S, &stalled_s);
+        if (rule != UWD_RULE_NONE) {
+            uplink_watchdog_fire(rule, stalled_s);
+        }
+    }
 }
 #endif /* CONFIG_UPLINK_WATCHDOG */
 
@@ -239,6 +261,9 @@ static void wifi_init_sta(void)
         WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler, NULL, &instance_any_id));
     ESP_ERROR_CHECK(esp_event_handler_instance_register(
         IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler, NULL, &instance_got_ip));
+    esp_event_handler_instance_t instance_lost_ip;
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(
+        IP_EVENT, IP_EVENT_STA_LOST_IP, &event_handler, NULL, &instance_lost_ip));
 
     wifi_config_t wifi_config = {
         .sta = {

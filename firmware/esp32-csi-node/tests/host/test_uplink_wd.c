@@ -4,7 +4,8 @@
  * Replays tick sequences shaped on measured fleet behaviour: a TX stall in
  * which every CSI send failed for ~10 h while the node stayed associated, the
  * self-healing silences that set the 1200 s timeout (median 210 s, max 225 s),
- * and ordinary healthy / ENOMEM-pressure running. The traces are SYNTHETIC
+ * ordinary healthy / ENOMEM-pressure running, and (rule 3) a dead IP path
+ * while associated. The traces are SYNTHETIC
  * reconstructions of those shapes, not recorded counters.
  *
  * Pure C, no ESP-IDF -- same pattern as the rest of tests/host/.
@@ -228,6 +229,120 @@ static void test_first_tick_not_judged(void)
 }
 
 
+/* ---------------------------------------------------------------- rule 3 --
+ * One call per completed 60 s link-watchdog window. Shape of the measured
+ * dead-path wedge: healthy, then 100 % gateway-ping loss while associated, one
+ * unassociated window (an external reassociate), then 94 min associated with
+ * no ping answered and every sendto accepted. SYNTHETIC reconstruction. */
+#define WIN_US (60LL * 1000000LL)
+
+typedef struct {
+    uwd_path_state_t st;
+    int64_t now_us;
+    int     fired;
+    int64_t fired_at_us;
+    int64_t stalled_s;
+} psim_t;
+
+static void psim_init(psim_t *p) { memset(p, 0, sizeof(*p)); p->now_us = WIN_US; }
+
+static void pwin(psim_t *p, int n, uint32_t ok, bool assoc)
+{
+    for (int i = 0; i < n; i++) {
+        p->now_us += WIN_US;
+        int64_t st = 0;
+        uint8_t r = uwd_path_step(&p->st, p->now_us, ok, assoc, TIMEOUT_S, &st);
+        if (r != UWD_RULE_NONE && !p->fired) {
+            CHECK(r == UWD_RULE_DEAD_PATH, "rule 3 returns UWD_RULE_DEAD_PATH");
+            p->fired = 1;
+            p->fired_at_us = p->now_us;
+            p->stalled_s = st;
+        }
+    }
+}
+
+static void test_dead_path_wedge(void)
+{
+    printf("dead IP path, associated, 94 min:\n");
+    psim_t p; psim_init(&p);
+    pwin(&p, 60, 2000, true);           /* healthy hour */
+    pwin(&p, 5, 0, true);               /* 100 % loss, associated */
+    pwin(&p, 1, 0, false);              /* external reassociate */
+    int64_t rejoin_us = p.now_us;
+    pwin(&p, 94, 0, true);              /* the 94 silent minutes */
+    CHECK(p.fired, "dead-path shape fires");
+    int64_t after_s = (p.fired_at_us - rejoin_us) / 1000000LL;
+    CHECK(after_s >= TIMEOUT_S && after_s <= TIMEOUT_S + 120,
+          "fires within 2 windows of the timeout after the rejoin");
+    CHECK(p.stalled_s >= TIMEOUT_S, "stalled_s reports >= timeout");
+}
+
+static void test_ap_outage_never_fires(void)
+{
+    /* A short AP restart (~3 min unassociated), and a 10 h one: reconnecting
+     * is main.c's job, never rule 3's. */
+    printf("AP outages (unassociated):\n");
+    psim_t p; psim_init(&p);
+    pwin(&p, 30, 2000, true);
+    pwin(&p, 3, 0, false);
+    pwin(&p, 30, 2000, true);
+    pwin(&p, 600, 0, false);
+    pwin(&p, 30, 2000, true);
+    CHECK(!p.fired, "AP outages (unassociated) never fire");
+}
+
+static void test_not_armed_never_fires(void)
+{
+    printf("gateway never answered this boot:\n");
+    psim_t p; psim_init(&p);
+    pwin(&p, 300, 0, true);
+    CHECK(!p.fired, "no successful ping since boot -> not armed");
+}
+
+static void test_partial_loss_never_fires(void)
+{
+    printf("1 answered ping per window for 500 windows:\n");
+    psim_t p; psim_init(&p);
+    pwin(&p, 10, 2000, true);
+    pwin(&p, 500, 1, true);             /* lossy, not dead */
+    CHECK(!p.fired, "any successful ping per window resets the streak");
+}
+
+static void test_dead_path_boundary(void)
+{
+    /* Streak counted from the END of the first dead window, so with 60 s
+     * windows it fires on dead window 21 (20 windows = 1200 s later). */
+    printf("rule 3 boundary:\n");
+    psim_t p; psim_init(&p);
+    pwin(&p, 5, 2000, true);
+    pwin(&p, 20, 0, true);
+    CHECK(!p.fired, "20 dead windows: not yet");
+    pwin(&p, 1, 0, true);
+    CHECK(p.fired, "21st dead window fires");
+}
+
+static void test_unassoc_resets_streak(void)
+{
+    printf("a disassociation mid-streak:\n");
+    psim_t p; psim_init(&p);
+    pwin(&p, 5, 2000, true);
+    pwin(&p, 15, 0, true);
+    pwin(&p, 1, 0, false);
+    pwin(&p, 15, 0, true);
+    CHECK(!p.fired, "a disassociation restarts the streak");
+}
+
+static void test_gateway_outage_documented(void)
+{
+    /* Known exposure: gateway down (or not answering ICMP) > timeout with the
+     * AP up reboots each armed node once. Asserted so a change is deliberate. */
+    printf("gateway down > timeout, AP up (accepted exposure):\n");
+    psim_t p; psim_init(&p);
+    pwin(&p, 5, 2000, true);
+    pwin(&p, 40, 0, true);
+    CHECK(p.fired, "gateway down > timeout while associated fires (accepted)");
+}
+
 int main(void)
 {
     test_tx_stall_occasional_ok();
@@ -241,6 +356,13 @@ int main(void)
     test_boundary();
     test_counter_wrap();
     test_first_tick_not_judged();
+    test_dead_path_wedge();
+    test_ap_outage_never_fires();
+    test_not_armed_never_fires();
+    test_partial_loss_never_fires();
+    test_dead_path_boundary();
+    test_unassoc_resets_streak();
+    test_gateway_outage_documented();
     printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

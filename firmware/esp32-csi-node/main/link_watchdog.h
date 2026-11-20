@@ -95,6 +95,13 @@ void link_watchdog_get_report(link_watchdog_report_t *out);
  *  codes (lwd_action_t / lwd_inhibit_t), for /config and log lines. Never
  *  returns NULL. */
 const char *link_watchdog_action_name(uint8_t action);
+
+/** True once per completed window (then false until the next), giving that
+ *  window's successful gateway pings and whether the station was associated.
+ *  Feeds the uplink watchdog's dead-path rule (main.c, uwd_path_step), which
+ *  acts regardless of `linkwd` mode. False forever when CONFIG_LINK_WATCHDOG
+ *  is off. Call from the main loop task only. */
+bool link_watchdog_take_window(uint32_t *ping_success, bool *associated);
 const char *link_watchdog_inhibit_name(uint8_t inhibit);
 
 #ifdef __cplusplus

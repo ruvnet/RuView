@@ -60,3 +60,33 @@ uint8_t uwd_step(uwd_state_t *st, int64_t now_us,
     }
     return UWD_RULE_NONE;
 }
+
+uint8_t uwd_path_step(uwd_path_state_t *st, int64_t now_us,
+                      uint32_t ping_success, bool associated,
+                      uint32_t timeout_s, int64_t *stalled_s)
+{
+    if (!associated) {
+        st->dead_since_us = 0;          /* AP gone: the reconnect loop owns it */
+        return UWD_RULE_NONE;
+    }
+    if (ping_success > 0) {
+        st->armed = true;
+        st->dead_since_us = 0;
+        return UWD_RULE_NONE;
+    }
+    if (!st->armed) {
+        return UWD_RULE_NONE;           /* gateway never answered this boot */
+    }
+    if (st->dead_since_us == 0) {
+        /* Counted from the END of the first dead window: one window late,
+         * never early (same convention as rule 2). */
+        st->dead_since_us = now_us;
+        return UWD_RULE_NONE;
+    }
+    int64_t dead_us = now_us - st->dead_since_us;
+    if (dead_us >= (int64_t)timeout_s * 1000000LL) {
+        if (stalled_s) *stalled_s = dead_us / 1000000LL;
+        return UWD_RULE_DEAD_PATH;
+    }
+    return UWD_RULE_NONE;
+}
