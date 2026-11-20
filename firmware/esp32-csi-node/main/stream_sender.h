@@ -52,15 +52,22 @@ int stream_sender_send_priority(const uint8_t *data, size_t len);
 
 /**
  * esp_timer timestamp (microseconds) of the last sendto() the network stack
- * accepted, on either the bulk or the priority path. Returns 0 if the node has
- * not successfully sent anything since boot.
+ * accepted on the bulk path only. Returns 0 if the node has not successfully
+ * sent anything since boot.
  *
  * This reports that the datagram was accepted for transmission, NOT that the
  * aggregator received it -- UDP gives no such signal. Used by the uplink
  * watchdog to detect a node that is powered and capturing but cannot reach the
- * network.
+ * network. The priority path is excluded because its tiny packets kept being
+ * accepted through a measured 10 h TX stall (see stream_sender.c).
  */
 int64_t stream_sender_last_success_us(void);
+
+/**
+ * Same, for the priority path (mesh sync, feature_state, HEALTH). Reported in
+ * /config only; never a watchdog input.
+ */
+int64_t stream_sender_last_priority_success_us(void);
 
 /**
  * Close the UDP sender socket.
