@@ -51,6 +51,14 @@ CREATE INDEX IF NOT EXISTS ix_states_last_updated_ts
     ON states (last_updated_ts);
 ";
 
+/// Explicit markers for removal rows, separate from legacy malformed NULL states.
+/// The state row supplies the timestamp and row-id ordering used during restore.
+pub const CREATE_STATE_REMOVALS: &str = "
+CREATE TABLE IF NOT EXISTS state_removals (
+    state_id INTEGER PRIMARY KEY NOT NULL
+);
+";
+
 /// Create `events` table.
 ///
 /// `event_type`      — string key (e.g. \"state_changed\", \"call_service\")
@@ -85,6 +93,7 @@ CREATE TABLE IF NOT EXISTS recorder_runs (
 pub const ALL_DDL: &[&str] = &[
     CREATE_STATE_ATTRIBUTES,
     CREATE_STATES,
+    CREATE_STATE_REMOVALS,
     CREATE_EVENTS,
     CREATE_RECORDER_RUNS,
 ];
