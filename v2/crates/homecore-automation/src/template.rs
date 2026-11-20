@@ -66,20 +66,17 @@ impl TemplateEnvironment {
         );
 
         // --- state_attr(entity_id, attribute) ---
-        // Returns an attribute value as a JSON string, or empty string.
+        // Preserve JSON types so numeric comparisons and nested access work.
         let attr_sm = Arc::clone(&states);
         env.add_global(
             "state_attr",
-            Value::from_function(move |entity_id: String, attr: String| -> String {
+            Value::from_function(move |entity_id: String, attr: String| -> Value {
                 EntityId::parse(&entity_id)
                     .ok()
                     .and_then(|eid| attr_sm.get(&eid))
                     .and_then(|s| s.attributes.get(&attr).cloned())
-                    .map(|v| match v {
-                        serde_json::Value::String(s) => s,
-                        other => other.to_string(),
-                    })
-                    .unwrap_or_default()
+                    .map(Value::from_serialize)
+                    .unwrap_or_else(|| Value::from_serialize(serde_json::Value::Null))
             }),
         );
 
@@ -172,6 +169,26 @@ mod tests {
         let env = TemplateEnvironment::new(sm);
         let out = env.render("{{ states('sensor.unknown') }}").unwrap();
         assert_eq!(out.trim(), "unavailable");
+    }
+
+    #[test]
+    fn state_attr_preserves_types_for_conditions_and_nested_access() {
+        let env = TemplateEnvironment::new(sm_with(
+            "light.kitchen",
+            "on",
+            serde_json::json!({
+                "brightness": 200, "active": false, "rooms": ["hall", "kitchen"], "meta": {"count": 2}
+            }),
+        ));
+        for template in [
+            "{{ state_attr('light.kitchen', 'brightness') > 100 }}",
+            "{{ state_attr('light.kitchen', 'active') == false }}",
+            "{{ state_attr('light.kitchen', 'rooms')[1] == 'kitchen' }}",
+            "{{ state_attr('light.kitchen', 'meta').count == 2 }}",
+            "{{ state_attr('light.kitchen', 'missing') is none }}",
+        ] {
+            assert!(env.render_bool(template).unwrap(), "{template}");
+        }
     }
 
     #[test]
