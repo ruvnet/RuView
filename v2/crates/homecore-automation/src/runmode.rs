@@ -94,16 +94,17 @@ impl RunState {
     /// `Restart`: abort the in-flight run (if any), then start a fresh one
     /// and record its abort handle.
     fn dispatch_restart(&self, hc: &HomeCore, automation: Arc<Automation>) {
-        // Abort any prior run before starting the new one.
-        if let Some(prev) = self.current.lock().unwrap().take() {
+        // Timer and event triggers can dispatch concurrently. Keep cancellation
+        // and replacement in one critical section so no abort handle is lost.
+        let mut current = self.current.lock().unwrap();
+        if let Some(prev) = current.take() {
             prev.abort();
         }
         let hc = hc.clone();
-        let slot = Arc::clone(&self.current);
         let handle = tokio::spawn(async move {
             run_actions(&hc, &automation).await;
         });
-        *slot.lock().unwrap() = Some(handle.abort_handle());
+        *current = Some(handle.abort_handle());
     }
 
     /// `Queued`: serialize via the per-automation async mutex. Each trigger
