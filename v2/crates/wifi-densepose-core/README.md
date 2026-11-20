@@ -10,8 +10,10 @@ Core types, traits, and utilities for the WiFi-DensePose pose estimation system.
 
 `wifi-densepose-core` is the foundation crate for the WiFi-DensePose workspace. It defines the
 shared data structures, error types, and trait contracts used by every other crate in the
-ecosystem. The crate is `no_std`-compatible (with the `std` feature disabled) and forbids all
-unsafe code.
+ecosystem. Disabling the `std` feature builds this crate with `#![no_std]` and
+`alloc`; it forbids all unsafe code. Some dependencies still enable `std` and
+host services (including clock and UUID generation), so this feature alone does
+not establish support for bare-metal targets.
 
 ## Features
 
@@ -21,7 +23,8 @@ unsafe code.
   contracts for signal processing, neural network inference, and data persistence respectively.
 - **Error hierarchy** -- `CoreError`, `SignalError`, `InferenceError`, and `StorageError` provide
   typed error handling across subsystem boundaries.
-- **`no_std` support** -- Disable the default `std` feature for embedded or WASM targets.
+- **`no_std` source mode** -- Disable the default `std` feature to check the core/alloc
+  imports independently; dependency-level bare-metal support is not guaranteed.
 - **Constants** -- `MAX_KEYPOINTS` (17, COCO format), `MAX_SUBCARRIERS` (256),
   `DEFAULT_CONFIDENCE_THRESHOLD` (0.5).
 
