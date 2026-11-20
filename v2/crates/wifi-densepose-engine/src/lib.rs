@@ -46,6 +46,9 @@ use wifi_densepose_worldgraph::{
     WorldId, WorldNode, ZoneBoundsEnu,
 };
 
+#[cfg(feature = "pan2-physical")]
+pub mod physical_forecast;
+
 pub mod mesh_guard;
 pub use mesh_guard::{MeshGuard, MeshPartitionReport};
 
@@ -419,6 +422,7 @@ impl StreamingEngine {
                 position: EnuPoint { east_m: pos[0], north_m: pos[1], up_m: pos[2] },
                 anchor_kind: kind,
                 confidence: 0.9,
+                asset: None,
             });
             written.push(id);
         }

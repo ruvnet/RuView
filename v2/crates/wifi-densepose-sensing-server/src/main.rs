@@ -14,6 +14,7 @@ mod companion_integration;
 mod companion_room;
 mod managed_worldgraph;
 mod companion_spatial;
+mod rssi_motion;
 pub mod cli;
 pub mod csi;
 mod engine_bridge;
@@ -5252,6 +5253,109 @@ fn raw_classify(score: f64) -> String {
     }
 }
 
+/// Host WiFi has RSSI samples, not CSI spatial-frequency bins. Keep the CSI
+/// extractor unchanged and replace only the single-link motion blend (#2557).
+fn extract_wifi_features_from_frame(
+    frame: &Esp32Frame,
+    history: &VecDeque<Vec<f64>>,
+    sample_rate_hz: f64,
+) -> (FeatureInfo, ClassificationInfo, f64, Vec<f64>, f64) {
+    let (features, mut classification, breathing, variances, score) =
+        extract_features_from_frame(frame, history, sample_rate_hz);
+    if frame.amplitudes.len() != 1 {
+        return (features, classification, breathing, variances, score);
+    }
+    let score = rssi_motion::motion_score(history, sample_rate_hz);
+    classification.motion_level = raw_classify(score);
+    classification.presence = score > 0.04;
+    (features, classification, breathing, variances, score)
+}
+
+#[cfg(test)]
+mod single_rssi_regression_tests {
+    use super::*;
+
+    fn frame(rssi: f64) -> Esp32Frame {
+        Esp32Frame {
+            magic: 0xC511_0001,
+            node_id: 0,
+            n_antennas: 1,
+            n_subcarriers: 1,
+            freq_mhz: 2437,
+            sequence: 0,
+            rssi: rssi as i8,
+            noise_floor: -90,
+            ppdu_type: wifi_densepose_hardware::PpduType::HtLegacy,
+            adr018_flags: wifi_densepose_hardware::Adr018Flags::default(),
+            amplitudes: vec![10.0_f64.powf((rssi + 100.0) / 20.0)],
+            phases: vec![0.0],
+        }
+    }
+
+    #[test]
+    fn synthetic_still_walk_still_reaches_motion_then_recovers_at_different_rssi_levels() {
+        // SYNTHETIC quantized samples, approximately 1 dB std and 0.8 dB
+        // mean absolute step while moving. This is not a replay of #2557.
+        let walk = [-1.0, 0.0, 1.0, 2.0, 1.0, 0.0, -1.0, -2.0, -1.0, 0.0];
+        for base in [-80.0, -56.0, -39.0] {
+            let mut state = AppStateInner::minimal();
+            for phase in 0..3 {
+                let mut moving = 0;
+                for tick in 0..120 {
+                    let offset = if phase == 1 {
+                        walk[tick % walk.len()]
+                    } else if tick % 50 == 0 {
+                        1.0
+                    } else {
+                        0.0
+                    };
+                    let f = frame(base + offset);
+                    state.frame_history.push_back(f.amplitudes.clone());
+                    if state.frame_history.len() > FRAME_HISTORY_CAPACITY {
+                        state.frame_history.pop_front();
+                    }
+                    let (_, mut c, _, _, score) =
+                        extract_wifi_features_from_frame(&f, &state.frame_history, 2.0);
+                    smooth_and_classify(&mut state, &mut c, score);
+                    assert_eq!(c.presence, c.motion_level != "absent");
+                    if tick >= 40 {
+                        if phase == 1 {
+                            if c.motion_level == "present_moving" || c.motion_level == "active" {
+                                moving += 1;
+                            }
+                        } else {
+                            assert_eq!(
+                                c.motion_level, "absent",
+                                "base={base} phase={phase} tick={tick}"
+                            );
+                        }
+                    }
+                }
+                if phase == 1 {
+                    assert_eq!(
+                        moving, 80,
+                        "base={base}: sustained walking must remain detected"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn multicarrier_extraction_keeps_the_existing_csi_score() {
+        let mut f = frame(-56.0);
+        f.amplitudes = (0..8).map(|i| 1.0 + i as f64).collect();
+        f.n_subcarriers = 8;
+        f.phases = vec![0.0; 8];
+        let history = VecDeque::from([vec![1.0; 8], f.amplitudes.clone()]);
+        let csi = extract_features_from_frame(&f, &history, 2.0);
+        let wifi = extract_wifi_features_from_frame(&f, &history, 2.0);
+        assert_eq!(wifi.4, csi.4);
+        assert_eq!(wifi.1.motion_level, csi.1.motion_level);
+        assert_eq!(wifi.0.variance, csi.0.variance);
+    }
+}
+
 /// Debounce frames required before state transition (at ~10 FPS = ~0.4s).
 /// Used only by [`smooth_and_classify`] (simulated / WiFi-scan sources,
 /// which run on a fixed tick cadence close to this design point).
@@ -5882,7 +5986,7 @@ async fn wifi_task(state: SharedState, tick_ms: u64) {
         }
         let sample_rate_hz = 1000.0 / tick_ms as f64;
         let (features, mut classification, breathing_rate_hz, sub_variances, raw_motion) =
-            extract_features_from_frame(&frame, &s_write_pre.frame_history, sample_rate_hz);
+            extract_wifi_features_from_frame(&frame, &s_write_pre.frame_history, sample_rate_hz);
         smooth_and_classify(&mut s_write_pre, &mut classification, raw_motion);
         adaptive_override(&s_write_pre, &features, &mut classification);
         drop(s_write_pre);
@@ -6067,7 +6171,7 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
         noise_floor: -90,
         ppdu_type: wifi_densepose_hardware::PpduType::HtLegacy,
         adr018_flags: wifi_densepose_hardware::Adr018Flags::default(),
-        amplitudes: vec![signal_pct],
+        amplitudes: vec![10.0_f64.powf((rssi_dbm + 100.0) / 20.0)],
         phases: vec![0.0],
     };
 
@@ -6079,7 +6183,7 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
     }
     let sample_rate_hz = 2.0_f64; // fallback tick ~ 500 ms => 2 Hz
     let (features, mut classification, breathing_rate_hz, sub_variances, raw_motion) =
-        extract_features_from_frame(&frame, &s.frame_history, sample_rate_hz);
+        extract_wifi_features_from_frame(&frame, &s.frame_history, sample_rate_hz);
     smooth_and_classify(&mut s, &mut classification, raw_motion);
     adaptive_override(&s, &features, &mut classification);
 

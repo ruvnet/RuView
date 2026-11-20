@@ -525,7 +525,7 @@ class Observatory {
     // Updates
     this._nebula.update(dt, elapsed);
     this._figurePool.update(data, elapsed);
-    this._scenarioProps.update(data, this._demoData.currentScenario);
+    this._scenarioProps.update(data, this.settings.dataSource === 'ws' ? null : this._demoData.currentScenario);
     this._updateDotMatrixMist(data, elapsed);
     this._updateParticleTrail(data, dt, elapsed);
     this._updateWifiWaves(elapsed);

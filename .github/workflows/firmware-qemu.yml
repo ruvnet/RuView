@@ -100,26 +100,26 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          . $IDF_PATH/export.sh
+          . "$IDF_PATH/export.sh"
           pip install esptool esp-idf-nvs-partition-gen
 
       - name: Set target ESP32-S3
         working-directory: firmware/esp32-csi-node
         run: |
-          . $IDF_PATH/export.sh
+          . "$IDF_PATH/export.sh"
           idf.py set-target esp32s3
 
       - name: Build firmware (mock CSI mode)
         working-directory: firmware/esp32-csi-node
         run: |
-          . $IDF_PATH/export.sh
+          . "$IDF_PATH/export.sh"
           idf.py \
             -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.qemu" \
             build
 
       - name: Generate NVS matrix
         run: |
-          . $IDF_PATH/export.sh
+          . "$IDF_PATH/export.sh"
           python3 scripts/generate_nvs_matrix.py \
             --output-dir firmware/esp32-csi-node/build/nvs_matrix \
             --only ${{ matrix.nvs_config }}
@@ -127,12 +127,12 @@ jobs:
       - name: Create merged flash image
         working-directory: firmware/esp32-csi-node
         run: |
-          . $IDF_PATH/export.sh
+          . "$IDF_PATH/export.sh"
 
           # Determine merge_bin arguments
-          OTA_ARGS=""
+          OTA_ARGS=()
           if [ -f build/ota_data_initial.bin ]; then
-            OTA_ARGS="0xf000 build/ota_data_initial.bin"
+            OTA_ARGS=(0xf000 build/ota_data_initial.bin)
           fi
 
           python3 -m esptool --chip esp32s3 merge_bin \
@@ -141,7 +141,7 @@ jobs:
             --fill-flash-size 8MB \
             0x0     build/bootloader/bootloader.bin \
             0x8000  build/partition_table/partition-table.bin \
-            $OTA_ARGS \
+            "${OTA_ARGS[@]}" \
             0x20000 build/esp32-csi-node.bin
 
           file_size() { stat -c%s "$1" 2>/dev/null || stat -f%z "$1" 2>/dev/null || wc -c < "$1"; }
@@ -285,7 +285,7 @@ jobs:
               echo "::error::$f has unexpected size $SIZE (expected 24576)"
               exit 1
             fi
-            echo "  OK: $(basename $f) ($SIZE bytes)"
+            echo "  OK: $(basename "$f") ($SIZE bytes)"
           done
 
   # ---------------------------------------------------------------------------
@@ -323,13 +323,13 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          . $IDF_PATH/export.sh
+          . "$IDF_PATH/export.sh"
           pip install pyyaml esptool esp-idf-nvs-partition-gen
 
       - name: Build firmware for swarm
         working-directory: firmware/esp32-csi-node
         run: |
-          . $IDF_PATH/export.sh
+          . "$IDF_PATH/export.sh"
           idf.py set-target esp32s3
           idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.qemu" build
           python3 -m esptool --chip esp32s3 merge_bin \
@@ -342,7 +342,7 @@ jobs:
 
       - name: Run swarm smoke test
         run: |
-          . $IDF_PATH/export.sh
+          . "$IDF_PATH/export.sh"
           EXIT_CODE=0
           python3 scripts/qemu_swarm.py --preset ci_matrix \
             --qemu-path /opt/qemu-esp32/bin/qemu-system-xtensa \
