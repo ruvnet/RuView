@@ -6,6 +6,10 @@
 #include "../main/config_api.c"
 
 nvs_config_t g_nvs_config;
+/* GET /config's "active"."link_wd" block (ADR-427, link_watchdog.c). */
+void link_watchdog_get_report(link_watchdog_report_t *out) { memset(out, 0, sizeof(*out)); }
+const char *link_watchdog_action_name(uint8_t a) { (void)a; return "none"; }
+const char *link_watchdog_inhibit_name(uint8_t i) { (void)i; return "none"; }
 static cJSON *db[3];
 static int live_sets, fail_set_at, restarts;
 static bool fail_restore, fail_erase, fail_bank_clear, fail_read, fail_restore_open;

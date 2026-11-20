@@ -28,6 +28,7 @@
 #include "ping/ping_sock.h"     /* #954: esp_ping gateway traffic generator */
 #include "lwip/ip_addr.h"       /* #954: ip_addr_t target for esp_ping */
 #include "ping_rate.h"          /* self-ping reply timeout (host-tested) */
+#include "link_watchdog.h"      /* ADR-427: self-ping RTT is the watchdog's signal */
 
 /* ADR-060: Access the global NVS config for MAC filter and channel override. */
 extern nvs_config_t g_nvs_config;
@@ -584,9 +585,14 @@ static void csi_start_self_ping(void)
 
     esp_ping_callbacks_t cbs = {
         .cb_args         = NULL,
-        .on_ping_success = csi_ping_cb_noop,
-        .on_ping_timeout = csi_ping_cb_noop,
-        .on_ping_end     = csi_ping_cb_noop,
+        /* ADR-427: these were no-ops -- the RTT was measured by lwIP and
+         * thrown away. link_watchdog.c now reads ESP_PING_PROF_TIMEGAP on
+         * success and counts timeouts (both inert unless
+         * CONFIG_LINK_WATCHDOG is set); the session itself, its cadence and
+         * its purpose as a CSI OFDM source (#521/#954) are unchanged. */
+        .on_ping_success = link_watchdog_ping_success_cb,
+        .on_ping_timeout = link_watchdog_ping_timeout_cb,
+        .on_ping_end     = csi_ping_cb_noop,   /* count is infinite; never fires */
     };
 
     if (esp_ping_new_session(&cfg, &cbs, &s_self_ping) == ESP_OK && s_self_ping != NULL) {

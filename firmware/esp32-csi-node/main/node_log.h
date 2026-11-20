@@ -57,6 +57,20 @@ extern "C" {
 #define NODE_LOG_EV_THERMAL_STATE   3
 #define NODE_LOG_EV_SEND_FAIL_RATE  4
 #define NODE_LOG_EV_WATCHDOG        5
+/* 6, 7: reserved (used by other features in a downstream fleet; the ids are
+ * an on-flash format, so they are kept rather than renumbered). */
+/* ADR-427 link-rate watchdog (link_watchdog.c): every state change and every
+ * action or would-act. Five values in two int32 slots, bit-packed (all
+ * unsigned fields, stored via an (int32_t) cast):
+ *
+ *   a: [31:28] action_code   (lwd_action_t, link_watchdog_core.h, 0-4)
+ *      [27:24] inhibit_code  (lwd_inhibit_t, 0-7)
+ *      [23:8]  median_rtt_ms (u16)
+ *      [7:0]   loss_pct      (u8, 0-100)
+ *   b: [31:16] baseline_ms   (u16, 0xFFFF = not yet seeded)
+ *      [15:8]  peers_degraded (u8, saturating)
+ *      [7:0]   peers_valid    (u8, saturating) */
+#define NODE_LOG_EV_LINK_WD         8
 
 /** Mount the FAT volume and open the ring. Call once at boot, after NVS is up
  *  (the boot counter lives there).

@@ -39,6 +39,10 @@ static esp_err_t test_start(esp_ping_handle_t handle)
 #include "../main/csi_collector.c"
 
 nvs_config_t g_nvs_config;
+/* csi_start_self_ping() hands RTTs to the link watchdog (ADR-427); this test
+ * only checks the session config, so the callbacks are no-ops. */
+void link_watchdog_ping_success_cb(esp_ping_handle_t hdl, void *args) { (void)hdl; (void)args; }
+void link_watchdog_ping_timeout_cb(esp_ping_handle_t hdl, void *args) { (void)hdl; (void)args; }
 
 int main(void)
 {

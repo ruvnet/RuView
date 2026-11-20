@@ -29,7 +29,7 @@ FEATURE_STATE_SRCS := $(MAIN_DIR)/rv_feature_state.c
 # before including the .c. The decide() body itself has no ESP-IDF deps.
 # Simpler: just recompile decide() here via a small shim.
 
-TESTS := test_adaptive_controller test_rv_feature_state test_rv_mesh test_ping_rate
+TESTS := test_adaptive_controller test_rv_feature_state test_rv_mesh test_ping_rate test_link_watchdog
 
 all: $(TESTS)
 
@@ -50,6 +50,11 @@ test_rv_mesh: test_rv_mesh.c $(MAIN_DIR)/rv_mesh.c $(MAIN_DIR)/rv_mesh.h $(FEATU
 test_ping_rate: test_ping_rate.c $(MAIN_DIR)/ping_rate.c $(MAIN_DIR)/ping_rate.h
 	$(CC) $(CFLAGS) test_ping_rate.c $(MAIN_DIR)/ping_rate.c -o $@ $(LDLIBS)
 
+# ADR-427 link-rate watchdog decision logic. 100% pure (see
+# link_watchdog_core.h).
+test_link_watchdog: test_link_watchdog.c $(MAIN_DIR)/link_watchdog_core.c $(MAIN_DIR)/link_watchdog_core.h
+	$(CC) $(CFLAGS) test_link_watchdog.c $(MAIN_DIR)/link_watchdog_core.c -o $@ $(LDLIBS)
+
 check: all
 	./test_adaptive_controller
 	@echo ""
@@ -58,6 +63,8 @@ check: all
 	./test_rv_mesh
 	@echo ""
 	./test_ping_rate
+	@echo ""
+	./test_link_watchdog
 
 clean:
 	rm -f $(TESTS) *.o

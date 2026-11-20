@@ -11,6 +11,7 @@
 #include "ota_update.h"
 #include "nvs_config.h"
 #include "config_rules.h"
+#include "link_watchdog.h"   /* ADR-427: "active"."link_wd" reporting block */
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_timer.h"
@@ -332,6 +333,11 @@ void config_trial_notify_connected(void)
     ESP_LOGI(TAG, "config trial COMMITTED -- association proved on new settings");
 }
 
+bool config_trial_is_pending(void)
+{
+    return s_trial_armed;
+}
+
 /* ------------------------------------------------------------- handlers --- */
 
 static esp_err_t recv_body(httpd_req_t *req, char **out)
@@ -380,6 +386,34 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "reassoc_count", s_reassoc_count);
     cJSON_AddNumberToObject(root, "reassoc_last_s_ago",
         s_reassoc_last_us ? (double)((esp_timer_get_time() - s_reassoc_last_us) / 1000000) : -1);
+
+    /* ADR-427: link-rate watchdog runtime state, under "active" (runtime
+     * state, as opposed to the NVS values under "config"). All zeros/"none"
+     * when compiled out or NVS linkwd=0. */
+    {
+        cJSON *act = cJSON_GetObjectItemCaseSensitive(root, "active");
+        if (!act) act = cJSON_AddObjectToObject(root, "active");
+        link_watchdog_report_t r;
+        link_watchdog_get_report(&r);
+        cJSON *lwd = cJSON_AddObjectToObject(act, "link_wd");
+        cJSON_AddNumberToObject(lwd, "mode", r.mode);
+        cJSON_AddNumberToObject(lwd, "baseline_ms", r.baseline_seeded ? (double)r.baseline_ms : -1);
+        cJSON_AddNumberToObject(lwd, "last_median_ms", r.last_median_ms);
+        cJSON_AddNumberToObject(lwd, "last_p90_ms", r.last_p90_ms);
+        cJSON_AddNumberToObject(lwd, "last_loss_pct", r.last_loss_pct);
+        cJSON_AddNumberToObject(lwd, "degraded_streak", r.degraded_streak);
+        cJSON_AddBoolToObject(lwd, "in_grace", r.in_grace);
+        cJSON_AddNumberToObject(lwd, "actions_taken", r.actions_taken);
+        cJSON_AddNumberToObject(lwd, "would_actions_taken", r.would_actions_taken);
+        cJSON_AddStringToObject(lwd, "last_action",
+                                link_watchdog_action_name(r.last_action));
+        cJSON_AddNumberToObject(lwd, "last_action_lifetime_s",
+                                (double)r.last_action_lifetime_s);
+        cJSON_AddStringToObject(lwd, "inhibit",
+                                link_watchdog_inhibit_name(r.last_inhibit));
+        cJSON_AddNumberToObject(lwd, "peers_valid", r.peers_valid);
+        cJSON_AddNumberToObject(lwd, "peers_degraded", r.peers_degraded);
+    }
 
     char *out = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
@@ -631,6 +665,8 @@ static esp_err_t config_post_handler(httpd_req_t *req)
     if (cJSON_IsNumber(lm)) g_nvs_config.led_mode = (uint8_t)lm->valuedouble;
     cJSON *lb = cJSON_GetObjectItem(root, "led_brightness");
     if (cJSON_IsNumber(lb)) g_nvs_config.led_brightness = (uint8_t)lb->valuedouble;
+    cJSON *lwd = cJSON_GetObjectItem(root, "linkwd");
+    if (cJSON_IsNumber(lwd)) g_nvs_config.linkwd_mode = (uint8_t)lwd->valuedouble;
 
     cJSON_Delete(root);
     cJSON_Delete(bank);
