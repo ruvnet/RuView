@@ -27,10 +27,21 @@
 #include <string.h>
 #include <stdlib.h>
 
-/* ---- Reproduce the ring buffer from edge_processing.h ---- */
+/* ---- Reproduce the ring buffer from edge_processing.h ----
+ *
+ * EDGE_MAX_SUBCARRIERS deliberately does NOT appear here. This target
+ * exercises the SPSC ring (ring_push/ring_pop), which is bounded by
+ * EDGE_MAX_IQ_BYTES and never consults the subcarrier grid. It previously
+ * carried a private `#define EDGE_MAX_SUBCARRIERS 128` that nothing read --
+ * dead, and free to drift from the real constant without any test failing.
+ * That is precisely how the HE20 truncation bug survived: the grid is
+ * target-conditional (128 pre-HE, 256 on C6/C5) and a stale private copy
+ * would have masked it.
+ *
+ * The grid is pinned against the real header in test_edge_subcarrier_grid.c.
+ */
 #define EDGE_RING_SLOTS       16
 #define EDGE_MAX_IQ_BYTES     1024
-#define EDGE_MAX_SUBCARRIERS  128
 
 typedef struct {
     uint8_t  iq_data[EDGE_MAX_IQ_BYTES];
