@@ -125,6 +125,8 @@ fn spawn(path: &Path, url: &str, extra: &[(&str, &str)]) -> std::process::Child 
         "--test-threads=1",
     ])
     .env(CHILD, "1")
+    .env_remove("RUVIEW_TEST_REFRESH_TIMEOUT_MS")
+    .env_remove("RUVIEW_TEST_LOCK_WAIT_MS")
     .env(CREDENTIALS_PATH_ENV, path)
     .env(client::AUTH_URL_ENV, url)
     .stdout(std::process::Stdio::piped());
@@ -248,4 +250,65 @@ fn an_answer_without_a_new_refresh_token_never_keeps_the_spent_one() {
     assert_eq!(result(spawn(&path, &url, &[])), "ok fixture-access-1");
     assert_eq!(refreshes.load(Ordering::SeqCst), 1);
     assert_eq!(load(&path).unwrap().refresh_token, None);
+}
+
+const LOCK_CHILD: &str = "RUVIEW_TEST_LOCK_HOLD_CHILD";
+
+/// Runs only as a child of `a_lock_left_by_a_dead_process_does_not_block`:
+/// takes the lock, says so, and waits to be killed while holding it.
+#[test]
+fn lock_holding_child_process() {
+    if std::env::var(LOCK_CHILD).as_deref() != Ok("1") {
+        return;
+    }
+    let _lock = FileLock::try_acquire(&default_credentials_path()).expect("child takes the lock");
+    println!("LOCK-HELD");
+    std::thread::sleep(Duration::from_secs(60));
+}
+
+#[test]
+fn a_lock_left_by_a_dead_process_does_not_block() {
+    let path = scratch("dead-holder");
+    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "login::store::refresh_tests::lock_holding_child_process",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(LOCK_CHILD, "1")
+        .env(CREDENTIALS_PATH_ENV, &path)
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut out = child.stdout.take().unwrap();
+    let mut seen = String::new();
+    let mut byte = [0u8; 1];
+    while !seen.contains("LOCK-HELD") {
+        assert_eq!(
+            out.read(&mut byte).unwrap(),
+            1,
+            "child exited before taking the lock: {seen}"
+        );
+        seen.push(byte[0] as char);
+    }
+    assert!(
+        FileLock::try_acquire(&path).is_none(),
+        "the live child holds it"
+    );
+    child.kill().unwrap();
+    child.wait().unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let mut freed = false;
+    while std::time::Instant::now() < deadline {
+        if FileLock::try_acquire(&path).is_some() {
+            freed = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        freed,
+        "the OS released the dead child's lock; no staleness guess needed"
+    );
 }

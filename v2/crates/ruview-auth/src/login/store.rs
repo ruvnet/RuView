@@ -27,7 +27,8 @@
 //! out for running two commands at once.
 //!
 //! So the critical section is also guarded by a cross-process **file lock**
-//! ([`super::lock`]: `flock` on Unix, an atomic lock directory elsewhere),
+//! ([`super::lock`]: `File::lock` on a never-deleted lock file, released by
+//! the OS if its holder dies),
 //! polled without blocking the executor — the same mistake this crate had to
 //! fix in `jwks.rs`. Under the lock the file is re-read, so a process that
 //! waited finds another's refresh already done. A process that cannot get the
@@ -268,6 +269,17 @@ pub fn save(path: &Path, creds: &StoredCredentials) -> Result<(), StoreError> {
         path: path.to_path_buf(),
         source,
     })?;
+    // The rename is only durable once the directory entry is: without this a
+    // crash can bring back the previous file, and with it a spent refresh token.
+    #[cfg(unix)]
+    if let Some(dir) = path.parent() {
+        std::fs::File::open(dir)
+            .and_then(|d| d.sync_all())
+            .map_err(|source| StoreError::Unwritable {
+                path: dir.to_path_buf(),
+                source,
+            })?;
+    }
     Ok(())
 }
 
@@ -291,7 +303,11 @@ fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 
 #[cfg(not(unix))]
 fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    std::fs::write(path, bytes)
+    use std::io::Write;
+    let mut f = std::fs::File::create(path)?;
+    f.write_all(bytes)?;
+    // Flushed before the rename, so the new name never points at unwritten data.
+    f.sync_all()
 }
 
 #[cfg(unix)]
