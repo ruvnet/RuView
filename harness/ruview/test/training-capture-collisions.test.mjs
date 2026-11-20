@@ -15,9 +15,27 @@ async function record(dir, port, sequence) {
   const tx = dgram.createSocket('udp4');
   try {
     await new Promise((resolve, reject) => {
-      let text = ''; timer = setTimeout(() => reject(new Error('collector startup timeout')), 2000);
-      child.stderr.on('data', b => { text += b; if (text.includes("Collecting 'walking'")) { clearTimeout(timer); resolve(); } });
-      child.once('error', reject);
+      // This is a session-collision test, not a Python startup benchmark.
+      // Cold Windows workers can take over two seconds to start the child.
+      let text = '';
+      const cleanup = () => {
+        clearTimeout(timer);
+        child.stderr.off('data', onData);
+        child.off('exit', onExit);
+        child.off('error', onError);
+      };
+      const onError = error => { cleanup(); reject(error); };
+      const onExit = (code, signal) => onError(new Error(
+        `collector exited before readiness (code=${code}, signal=${signal}): ${text}`));
+      const onData = chunk => {
+        text += chunk;
+        if (text.includes("Collecting 'walking'")) { cleanup(); resolve(); }
+        else text = text.slice(-8192);
+      };
+      timer = setTimeout(() => onError(new Error(`collector startup timeout: ${text}`)), 10000);
+      child.stderr.on('data', onData);
+      child.once('exit', onExit);
+      child.once('error', onError);
     });
     const packet = Buffer.alloc(24); packet.writeUInt32LE(0xC5110001); packet[4]=1; packet[5]=1; packet.writeUInt16LE(2,6); packet.writeUInt32LE(2437,8); packet.writeUInt32LE(sequence,12); packet.writeInt8(-50,16); Buffer.from([3,4,6,8]).copy(packet,20);
     await new Promise((resolve,reject)=>tx.send(packet,port,'127.0.0.1',e=>e?reject(e):resolve()));
