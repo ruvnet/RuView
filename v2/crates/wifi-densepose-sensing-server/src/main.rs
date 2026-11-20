@@ -7969,6 +7969,10 @@ async fn health_ready(State(state): State<SharedState>) -> Json<serde_json::Valu
             })),
         },
         "node_positions": node_positions_status(&s.node_positions_config, &s.node_states),
+        "multistatic": multistatic_bridge::cohort_quality(
+            &s.node_states,
+            s.multistatic_fuser.guard_interval_us(),
+        ),
     }))
 }
 
