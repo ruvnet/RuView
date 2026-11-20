@@ -40,7 +40,7 @@
     "skills/operate-server.md": "883bd5cfec5f10c78e05c4479290dc39a8191a6212555f8e8807cfeebaf66762",
     "skills/secure-plugin.md": "c762e9335858428e79cdce6c582b9e91e58ebed4c55254f29ccbcce40466d36b",
     "skills/verify.md": "5a544c716931c34054cb18431d9eaa5778f89a80ddfc538257b04c9312b9b7fe",
-    "src/brain.js": "196eb0c2144a51e8c443408fe6f4ae1166bd7b7e6b94d62b91b218c856925901",
+    "src/brain.js": "2a7f4b6432aa5ab1f5faf875645516d7abc0942d3019585a36049561b0d01103",
     "src/capabilities.js": "ae959e5e2f55c6414199f12d364c8f2e4558034481a7831fbc5ac89e5ae5109b",
     "src/guidance.js": "f04a15f4ece3dc92ee869b6ca1fc7e2e3ff4dd408f95c49baf19d99debec7f34",
     "src/hosts/claude-code.js": "bd844278849791b411a38d440bf076de52a2b8198274a2002f9369ff604ee0e6",
@@ -54,7 +54,7 @@
     "src/repo-trust.js": "c11b2255e43f7cba0c74c33e4a972f60193490821445dce8bab0f97dd47db977",
     "src/tools.js": "1ad280eebca0688a52ae08fe5647c8e42a6a8e8e5d70534cc4361dc319c22fbf"
   },
-  "filesDigest": "01b6331f69562fc216bec49a23ef318daf2e7fed76f3714c1db26c0ebe1c7f5f",
+  "filesDigest": "fa327340dcc10895ecd0f55c6632b272bf01bd790d2a52c558e7cfbe4c7cb58a",
   "brainDigest": "a01a42723490e8c4bcf4ceb4233e8115cb7e27fb9a17a802f279d565dc3493fb",
   "policyDigest": "73893df248c9a8d79da5451940b40d6b930b9b92999b52ef8bd538c527cd8a47",
   "dependencies": {
