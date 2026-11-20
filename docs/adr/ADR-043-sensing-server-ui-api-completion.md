@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-03-03
+**Updated**: 2026-09-27 — validate live recording IDs and preserve existing captures
 **Deciders**: @ruvnet
 **Supersedes**: None
 **Related**: ADR-034, ADR-036, ADR-039, ADR-040, ADR-041
@@ -88,6 +89,15 @@ All 14 new handler functions are implemented directly in `main.rs` as async func
 ```
 
 Routes are registered individually in the `http_app` Router before the static UI fallback handler.
+
+### Recording file safety
+
+The live `main.rs` recording-start handler validates a supplied `id` through
+the shared `path_safety::safe_id` contract before constructing its JSONL path.
+Creation is exclusive: an existing file or symlink causes rejection without
+truncation or a recording-state transition. Generated IDs include a random
+suffix so rapid start/stop cycles need not reuse a second-resolution name.
+Invalid IDs and collisions retain the API's `success: false` response envelope.
 
 ### New Endpoints (17 total)
 
