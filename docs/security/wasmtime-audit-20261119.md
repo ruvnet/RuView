@@ -26,66 +26,32 @@ It is retained under the optional Wasmtime feature. This tests the dependency
 patch; it is not a claim that the existing application invokes that faulty API or
 that a deployed exploit was demonstrated.
 
-## Why native cargo-audit still reports two matches
+## Upstream correction and native audit — 2026-11-20
 
-With36.0.21, the native report drops from five to two. Its remaining0567/0573
-entries omit the upstream lower bounds and therefore incorrectly match36.x.
-The two wrongly named WASI entries stop matching after the patch; no special
-coverage for those entries is implemented.
+RustSec commit `074ea9a7ed619f511b5b7374c7a97e98d1e98be4` corrected both
+range errors by recording `<39.0.0` and `<47.0.0` as unaffected for0567/0573.
+With the patched lockfile, the CI-pinned cargo-audit0.22.2 now exits0 with zero
+native registry findings under the unchanged audit policy.
 
-The existing security workflow uses audit_rust_advisories.py to retain the exact
-native report and reconcile only these two reviewed range errors. This is not a
-native audit-clean result: native exit1/two findings remain recorded separately
-from zero unresolved findings after verified metadata reconciliation.
+The temporary selector reconciliation, fixtures and live GitHub advisory API
+calls have therefore been removed. CI again retains only the unmodified native
+JSON report and uses its exit status, with pipefail preserving auditor failure.
+No custom classification, extra token, offline database or advisory exception
+is needed. Any future native advisory failure remains a job failure.
 
-A correction applies only when ALL of the following hold:
+Invoke `cargo-audit audit --file Cargo.lock --json` directly from `v2/`.
+Direct binary invocation avoids executing a project-defined Cargo audit alias;
+the installed tool remains pinned to0.22.2. An actual controlled Cargo-alias
+negative probe established that the old dispatcher could execute a benign marker
+and return artificial clean data; the direct auditor ignored that alias. Those
+negative-control reports are not real security evidence.
 
-- The RustSec selector fingerprint matches the checked-in ID/package/aliases/URL,
-  affected-function/platform selectors and patched/unaffected ranges.
-- The finding is registry core wasmtime exactly36.0.21, with its checksum matching
-  both the verified registry archive and current Cargo.lock. Other versions, sources or checksums are not covered.
-- Neither wasmtime-wasi nor wasmtime-wasi-http appears in the reviewed lockfile.
-  A different graph requires reassessment; those packages cannot gain coverage.
-- A fresh read of the fixed official GitHub repository advisory endpoint matches
-  the reviewed primary package/version-range fingerprint. Network failure,
-  changed identity/ranges or missing evidence cannot fall back to the fixture.
-- The report's existing ignore settings match the unchanged local audit policy.
+The dependency patch remains necessary:36.x before36.0.21 is still affected by
+0569. The controlled API regression and archive provenance checks above remain.
+Historical raw reports and reconciliation receipts describe the earlier database,
+not the current native result. cargo-audit0.22.1 separately reports local path ZIP
+packages as registry matches; it is not the pinned CI tool. Actual registry ZIP9
+and adapter tests remain separately relevant to the held server integration.
 
-All unknown findings remain unresolved, including the version-applicable0569 if
-it reappears. Malformed or incomplete reports fail closed. Fingerprints deliberately
-cover scope selectors, not cosmetic prose. The primary scopes are checked live;
-fixtures are used only by offline tests and never as a successful CI fallback.
-
-## Evidence and operating boundary
-
-The job retains cargo-audit.json (unmodified native output),
-cargo-audit-classification.json (including native exit and unresolved findings),
-and cargo-audit-upstream.json (live scopes and retrieval time). The existing
-read-only GitHub Actions token is used by gh to read public published advisories;
-no extra token, permission, secret or write operation is introduced.
-
-Offline negative tests exercise unknown advisories, changed RustSec/primary
-selectors, affected/future versions, wrong registry/checksum, missing lock records,
-WASI additions, policy injection, malformed reports, unreviewed network IDs and
-live-provider failure. Existing ignores remain explicit; no blanket ignore,
-severity-threshold change, raw report rewrite or advisory database edit is made.
-
-Native audit reproduction on snapshot7133866a after the patch reports two entries;
-live primary verification classifies those two scope mismatches and leaves zero
-unresolved entries. Remove this reconciliation when RustSec's ranges are corrected.
-A future version or altered scope must be reassessed, not silently covered.
-
-No plugin is enabled, helper replaced, application installed, physical sensor
-qualified or production configuration changed by this source repair. Merge/release
-remain the maintainers' separate decisions.
-
-The CLI invokes cargo-audit directly with a fixed argument vector and shell=False.
-It requires a standard Cargo.lock basename and has no alternate-database switch;
-Cargo aliases and CLI-selected advisory arguments do not enter the process command.
-Local pinned-snapshot evidence is reproduced by calling the native tool directly,
-then exercising the pure classifier with fresh upstream evidence.
-
-A controlled negative probe confirmed the previous Cargo dispatcher could execute
-a project-defined audit alias and accept an artificial clean result. The direct
-auditor ignored that alias. This is a negative-control fixture, not a real clean
-audit or a claim that any repository alias was used maliciously.
+No plugin is enabled, helper replaced, app installed or physical sensor qualified
+by this change. Merge and release remain separate maintainer decisions.
