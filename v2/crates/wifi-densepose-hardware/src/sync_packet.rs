@@ -176,7 +176,23 @@ impl SyncPacket {
     /// |error| < 1/fps_hz ≈ 50 ms × the per-frame jitter ratio).
     pub fn mesh_aligned_us_for_sequence(&self, frame_seq: u32, fps_hz: f64) -> u64 {
         debug_assert!(fps_hz > 0.0, "fps_hz must be positive");
-        let dframes = (frame_seq.wrapping_sub(self.sequence)) as i64;
+        // RFC 1982 serial-number-arithmetic style delta: `wrapping_sub` keeps
+        // true u32 wraparound working (sequence near u32::MAX rolling over to
+        // a small frame_seq must read as a small *forward* delta — see
+        // `mesh_aligned_for_sequence_handles_seq_wraparound`), but the u32
+        // result must be reinterpreted as `i32` (sign-extend), not widened
+        // straight to `i64` (zero-extend). A plain `as i64` treats a
+        // `frame_seq` that is merely a few hundred *behind* `self.sequence`
+        // (the common case when the paired CSI frame lags the latest sync
+        // packet — sync packets go out on a priority send path, ordinary CSI
+        // frames don't and can be delayed/dropped under load) as a ~4.29
+        // billion-frame forward jump instead of a small negative one, which
+        // blew the estimated timestamp out by trillions of microseconds
+        // (observed live: `Timestamp spread 9_xxx_xxx_xxx_xxx us`, i.e.
+        // years). Going through `i32` gives the correct small-magnitude
+        // delta in both directions; only sequence deltas near ±2^31 frames
+        // (unreachable in practice) are ambiguous between the two readings.
+        let dframes = (frame_seq.wrapping_sub(self.sequence)) as i32 as i64;
         let dus = (dframes as f64 * 1_000_000.0 / fps_hz) as i64;
         let local_at = (self.local_us as i64).wrapping_add(dus) as u64;
         self.apply_to_local(local_at)
@@ -381,6 +397,28 @@ mod tests {
         // Next sequence after u32::MAX is 0 (wrap). Δframes = 1, not -2^32.
         let mesh = pkt.mesh_aligned_us_for_sequence(0, 20.0);
         assert_eq!(mesh, pkt.epoch_us + 50_000);  // 1 frame at 20 fps = 50 ms
+    }
+
+    /// Regression for a live bug: a `frame_seq` a small amount *behind*
+    /// `self.sequence` (sync packets are sent on a priority path and can
+    /// race ahead of the ordinary CSI frame the caller is pairing against)
+    /// must extrapolate a small step *backward* in time, not wrap around to
+    /// ~4.29 billion frames forward (~years of µs). Before the `as i32`
+    /// sign-extension fix, this produced `Timestamp spread` values in the
+    /// tens of trillions of µs in the live fusion pipeline.
+    #[test]
+    fn mesh_aligned_for_sequence_handles_small_backward_drift() {
+        let pkt = SyncPacket {
+            node_id: 9, proto_ver: 1,
+            flags: SyncPacketFlags { is_leader: false, is_valid: true, smoothed_used: true },
+            local_us: 28_798_450, epoch_us: 27_634_885, sequence: 68_400,
+        };
+        // The paired CSI frame's sequence is 400 behind the sync packet's
+        // (e.g. the sync packet raced ahead on the priority send path).
+        let mesh = pkt.mesh_aligned_us_for_sequence(68_000, 20.0);
+        // 400 frames behind at 20 fps = 20 s earlier — a plausible, bounded
+        // value, not a multi-year swing.
+        assert_eq!(mesh, pkt.epoch_us - 20_000_000);
     }
 
     /// End-to-end ADR-110 pipeline sanity:

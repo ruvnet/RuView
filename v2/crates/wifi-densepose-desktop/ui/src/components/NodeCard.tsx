@@ -30,11 +30,19 @@ function formatLastSeen(iso: string): string {
 export function NodeCard({ node, onClick }: NodeCardProps) {
   const isOnline = node.health === "online";
 
+  const Component = onClick ? "button" : "div";
+
   return (
-    <div
-      onClick={() => onClick?.(node)}
+    <Component
+      {...(onClick ? { type: "button" as const } : {})}
+      onClick={onClick ? () => onClick(node) : undefined}
+      aria-label={onClick ? `View details for ${node.friendly_name || node.hostname || `Node ${node.node_id}`}` : undefined}
       style={{
         background: "var(--bg-elevated)",
+        width: "100%",
+        textAlign: "left",
+        font: "inherit",
+        color: "inherit",
         border: "1px solid var(--border)",
         borderRadius: 8,
         padding: "var(--space-4)",
@@ -114,7 +122,7 @@ export function NodeCard({ node, onClick }: NodeCardProps) {
         <DetailRow label="Uptime" value={formatUptime(node.uptime_secs)} mono />
         <DetailRow label="Seen" value={formatLastSeen(node.last_seen)} />
       </div>
-    </div>
+    </Component>
   );
 }
 

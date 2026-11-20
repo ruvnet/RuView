@@ -28,11 +28,15 @@ async def run_test():
     # Let ticker run for a few ticks
     await asyncio.sleep(0.3)
     
-    print("Calling get_system_metrics offloaded to background thread...")
+    print("Calling get_system_metrics directly on the event loop...")
     start_time = time.time()
-    
-    # Query system metrics using to_thread (simulating FastAPI request)
-    metrics = await asyncio.to_thread(get_system_metrics)
+
+    # Call get_system_metrics() directly on the event loop -- NOT via
+    # asyncio.to_thread. A regressed blocking psutil.cpu_percent(interval=1)
+    # would then freeze the loop (and the ticker) and be caught. The
+    # production endpoints wrap this in to_thread; this unit test targets the
+    # non-blocking property of the function itself.
+    metrics = get_system_metrics()
     
     duration = time.time() - start_time
     print(f"get_system_metrics took: {duration:.4f}s")

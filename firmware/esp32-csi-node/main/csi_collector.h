@@ -169,4 +169,11 @@ uint32_t csi_collector_get_send_ok_count(void);
 uint8_t csi_collector_get_gate_mode(void);
 uint8_t csi_collector_get_gate_seq_period(void);
 
+/**
+ * ADR-423 D1: cumulative HE PPDU counts since boot, split by the driver's
+ * rx_channel_estimate_info_vld flag, counted before any rate gating.
+ * Both are zero on targets without HE support. Either pointer may be NULL.
+ */
+void csi_collector_get_he_validity(uint32_t *valid, uint32_t *invalid);
+
 #endif /* CSI_COLLECTOR_H */

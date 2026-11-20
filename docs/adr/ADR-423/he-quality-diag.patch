@@ -1,0 +1,73 @@
+diff --git a/firmware/esp32-csi-node/main/csi_collector.c b/firmware/esp32-csi-node/main/csi_collector.c
+index 791a53340..b44f5f8a2 100644
+--- a/firmware/esp32-csi-node/main/csi_collector.c
++++ b/firmware/esp32-csi-node/main/csi_collector.c
+@@ -19,6 +19,7 @@
+ #include "c6_sync_espnow.h" /* ADR-110 §A0.11: mesh-aligned epoch for sync packet */
+ 
+ #include <string.h>
++#include <math.h>
+ #include "esp_log.h"
+ #include "esp_wifi.h"
+ #include "esp_timer.h"
+@@ -351,6 +352,60 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
+ 
+     s_cb_count++;
+ 
++    /* SCRATCH DIAG (not for commit): per-frame len x bb_format histogram. */
++    {
++        static uint32_t h_len[8][4]; /* bb_format 0..7 x {<=128,<=256,<=384,>384} */
++        static uint16_t h_max[8], h_min[8] = {0xffff,0xffff,0xffff,0xffff,0xffff,0xffff,0xffff,0xffff};
++        static uint32_t h_inv[8];
++        unsigned bb = info->rx_ctrl.cur_bb_format & 7;
++        unsigned b = info->len <= 128 ? 0 : info->len <= 256 ? 1 : info->len <= 384 ? 2 : 3;
++        h_len[bb][b]++;
++        if (info->len > h_max[bb]) h_max[bb] = info->len;
++        if (info->len < h_min[bb]) h_min[bb] = info->len;
++        if (!info->rx_ctrl.rx_channel_estimate_info_vld) h_inv[bb]++;
++        /* Content quality by (format, vld): class 0 = HE256 vld=0, 1 = HE256 vld=1,
++         * 2 = HT64 vld=1. Change is measured only against the previous frame of the
++         * same class from the SAME transmitter MAC, on true magnitude |z|, after
++         * per-frame gain normalisation (shape_change_pm: L1 of normalised
++         * distributions, 0..2000 permille). */
++        static uint32_t q_n[3], q_zero[3], q_shape[3], q_dn[3];
++        static float q_prev[3][256]; static float q_prevsum[3]; static uint8_t q_pmac[3][6]; static bool q_have[3];
++        int qc = -1; unsigned nb = 0;
++        bool vld = info->rx_ctrl.rx_channel_estimate_info_vld;
++        if (bb == 4 && info->len == 512) { qc = vld ? 1 : 0; nb = 256; }
++        else if (bb == 2 && info->len == 128 && vld) { qc = 2; nb = 64; }
++        if (qc >= 0 && info->buf) {
++            static float cur[256]; float sum = 0; uint32_t zero = 0;
++            for (unsigned k = 0; k < nb; k++) {
++                float i_ = info->buf[2 * k], q_ = info->buf[2 * k + 1];
++                cur[k] = sqrtf(i_ * i_ + q_ * q_);
++                if (cur[k] == 0.0f) zero++;
++                sum += cur[k];
++            }
++            if (q_have[qc] && sum > 0 && q_prevsum[qc] > 0 && memcmp(q_pmac[qc], info->mac, 6) == 0) {
++                float shp = 0;
++                for (unsigned k = 0; k < nb; k++) shp += fabsf(cur[k] / sum - q_prev[qc][k] / q_prevsum[qc]);
++                q_shape[qc] += (uint32_t)(shp * 1000.0f);
++                q_dn[qc]++;
++            }
++            memcpy(q_prev[qc], cur, nb * sizeof(float)); q_prevsum[qc] = sum;
++            memcpy(q_pmac[qc], info->mac, 6); q_have[qc] = true;
++            q_n[qc]++; q_zero[qc] += zero;
++        }
++        if ((s_cb_count % 500) == 0) {
++            static const char *qn[3] = {"HE256_vld0", "HE256_vld1", "HT64_vld1"};
++            for (unsigned c = 0; c < 3; c++) {
++                if (q_n[c]) ESP_LOGI(TAG, "HEQ class=%s n=%lu pairs=%lu zero_bins=%lu shape_change_pm=%lu",
++                    qn[c], (unsigned long)q_n[c], (unsigned long)q_dn[c], (unsigned long)(q_zero[c] / q_n[c]),
++                    (unsigned long)(q_dn[c] ? q_shape[c] / q_dn[c] : 0));
++            }
++            for (unsigned i = 0; i < 8; i++) {
++                if (h_max[i]) ESP_LOGI(TAG, "HEDIAG n=%lu bb=%u le128=%lu le256=%lu le384=%lu gt384=%lu min=%u max=%u invalid_est=%lu",
++                    (unsigned long)s_cb_count, i, (unsigned long)h_len[i][0], (unsigned long)h_len[i][1],
++                    (unsigned long)h_len[i][2], (unsigned long)h_len[i][3], h_min[i], h_max[i], (unsigned long)h_inv[i]);
++            }
++        }
++    }
+     if (s_cb_count <= 3 || (s_cb_count % 100) == 0) {
+         ESP_LOGI(TAG, "CSI cb #%lu: len=%d rssi=%d ch=%d",
+                  (unsigned long)s_cb_count, info->len,

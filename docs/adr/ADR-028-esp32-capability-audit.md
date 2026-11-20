@@ -236,8 +236,29 @@ python scripts/provision.py --port COM7 \
 | Generator | `archive/v1/data/proof/generate_reference_signal.py` | Deterministic multipath model |
 | Verifier | `archive/v1/data/proof/verify.py` | SHA-256 hash comparison |
 | Expected hash | `archive/v1/data/proof/expected_features.sha256` | `0b82bd45...` |
+| v2 verifier (Rust pipeline) | `python/wifi_densepose/witness.py` | `python -I -m wifi_densepose.witness` over the PyO3 wheel |
+| v2 expected hash | `archive/v1/data/proof/expected_features_v2.sha256` | `92d867f2...` (ADR-117 §11.3) |
 
 **Audit-time result:** PASS. Hash regenerated with numpy 2.4.2 + scipy 1.17.1. Pipeline hash: `8c0680d7d285739ea9597715e84959d9c356c87ee3ad35b5f1e69a4ca41151c6`.
+
+**v2 witness (ADR-117 §11.3, 2026-11-10).** The v2 hash covers the Rust vitals
+pipeline, not the v1 Python processor. Antenna 0 of each of the 1,000 reference
+frames goes through `CsiVitalPreprocessor`, `BreathingExtractor` and
+`HeartRateExtractor` (all `esp32_default()`, called through the PyO3 bindings).
+The residuals and estimates are rounded to 6 decimals, packed as little-endian
+float64 and hashed with SHA-256; `witness.py` documents the byte layout. The
+`witness-v2` job in `python-ci.yml` generated the committed value
+`92d867f2ed7ec9a96b4466b26903d81ff544b6d95dfeb71bb79d14ac633cd3cc`
+([run 42955822833](https://github.com/ruvnet/RuView/actions/runs/42955822833),
+Rust 1.89, Linux x86_64, release wheel). It ran the witness twice, and both runs
+agreed. A local Rust 1.89 build on Linux x86_64 gave the same hash. Of the 1,000
+frames, 501 produce a heart-rate estimate and none produce a breathing estimate:
+the breathing stage needs 10 s of history, and at the 10 s mark the signal is
+out of band. `python-ci.yml` re-checks the committed hash on every
+`python/**` PR. `pip-release.yml` re-checks it against the manylinux x86_64
+wheel it is about to publish. The hash is pinned for Linux x86_64 only; other
+platforms are expected to match because of the rounding, but they are not
+gated.
 
 ### 5.4 Security Posture
 

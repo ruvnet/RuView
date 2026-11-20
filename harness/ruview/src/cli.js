@@ -178,7 +178,7 @@ Operator tools:
 
 Firmware (ADR-370, cross-platform esptool):
   ports                                                  list serial ports (pyserial)
-  flash-plan --port <p> --bundle <dir> [--variant s3-8mb|s3-4mb|c6]   verify + print the plan
+  flash-plan --port <p> --bundle <dir> [--variant s3-8mb|s3-4mb|c6|c5]   verify + print the plan
   flash --port <p> --bundle <dir> [--variant ...] [--baud 460800] --confirm
         [--boot-log-seconds 15] [--allow-unverified]     write flash, then capture boot evidence
 

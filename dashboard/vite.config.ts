@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
@@ -59,12 +60,19 @@ export default defineConfig({
     sourcemap: true,
     rollupOptions: {
       output: {
-        manualChunks: {
-          lit: ['lit'],
-          signals: ['@preact/signals-core'],
+        // Function form: Vite 8 (Rolldown) no longer accepts the object form.
+        manualChunks(id: string) {
+          if (/[\\/]node_modules[\\/](lit|lit-html|lit-element|@lit)[\\/]/.test(id)) return 'lit';
+          if (/[\\/]node_modules[\\/]@preact[\\/]signals-core[\\/]/.test(id)) return 'signals';
+          return undefined;
         },
       },
     },
+  },
+  test: {
+    // tests/ holds Playwright specs (run via `npm run test:e2e`), not Vitest.
+    exclude: ['**/node_modules/**', '**/dist/**', 'tests/**'],
+    passWithNoTests: true,
   },
   server: {
     port: 5173,

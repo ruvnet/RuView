@@ -39,7 +39,7 @@ extern nvs_config_t g_nvs_config;
 static const char *TAG = "edge_proc";
 
 #ifndef CONFIG_EDGE_DSP_SAMPLE_HZ
-#if CONFIG_IDF_TARGET_ESP32C6
+#if CONFIG_IDF_TARGET_ESP32C6 || CONFIG_IDF_TARGET_ESP32C5
 #define CONFIG_EDGE_DSP_SAMPLE_HZ 8
 #else
 #define CONFIG_EDGE_DSP_SAMPLE_HZ 20
@@ -1062,7 +1062,13 @@ static void send_feature_vector(void)
 static void process_frame(const edge_ring_slot_t *slot)
 {
     uint16_t n_subcarriers = slot->iq_len / 2;
-    if (n_subcarriers == 0 || n_subcarriers > EDGE_MAX_SUBCARRIERS) return;
+    if (n_subcarriers == 0) return;
+    /* S3 STBC frames append a second HT-LTF block (192 entries total).
+     * Process the bounded LLTF + HT-LTF prefix instead of starving edge
+     * output (#2286). Raw CSI streaming retains the complete payload. */
+    if (n_subcarriers > EDGE_MAX_SUBCARRIERS) {
+        n_subcarriers = EDGE_MAX_SUBCARRIERS;
+    }
 
     s_frame_count++;
     s_latest_rssi = slot->rssi;
@@ -1125,7 +1131,17 @@ static void process_frame(const edge_ring_slot_t *slot)
     }
 
     /* --- Step 4: Top-K selection (every 100 frames to amortize cost) --- */
-    if ((s_frame_count % 100) == 1 || s_top_k_count == 0) {
+    /* A shorter CSI grid can arrive between periodic selections. All retained
+     * indices must fit the current phases[] prefix before any consumer uses
+     * them. This bounds reads; it does not make mixed CSI grids equivalent. */
+    bool top_k_outside_grid = s_top_k_count > n_subcarriers;
+    for (uint8_t ki = 0; ki < s_top_k_count; ki++) {
+        if (s_top_k[ki] >= n_subcarriers) {
+            top_k_outside_grid = true;
+            break;
+        }
+    }
+    if ((s_frame_count % 100) == 1 || s_top_k_count == 0 || top_k_outside_grid) {
         update_top_k(n_subcarriers);
     }
 

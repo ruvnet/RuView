@@ -20,6 +20,7 @@ WiFi DensePose turns commodity WiFi signals into real-time human pose estimation
    - [Simulated Mode (No Hardware)](#simulated-mode-no-hardware)
    - [Windows WiFi (RSSI Only)](#windows-wifi-rssi-only)
    - [ESP32-S3 (Full CSI)](#esp32-s3-full-csi)
+   - [ESP32-C5 (Experimental CSI target)](#esp32-c5-experimental-csi-target)
    - [ESP32 Multistatic Mesh (Advanced)](#esp32-multistatic-mesh-advanced)
    - [MediaTek Router CSI (Experimental)](#mediatek-router-csi-experimental)
    - [Connect Mesh Data to the Dashboard and Observatory](#connect-mesh-data-to-the-dashboard-and-observatory)
@@ -404,6 +405,37 @@ curl -s -H "Authorization: Bearer $RUVIEW_API_TOKEN" localhost:3000/api/v1/nodes
 ```
 
 Allowing the gateway admits anything that can reach the published port, so keep `5005/udp` off untrusted networks. Node identity still comes from the frame payload. With Docker Compose the service runs on the project network (`<project>_default`), so inspect that network's gateway rather than `bridge`. Docker Desktop on Windows has a related source-address problem; see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+
+### ESP32-C5 (Experimental CSI target)
+
+The C5 profile is headless: 2.4 GHz association, 240 MHz application CPU,
+8 Hz edge DSP and a 4 MB OTA layout. Use the `c5` variant, ESP-IDF 6.0.2
+for the reproducible build, and esptool 5.3 or newer. This profile does not
+enable 5 GHz or PSRAM. No C5 speedup or sensing-accuracy claim is established.
+C5 also skips default mmWave probing: S3's GPIO17/18 sensor pair conflicts
+with C5 flash/PSRAM. Do not reuse S3 sensor pin assignments on C5.
+Real-board tests confirmed boot and decoded CSI transport, but the tested AP
+did not consistently sustain the 20 packets/s acceptance target, including
+with additional traffic. Check cadence in your deployment; a successful install alone
+does not qualify sensing accuracy or long-run reliability.
+
+Identify the exact board and production chip, confirm at least 4 MB flash,
+and save a private full-flash backup before installation. C5's bootloader
+address is **`0x2000`**, unlike S3/C6. Verify checksums and inspect the plan:
+
+```sh
+node harness/ruview/bin/cli.js flash-plan --port COM8 --bundle ./c5-bundle --variant c5
+```
+
+Choose your board's actual port. A CP210x listing identifies the USB bridge,
+not the ESP chip. If identification receives no serial data, hold BOOT, tap
+RESET, release BOOT, then retry. After flashing and provisioning, require
+positive `CSI cb #1` (or later) callbacks and sustained valid sink packets.
+Initialization messages alone are not hardware validation. Keep credentials
+and raw captures private.
+
+See the [C5 installation instructions](../firmware/esp32-csi-node/README.md#esp32-c5-candidate-installation-and-qualification)
+and [comparison and qualification record](validation/2026-10-28-esp32-c5-candidate.md).
 
 ### ESP32 Multistatic Mesh (Advanced)
 
@@ -1920,12 +1952,14 @@ A 3-6 node ESP32-S3 mesh provides full CSI at 20 Hz. Total cost: ~$54 for a 3-no
 
 Use versioned bundles from [Releases](https://github.com/ruvnet/RuView/releases),
 not the historical binaries in `firmware/esp32-csi-node/release_bins/`.
-The 0.8.14 prerelease fixes USB device identity and adds OTA key provisioning.
+The 0.8.16 prerelease adds conservative MR60BHA2 identification to the prior
+USB identity, OTA provisioning, and CSI reliability fixes.
 It has CI build/host-test coverage; new physical-board qualification remains
 pending. The previous stable firmware is 0.8.8.
 
 | Release | What It Includes | Tag |
 |---------|-----------------|-----|
+| [v0.8.16](https://github.com/ruvnet/RuView/releases/tag/v0.8.16-esp32) | **Prerelease:** conservative MR60BHA2 identification; CI/host-test coverage, without new physical firmware qualification | `v0.8.16-esp32` |
 | [v0.8.14](https://github.com/ruvnet/RuView/releases/tag/v0.8.14-esp32) | **Prerelease:** corrected C6 base-MAC identity, OTA key provisioning without a host key cache; physical qualification pending | `v0.8.14-esp32` |
 | [v0.8.8](https://github.com/ruvnet/RuView/releases/tag/v0.8.8-esp32) | Previous stable firmware: consistent occupancy and rate-aware C6 processing; see [release evidence](releases/v0.8.8-esp32.md) | `v0.8.8-esp32` |
 | [v0.7.0](https://github.com/ruvnet/RuView/releases/tag/v0.7.0-esp32) | Historical ADR-110 firmware-side substrate: ESP-NOW synchronization and sync-packet UDP emission ([WITNESS-LOG-110 §A0.7-§A0.13](WITNESS-LOG-110.md)) | `v0.7.0-esp32` |
@@ -1961,7 +1995,7 @@ python -m esptool --chip esp32s3 --port COM7 --baud 460800 \
 
 **4 MB headless S3 boards:** use the matching application and partition table
 from `esp32-csi-node-firmware-4mb.tar.gz` on the
-[0.8.14 prerelease](https://github.com/ruvnet/RuView/releases/tag/v0.8.14-esp32)
+[0.8.16 prerelease](https://github.com/ruvnet/RuView/releases/tag/v0.8.16-esp32)
 and select `--flash-size 4MB`:
 
 ```bash
