@@ -22,6 +22,9 @@ set(SRCS
     "c6_softap_he.c"
     # Node discovery over mDNS (runtime-gated by CONFIG_CSI_NODE_MDNS)
     "node_mdns.c"
+    # Self-ping (#954) reply-timeout rule, pure, host-tested
+    # (tests/host/test_ping_rate.c, test/test_self_ping.c).
+    "ping_rate.c"
 )
 
 # ESP-IDF v6+: headers must resolve via explicit REQUIRES (no implicit deps).
