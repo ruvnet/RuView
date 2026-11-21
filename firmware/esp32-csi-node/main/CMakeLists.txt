@@ -22,6 +22,18 @@ set(SRCS
     "c6_softap_he.c"
     # Node discovery over mDNS (runtime-gated by CONFIG_CSI_NODE_MDNS)
     "node_mdns.c"
+    # Self-ping (#954) reply-timeout rule, pure, host-tested
+    # (tests/host/test_ping_rate.c, test/test_self_ping.c).
+    "ping_rate.c"
+    # ADR-427 link-rate watchdog. link_watchdog_core.c is pure (host-tested,
+    # tests/host/test_link_watchdog.c); link_watchdog.c is the IDF glue and is
+    # inert (see its #ifdef CONFIG_LINK_WATCHDOG) when the Kconfig symbol is
+    # unset, which is the default.
+    "link_watchdog_core.c"
+    "link_watchdog.c"
+    # Uplink watchdog decision (main.c uplink_watchdog_tick), pure, host-tested
+    # (tests/host/test_uplink_wd.c).
+    "uplink_wd_core.c"
 )
 
 # ESP-IDF v6+: headers must resolve via explicit REQUIRES (no implicit deps).

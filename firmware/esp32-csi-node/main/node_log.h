@@ -56,7 +56,33 @@ extern "C" {
 #define NODE_LOG_EV_WIFI_RECONNECT  2
 #define NODE_LOG_EV_THERMAL_STATE   3
 #define NODE_LOG_EV_SEND_FAIL_RATE  4
+/* Uplink watchdog firing (main.c), written just before its esp_restart().
+ * a = (rule<<24) | stalled_s (24 bits): rule 1 = no accepted bulk send for the
+ * timeout, rule 2 = < 5 % of bulk sends accepted for the timeout, rule 3 =
+ * associated with no gateway self-ping answered for the timeout.
+ * b = seconds since the priority path last got through (-1 = never). */
 #define NODE_LOG_EV_WATCHDOG        5
+/* 6, 7: reserved (used by other features in a downstream fleet; the ids are
+ * an on-flash format, so they are kept rather than renumbered). */
+/* ADR-427 link-rate watchdog (link_watchdog.c): every state change and every
+ * action or would-act. Five values in two int32 slots, bit-packed (all
+ * unsigned fields, stored via an (int32_t) cast):
+ *
+ *   a: [31:28] action_code   (lwd_action_t, link_watchdog_core.h, 0-4)
+ *      [27:24] inhibit_code  (lwd_inhibit_t, 0-7)
+ *      [23:8]  median_rtt_ms (u16)
+ *      [7:0]   loss_pct      (u8, 0-100)
+ *   b: [31:16] baseline_ms   (u16, 0xFFFF = not yet seeded)
+ *      [15:8]  peers_degraded (u8, saturating)
+ *      [7:0]   peers_valid    (u8, saturating) */
+#define NODE_LOG_EV_LINK_WD         8
+/* 9, 10: reserved (used by other features in a downstream fleet). */
+/* Station IP changes (main.c event_handler). a = NODE_LOG_IP_GOT (b = the
+ * IPv4 address, network byte order, as esp_ip4_addr_t.addr) or
+ * NODE_LOG_IP_LOST (b = 0; IDF raises it after the IP-lost timer expires). */
+#define NODE_LOG_EV_IP             11
+#define NODE_LOG_IP_GOT             1
+#define NODE_LOG_IP_LOST            2
 
 /** Mount the FAT volume and open the ring. Call once at boot, after NVS is up
  *  (the boot counter lives there).

@@ -27,6 +27,8 @@
 #include "esp_netif.h"          /* #954: STA gateway lookup for self-ping CSI source */
 #include "ping/ping_sock.h"     /* #954: esp_ping gateway traffic generator */
 #include "lwip/ip_addr.h"       /* #954: ip_addr_t target for esp_ping */
+#include "ping_rate.h"          /* self-ping reply timeout (host-tested) */
+#include "link_watchdog.h"      /* ADR-427: self-ping RTT is the watchdog's signal */
 
 /* ADR-060: Access the global NVS config for MAC filter and channel override. */
 extern nvs_config_t g_nvs_config;
@@ -73,6 +75,10 @@ static uint32_t s_rate_skip = 0;
 #endif
 
 #define CSI_SELF_PING_INTERVAL_MS (1000U / CONFIG_CSI_SELF_PING_HZ)
+
+#ifndef CONFIG_CSI_SELF_PING_TIMEOUT_MS
+#define CONFIG_CSI_SELF_PING_TIMEOUT_MS 200
+#endif
 
 #ifndef CONFIG_EDGE_DSP_SAMPLE_HZ
 #if CONFIG_IDF_TARGET_ESP32C6 || CONFIG_IDF_TARGET_ESP32C5
@@ -569,21 +575,30 @@ static void csi_start_self_ping(void)
     cfg.target_addr     = target;
     cfg.count           = ESP_PING_COUNT_INFINITE;
     cfg.interval_ms     = CSI_SELF_PING_INTERVAL_MS;
-    cfg.timeout_ms      = CSI_SELF_PING_INTERVAL_MS;
+    /* #2287: the IDF default timeout (1000 ms) stops this sequential session
+     * for a second on every lost reply. See CSI_SELF_PING_TIMEOUT_MS in
+     * Kconfig.projbuild for why it is 200 ms and not one interval. */
+    cfg.timeout_ms      = ping_timeout_resolve(CSI_SELF_PING_INTERVAL_MS,
+                                               CONFIG_CSI_SELF_PING_TIMEOUT_MS);
     cfg.data_size       = 1;
     cfg.task_stack_size = 4096;
 
     esp_ping_callbacks_t cbs = {
         .cb_args         = NULL,
-        .on_ping_success = csi_ping_cb_noop,
-        .on_ping_timeout = csi_ping_cb_noop,
-        .on_ping_end     = csi_ping_cb_noop,
+        /* ADR-427: these were no-ops -- the RTT was measured by lwIP and
+         * thrown away. link_watchdog.c now reads ESP_PING_PROF_TIMEGAP on
+         * success and counts timeouts (both inert unless
+         * CONFIG_LINK_WATCHDOG is set); the session itself, its cadence and
+         * its purpose as a CSI OFDM source (#521/#954) are unchanged. */
+        .on_ping_success = link_watchdog_ping_success_cb,
+        .on_ping_timeout = link_watchdog_ping_timeout_cb,
+        .on_ping_end     = csi_ping_cb_noop,   /* count is infinite; never fires */
     };
 
     if (esp_ping_new_session(&cfg, &cbs, &s_self_ping) == ESP_OK && s_self_ping != NULL) {
         esp_ping_start(s_self_ping);
-        ESP_LOGI(TAG, "self-ping started -> %s @%dHz (CSI yield depends on AP reply rate, #2287)",
-                 gw_str, CONFIG_CSI_SELF_PING_HZ);
+        ESP_LOGI(TAG, "self-ping started -> %s @%dHz timeout %ums (CSI yield depends on AP reply rate, #2287)",
+                 gw_str, CONFIG_CSI_SELF_PING_HZ, (unsigned)cfg.timeout_ms);
     } else {
         ESP_LOGW(TAG, "self-ping: esp_ping_new_session failed");
         s_self_ping = NULL;
@@ -806,6 +821,11 @@ uint16_t csi_collector_get_send_fail_count(void)
 uint32_t csi_collector_get_send_ok_count(void)
 {
     return s_send_ok;
+}
+
+uint32_t csi_collector_get_send_fail_total(void)
+{
+    return s_send_fail;
 }
 
 /* The gate here is fixed at compile time (mesh-aligned bucketing, falling

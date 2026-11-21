@@ -37,11 +37,20 @@ static uint32_t s_enomem_suppressed = 0;
  * succeeds. */
 static uint32_t s_enomem_streak = 0;
 
-/* Timestamp of the last sendto() the stack accepted, on either path; 0 until
+/* Timestamp of the last sendto() the stack accepted on the BULK path; 0 until
  * the node has ever delivered anything. Read by the uplink watchdog in main.c
  * -- see the rationale there for why "accepted by the stack" is deliberately
- * not "received by the server". */
+ * not "received by the server".
+ *
+ * Bulk only, not the priority path: in a measured stall a node's TX path
+ * stopped draining while it stayed associated -- ~74 KiB of heap held, every
+ * CSI send failing, nothing reaching the AP for ~10 h. The ~1 Hz mesh-sync
+ * packet on the priority path is <= 48 B, still got a pbuf, and sendto() kept
+ * accepting it, so it refreshed this timestamp every second and the watchdog
+ * never fired. The priority path keeps its own timestamp for /config, where
+ * the gap between the two is itself the stall signature. */
 static int64_t s_last_success_us = 0;
+static int64_t s_last_priority_success_us = 0;
 
 static int sender_init_internal(const char *ip, uint16_t port)
 {
@@ -153,16 +162,22 @@ int stream_sender_send_priority(const uint8_t *data, size_t len)
         }
         return -1;
     }
-    /* Counts for the watchdog: the mesh sync packet rides this path at ~1 Hz,
-     * and its getting through proves the node's network path is intact even
-     * when the bulk CSI stream is being suppressed by the ENOMEM backoff. */
-    s_last_success_us = esp_timer_get_time();
+    /* Deliberately NOT the watchdog's timestamp: a tiny packet being accepted
+     * does not prove the TX path is draining (see s_last_success_us). The
+     * bulk path retries at least every ENOMEM_COOLDOWN_MAX_MS, so a healthy
+     * node under buffer pressure still refreshes it within seconds. */
+    s_last_priority_success_us = esp_timer_get_time();
     return sent;
 }
 
 int64_t stream_sender_last_success_us(void)
 {
     return s_last_success_us;
+}
+
+int64_t stream_sender_last_priority_success_us(void)
+{
+    return s_last_priority_success_us;
 }
 
 void stream_sender_deinit(void)

@@ -33,6 +33,7 @@ void nvs_config_load(nvs_config_t *cfg)
 
     cfg->led_mode = LED_MODE_FLICKER;
     cfg->led_brightness = 100;
+    cfg->linkwd_mode = 1;        /* ADR-427: observe, not off and not act */
 
     /* Start with Kconfig compiled defaults */
     strlcpy(cfg->wifi_ssid, CONFIG_CSI_WIFI_SSID, sizeof(cfg->wifi_ssid));
@@ -335,6 +336,12 @@ void nvs_config_load(nvs_config_t *cfg)
     if (nvs_get_u8(handle, "led_bright", &led_bright_val) == ESP_OK && led_bright_val <= 100) {
         cfg->led_brightness = led_bright_val;
         ESP_LOGI(TAG, "NVS override: led_brightness=%u", led_bright_val);
+    }
+
+    uint8_t linkwd_val = 0;
+    if (nvs_get_u8(handle, "linkwd", &linkwd_val) == ESP_OK && linkwd_val <= 2) {
+        cfg->linkwd_mode = linkwd_val;
+        ESP_LOGI(TAG, "NVS override: linkwd=%u", linkwd_val);
     }
 
     if (nvs_get_u16(handle, "swarm_ingest", &cfg->swarm_ingest_sec) != ESP_OK) {

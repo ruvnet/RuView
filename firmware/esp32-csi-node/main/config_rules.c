@@ -44,6 +44,10 @@ const cfg_key_t CONFIG_KEYS[] = {
     { "swarm_ingest_sec",   "swarm_ingest", T_U16,   1, 65535,     0,   0,   false },
     { "led_mode",           "led_mode",     T_U8,    0,     2,     0,   0,   false },
     { "led_brightness",     "led_bright",   T_U8,    0,   100,     0,   0,   false },
+    /* ADR-427 link watchdog mode: 0 off, 1 observe, 2 act. Not "assoc": a
+     * mode change cannot itself orphan the node the way a bad SSID/channel
+     * push can, so it applies live without a trial. */
+    { "linkwd",             "linkwd",       T_U8,    0,     2,     0,   0,   false },
 };
 
 const size_t CONFIG_KEY_COUNT = sizeof(CONFIG_KEYS) / sizeof(CONFIG_KEYS[0]);
@@ -122,7 +126,10 @@ bool config_write_allowed(bool trial_armed, bool pending_reboot)
 bool config_is_live(const char *name)
 {
     return strcmp(name, "led_mode") == 0 ||
-           strcmp(name, "led_brightness") == 0;
+           strcmp(name, "led_brightness") == 0 ||
+           /* link_watchdog_tick() re-reads g_nvs_config.linkwd_mode every
+            * window, so observe<->act<->off is a push, not a reboot. */
+           strcmp(name, "linkwd") == 0;
 }
 
 bool config_is_meta(const char *name)
