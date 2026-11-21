@@ -693,18 +693,31 @@ WiFi Signal [56 channels] → Transformer + Graph Neural Network
 **Quick Start**
 
 ```bash
-# Step 1: Learn from raw WiFi data (no labels needed)
-cargo run -p wifi-densepose-sensing-server -- --pretrain --dataset data/csi/ --pretrain-epochs 50
+# Step 1: Pretrain on a prepared MM-Fi dataset and save embedding weights
+cargo run -p wifi-densepose-sensing-server -- --pretrain --dataset data/mmfi/ --pretrain-epochs 50 --save-rvf pretrained.rvf
 
-# Step 2: Fine-tune with pose labels for full capability
-cargo run -p wifi-densepose-sensing-server -- --train --dataset data/mmfi/ --epochs 100 --save-rvf model.rvf
+# Step 2: Extract fingerprints from dataset windows (one JSON vector per line)
+cargo run -p wifi-densepose-sensing-server -- --model pretrained.rvf --dataset data/mmfi/ --embed > embeddings.jsonl
 
-# Step 3: Use the model — extract fingerprints from live WiFi
-cargo run -p wifi-densepose-sensing-server -- --model model.rvf --embed
-
-# Step 4: Search — find similar environments or detect anomalies
-cargo run -p wifi-densepose-sensing-server -- --model model.rvf --build-index env
+# Step 3: Save a fingerprint index for offline similarity search
+cargo run -p wifi-densepose-sensing-server -- --model pretrained.rvf --dataset data/mmfi/ --build-index env --index-output fingerprints.json
 ```
+
+These are offline dataset operations. All three modes require a non-empty,
+loadable dataset and fail on missing or invalid input; they never substitute
+synthetic data. The current `DataPipeline` accepts prepared MM-Fi directories
+(`csi_amplitude.npy`/`csi.npy` plus `labels.npy`/`keypoints.npy`) or Wi-Pose `.mat`
+files with `--dataset-type wipose`. Pretraining ignores the pose labels but the
+MM-Fi adapter still requires them (Wi-Pose labels are optional). Windows use
+the pipeline's default 10 frames, stride 5, normalization and 56-subcarrier
+resampling. Embedding and indexing require a pretrained RVF with both transformer and projection weights;
+a pose-only `--train` RVF is insufficient.
+
+`--index-output` creates a new JSON file containing a format version, index type,
+and embedding vectors in dataset-window order. Existing files are preserved.
+Rust callers can deserialize it as `embedding_workflow::FingerprintFile`, call
+`to_index()`, and use `FingerprintIndex::search()` for cosine nearest neighbors.
+This workflow does not establish measured environment or person recognition accuracy.
 
 **Training Modes**
 
