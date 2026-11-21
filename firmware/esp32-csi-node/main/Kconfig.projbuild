@@ -698,6 +698,20 @@ config UPLINK_WATCHDOG
       powered on while the AP is down does not reboot-loop; the unbounded
       reconnect handles that case instead.
 
+      Two rules, each held for UPLINK_WATCHDOG_TIMEOUT_S (uplink_wd_core.h):
+      (1) no bulk (CSI) send accepted at all; (2) fewer than 5 % of bulk sends
+      accepted in every 10 s tick with at least 10 attempts. Only the bulk
+      path counts: in a measured TX stall the ~1 Hz, <= 48 B priority packets
+      kept being accepted for ~10 h while every CSI send failed, and the
+      ENOMEM backoff let one bulk send through every <= 2 s -- enough to hold
+      off rule 1 forever. Each firing writes NODE_LOG_EV_WATCHDOG before the
+      restart.
+
+      Consequence of counting the bulk path only: a node that has sent CSI
+      at least once and then captures nothing to send for the whole timeout
+      (a capture stall, or a network so quiet that no CSI is produced) now
+      restarts too, where the priority path used to hold it off.
+
 config UPLINK_WATCHDOG_TIMEOUT_S
     int "Restart after this many seconds with no successful send"
     depends on UPLINK_WATCHDOG

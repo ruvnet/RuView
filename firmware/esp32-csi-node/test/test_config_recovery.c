@@ -6,6 +6,9 @@
 #include "../main/config_api.c"
 
 nvs_config_t g_nvs_config;
+/* GET /config's "active"."uplink_wd" block reads these (stream_sender.c). */
+int64_t stream_sender_last_success_us(void) { return 0; }
+int64_t stream_sender_last_priority_success_us(void) { return 0; }
 static cJSON *db[3];
 static int live_sets, fail_set_at, restarts;
 static bool fail_restore, fail_erase, fail_bank_clear, fail_read, fail_restore_open;

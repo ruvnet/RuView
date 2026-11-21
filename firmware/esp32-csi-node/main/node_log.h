@@ -56,6 +56,10 @@ extern "C" {
 #define NODE_LOG_EV_WIFI_RECONNECT  2
 #define NODE_LOG_EV_THERMAL_STATE   3
 #define NODE_LOG_EV_SEND_FAIL_RATE  4
+/* Uplink watchdog firing (main.c), written just before its esp_restart().
+ * a = (rule<<24) | stalled_s (24 bits): rule 1 = no accepted bulk send for the
+ * timeout, rule 2 = < 5 % of bulk sends accepted for the timeout.
+ * b = seconds since the priority path last got through (-1 = never). */
 #define NODE_LOG_EV_WATCHDOG        5
 
 /** Mount the FAT volume and open the ring. Call once at boot, after NVS is up
