@@ -42,6 +42,8 @@ mod source_fusion;
 mod tracker_bridge;
 pub mod types;
 mod vital_signs;
+#[cfg(test)]
+mod scenario_harness;
 
 // Training pipeline modules (exposed via lib.rs)
 use wifi_densepose_sensing_server::{
