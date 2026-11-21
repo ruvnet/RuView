@@ -1,7 +1,7 @@
 # Dependency compatibility patch
 
-Source: crates.io `wasmtime-internal-cache` 36.0.20.
-Published archive SHA-256: `65f09c789d1bb2e7ab1618ac8336d783c1ff0babc38430c7f1940d01c546722b` (verified against crates.io version metadata).
+Source: crates.io `wasmtime-internal-cache` 36.0.21.
+Published archive SHA-256: `1ff2377df26271c42d9649ac4ee13656ef89a51f02f0daa7917e67c635d9bc1d` (verified against crates.io version metadata).
 
 Executable source, tests, fixtures and licenses are byte-for-byte upstream.
 Only the normalized Cargo.toml dependency requirement changes:
