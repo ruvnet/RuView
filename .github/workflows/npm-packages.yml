@@ -45,8 +45,10 @@ jobs:
             # flashing, training runner/gate, doctor, device access, and SSH
             # hosts. ADR-375 adds the MCP Apps console widget (~12 KB), the
             # Streamable HTTP transport and the terminal UI (384 KiB); ADR-378 the
-            # ruview-live showcase views (~37 KB): 448 KiB reviewed ceiling.
-            unpacked_budget: 458752
+            # ruview-live showcase views (~37 KB): prior 448 KiB ceiling.
+            # Declarative node configuration adds a 44 KB runtime module.
+            # Measured pack: 479863 B; retain a 480 KiB hard feature ceiling.
+            unpacked_budget: 491520
           - dir: harness/homecore
             build: false
             publishable: true

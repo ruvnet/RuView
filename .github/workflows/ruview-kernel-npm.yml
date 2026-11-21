@@ -77,6 +77,13 @@ jobs:
         with:
           node-version: '22'
 
+      # The ruv-FANN git dependency contains paths longer than Windows'
+      # 260-character limit. On a cold cargo cache, cargo's checkout fails
+      # with "path too long" unless git long-path support is on.
+      - name: Allow long paths for cargo git checkouts
+        if: runner.os == 'Windows'
+        run: git config --global core.longpaths true
+
       - name: Rust ABI tests
         run: cargo test --manifest-path v2/Cargo.toml -p ruview-kernel --locked
 
