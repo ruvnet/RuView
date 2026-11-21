@@ -8,7 +8,10 @@
  * - Mini person-count dot visualization
  * - Settings dialog (tabs, ranges, presets, data source)
  * - Quick-select scenario dropdown
+ * - Data-source badge and the not-live banner
  */
+
+import { sourceBanner } from './live-data.js';
 
 // ---- Constants ----
 
@@ -243,9 +246,10 @@ export class HudController {
     dsSel.addEventListener('change', (e) => {
       s.dataSource = e.target.value;
       document.getElementById('ws-url-row').style.display = e.target.value === 'ws' ? 'flex' : 'none';
+      obs._reconnectAttempt = 0;
       if (e.target.value === 'ws' && s.wsUrl) obs._connectWS(s.wsUrl);
       else obs._disconnectWS();
-      this.updateSourceBadge(s.dataSource, obs._ws);
+      if (e.target.value !== 'ws') obs._demoReason = 'Demo selected in settings.';
       this.saveSettings();
     });
     document.getElementById('ws-url-row').style.display = s.dataSource === 'ws' ? 'flex' : 'none';
@@ -254,6 +258,7 @@ export class HudController {
     wsInput.value = s.wsUrl;
     wsInput.addEventListener('change', (e) => {
       s.wsUrl = e.target.value;
+      obs._reconnectAttempt = 0;
       if (s.dataSource === 'ws') obs._connectWS(e.target.value);
       this.saveSettings();
     });
@@ -359,14 +364,32 @@ export class HudController {
   // Source badge
   // ============================================================
 
-  updateSourceBadge(dataSource, ws) {
-    const dot = document.querySelector('#data-source-badge .dot');
+  /**
+   * Called every frame with what is actually being drawn ('live', 'demo' or
+   * 'no-data'). Touches the DOM only when the text changes.
+   */
+  updateSource(kind, info = {}) {
+    this._sourceKind = kind;
+    const banner = sourceBanner(kind, info);
+    const key = kind + '|' + (banner ? banner.detail : '');
+    if (key === this._sourceKey) return;
+    this._sourceKey = key;
+
+    const dot = document.querySelector?.('#data-source-badge .dot');
     const label = document.getElementById('data-source-label');
-    if (dataSource === 'ws' && ws?.readyState === WebSocket.OPEN) {
-      dot.className = 'dot dot--live'; label.textContent = 'LIVE';
-    } else {
-      dot.className = 'dot dot--demo'; label.textContent = 'DEMO';
-    }
+    const badge = { live: ['dot--live', 'LIVE'], demo: ['dot--demo', 'DEMO'], 'no-data': ['dot--nodata', 'NO DATA'] }[kind];
+    if (dot && badge) dot.className = `dot ${badge[0]}`;
+    if (label && badge) label.textContent = badge[1];
+
+    const el = document.getElementById('data-source-banner');
+    if (!el) return;
+    if (!banner) { el.hidden = true; return; }
+    el.hidden = false;
+    el.className = `source-banner source-banner--${banner.tone}`;
+    const title = document.getElementById('data-source-banner-title');
+    const detail = document.getElementById('data-source-banner-detail');
+    if (title) title.textContent = banner.title;
+    if (detail) detail.textContent = banner.detail;
   }
 
   // ============================================================
@@ -419,9 +442,11 @@ export class HudController {
     this._setBarColor('br-bar', vitalColor('br', this._lerpBr));
     this._setBarColor('conf-bar', vitalColor('conf', this._lerpConf));
 
-    this._setText('rssi-value', `${Math.round(feat.mean_rssi || 0)} dBm`);
-    this._setText('var-value', (feat.variance || 0).toFixed(2));
-    this._setText('motion-value', (feat.motion_band_power || 0).toFixed(3));
+    // A missing reading shows '--', not a made-up zero.
+    const num = (v, f) => (Number.isFinite(v) ? f(v) : '--');
+    this._setText('rssi-value', `${num(feat.mean_rssi, Math.round)} dBm`);
+    this._setText('var-value', num(feat.variance, v => v.toFixed(2)));
+    this._setText('motion-value', num(feat.motion_band_power, v => v.toFixed(3)));
 
     // Mini person-count dots
     const personCount = data.estimated_persons || 0;
@@ -432,7 +457,8 @@ export class HudController {
     if (presEl) {
       const ml = cls.motion_level || 'absent';
       presEl.className = 'presence-state';
-      if (ml === 'active') { presEl.classList.add('presence--active'); presLabel.textContent = 'ACTIVE'; }
+      if (!data.classification) { presEl.classList.add('presence--absent'); presLabel.textContent = 'NO DATA'; }
+      else if (ml === 'active') { presEl.classList.add('presence--active'); presLabel.textContent = 'ACTIVE'; }
       else if (cls.presence) { presEl.classList.add('presence--present'); presLabel.textContent = 'PRESENT'; }
       else { presEl.classList.add('presence--absent'); presLabel.textContent = 'ABSENT'; }
     }
@@ -447,7 +473,9 @@ export class HudController {
       this._updateScenarioDescription(scenarioKey);
       this._updateEdgeModules(scenarioKey);
     }
-    if (live) {
+    if (live && this._sourceKind === 'no-data') {
+      this._setText('scenario-description', 'No live data: nothing is being measured right now.');
+    } else if (live) {
       this._setText('scenario-description', 'Live measurements: ' +
         (typeof cls.motion_level === 'string' ? cls.motion_level : 'classification unavailable').replaceAll('_', ' '));
     }

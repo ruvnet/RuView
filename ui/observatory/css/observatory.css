@@ -107,6 +107,38 @@ body {
 }
 .dot--demo { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
 .dot--live { background: var(--green-glow); box-shadow: 0 0 6px var(--green-glow); animation: pulse-dot 2s infinite; }
+.dot--nodata { background: var(--red-alert); box-shadow: 0 0 6px var(--red-alert); }
+
+/* ---- Not-live banner (top centre): demo or no live data ---- */
+.source-banner {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 10px 18px;
+  border-radius: 10px;
+  text-align: center;
+  font-family: 'JetBrains Mono', monospace;
+  backdrop-filter: blur(6px);
+  z-index: 20;
+}
+.source-banner[hidden] { display: none; }
+#data-source-banner-title { font-size: 15px; font-weight: 700; letter-spacing: 2px; }
+#data-source-banner-detail { margin-top: 4px; font-size: 11px; line-height: 1.4; opacity: 0.9; }
+.source-banner--demo {
+  background: rgba(60, 38, 0, 0.88);
+  color: var(--amber);
+  border: 2px solid var(--amber);
+}
+.source-banner--no-data {
+  background: rgba(60, 8, 14, 0.9);
+  color: var(--red-alert);
+  border: 2px solid var(--red-alert);
+}
+@media (max-width: 900px) {
+  .source-banner { top: 76px; }
+}
 
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; }
