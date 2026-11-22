@@ -38,6 +38,33 @@ const BOLD: &str = "\x1b[1m";
 const RST: &str = "\x1b[0m";
 const BLOCKS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
 
+/// Candidate-identity domain the model supports. A room must name at least two
+/// candidates to be a re-identification problem at all, and
+/// [`veil::adaptive_shield`] runs one full experiment per candidate while it
+/// searches the pass budget, so the upper bound keeps `adaptive` bounded.
+const MIN_IDENTITIES: usize = 2;
+const MAX_IDENTITIES: usize = 128;
+
+/// Parse the `N` of `veil adaptive <N>`.
+///
+/// The count is user input, so it is checked against the supported domain
+/// before it reaches the model: below [`MIN_IDENTITIES`] the scene has no
+/// identity to protect, and above [`MAX_IDENTITIES`] the shield search is no
+/// longer bounded. A value that does not parse is an error rather than a
+/// silent fallback to the default, so the answer always describes the `N` the
+/// operator actually asked for.
+fn parse_identity_count(raw: &str) -> Result<usize, String> {
+    match raw.parse::<usize>() {
+        Ok(n) if (MIN_IDENTITIES..=MAX_IDENTITIES).contains(&n) => Ok(n),
+        Ok(n) => Err(format!(
+            "N={n} is outside {MIN_IDENTITIES}..={MAX_IDENTITIES} candidate identities"
+        )),
+        Err(_) => Err(format!(
+            "'{raw}' is not a candidate-identity count ({MIN_IDENTITIES}..={MAX_IDENTITIES})"
+        )),
+    }
+}
+
 /// Emit color for a real terminal; never when `NO_COLOR` is set; always when
 /// `CLICOLOR_FORCE` is set (so piped captures keep their color).
 fn color_enabled() -> bool {
@@ -393,7 +420,7 @@ fn help() {
          \x20 report           print the dashboard once\n\
          \x20 sweep            re-ID vs passes + throughput vs bits\n\
          \x20 optimize         run the hyper-optimizer\n\
-         \x20 adaptive <N>     derive the shield for N candidate identities\n\
+         \x20 adaptive <N>     derive the shield for N candidate identities (2..=128)\n\
          \x20 proof            verify the deterministic witness\n\
          \x20 doctor           self-check (exit 0 = healthy)\n\
          \x20 help             this text\n\n\
@@ -451,8 +478,8 @@ fn tui(mut cfg: ExperimentConfig, on: bool) {
                 Err(_) => msg = "bits: need 1..12".into(),
             },
             "n" => match arg.parse::<usize>() {
-                Ok(v) => cfg.scene.identities = v.clamp(2, 128),
-                Err(_) => msg = "n: need 2..128".into(),
+                Ok(v) => cfg.scene.identities = v.clamp(MIN_IDENTITIES, MAX_IDENTITIES),
+                Err(_) => msg = format!("n: need {MIN_IDENTITIES}..={MAX_IDENTITIES}"),
             },
             "snr" => match arg.parse::<f64>() {
                 Ok(v) => cfg.link.snr_db = v.clamp(0.0, 60.0),
@@ -526,14 +553,24 @@ fn main() {
             cmd_optimize(&cfg, on);
             0
         }
-        "adaptive" => {
-            let n = args
-                .get(1)
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(cfg.scene.identities);
-            cmd_adaptive(&cfg, n, on);
-            0
-        }
+        "adaptive" => match args.get(1).map(String::as_str) {
+            Some(raw) => match parse_identity_count(raw) {
+                Ok(n) => {
+                    cmd_adaptive(&cfg, n, on);
+                    0
+                }
+                Err(message) => {
+                    eprintln!("veil adaptive: {message}");
+                    2
+                }
+            },
+            // No count at all: fall back to the configured scene, which is
+            // inside the domain by construction (SceneConfig::default).
+            None => {
+                cmd_adaptive(&cfg, cfg.scene.identities, on);
+                0
+            }
+        },
         "proof" => cmd_proof(on),
         "doctor" => cmd_doctor(on),
         "help" | "-h" | "--help" => {
@@ -546,4 +583,58 @@ fn main() {
         }
     };
     std::process::exit(code);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn identity_count_accepts_the_supported_domain() {
+        for n in [MIN_IDENTITIES, 3, 16, 32, 64, MAX_IDENTITIES] {
+            assert_eq!(parse_identity_count(&n.to_string()), Ok(n));
+        }
+    }
+
+    /// `veil adaptive 0` used to reach `Channel::observe`, which indexes a
+    /// signature vector that `SceneConfig::identities == 0` never fills — an
+    /// index-out-of-bounds panic on a documented subcommand. The count is
+    /// rejected at the boundary instead.
+    #[test]
+    fn identity_count_rejects_a_scene_with_no_candidates() {
+        assert!(parse_identity_count("0").is_err());
+        assert!(parse_identity_count("1").is_err());
+    }
+
+    /// The pass search runs one experiment per candidate, so an unbounded `N`
+    /// is unbounded work rather than a rejected argument.
+    #[test]
+    fn identity_count_rejects_counts_above_the_model_bound() {
+        let too_many = (MAX_IDENTITIES + 1).to_string();
+        assert!(parse_identity_count(&too_many).is_err());
+        assert!(parse_identity_count("4000").is_err());
+    }
+
+    #[test]
+    fn identity_count_rejects_unparseable_input_instead_of_defaulting() {
+        // A silent fallback would report a shield for a different room.
+        assert!(parse_identity_count("abc").is_err());
+        assert!(parse_identity_count("").is_err());
+        assert!(parse_identity_count("-4").is_err());
+    }
+
+    /// The TUI and `adaptive` share one domain, so the two surfaces cannot
+    /// drift apart on what `N` means.
+    #[test]
+    fn tui_clamp_matches_the_parsed_domain() {
+        let clamp = |v: usize| v.clamp(MIN_IDENTITIES, MAX_IDENTITIES);
+        assert_eq!(clamp(0), MIN_IDENTITIES);
+        assert_eq!(clamp(1), MIN_IDENTITIES);
+        assert_eq!(clamp(4000), MAX_IDENTITIES);
+        assert_eq!(clamp(16), 16);
+        assert_eq!(
+            parse_identity_count(&MAX_IDENTITIES.to_string()),
+            Ok(MAX_IDENTITIES)
+        );
+    }
 }
