@@ -1,0 +1,17 @@
+# ESP32-C5 native C5L8/v1 producer overlay. Applied after sdkconfig.defaults and
+# sdkconfig.defaults.esp32c5 by build_c5l8v1.sh. Needs ESP-IDF 6.x (lltf_bit_mode).
+CONFIG_CSI_C5_LLTF8_V1=y
+CONFIG_C5_LLTF8_CHANNEL=48
+CONFIG_C5_LLTF8_SERIAL_SELFTEST=y
+# Byte 18/19 PPDU + flags population (sync bit 4, sanitized bit 5).
+CONFIG_CSI_FRAME_HE_TAGGING=y
+# OTA stays on as on every node: two-slot table (partitions_4mb.csv, ota_0 + ota_1),
+# HTTP POST /ota on 8032 gated by the OTA PSK provisioned into NVS
+# (provision.py --ota-psk-file), and a rollback-capable bootloader so an OTA image
+# that fails ota_health self-confirmation reverts.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+# Console on the C5's native USB-Serial-JTAG port (as the C6 fleet overlay does), so the
+# boot self-test lines and USB onboarding are reachable on a board with no UART bridge.
+# CONFIG_ESP_CONSOLE_UART_DEFAULT is not set
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+# CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG is not set

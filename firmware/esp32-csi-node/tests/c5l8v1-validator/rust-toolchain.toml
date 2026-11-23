@@ -1,0 +1,7 @@
+# wifi-densepose-sensing-server (ruvector-mincut -> ruvector-core / hnsw_rs / mmap-rs):
+# - mmap-rs 0.7: Cargo must accept edition 2024 in a dependency manifest (1.85+).
+# - hnsw_rs 0.3.4: u*.is_multiple_of (1.86+).
+# - ruvector-core 2.0.5 x86_64: #[target_feature(enable = "avx512f")] (1.89+ stable).
+[toolchain]
+channel = "1.89"
+profile = "minimal"

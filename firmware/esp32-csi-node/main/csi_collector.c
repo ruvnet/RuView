@@ -18,8 +18,10 @@
 #include "c6_timesync.h"  /* ADR-110: 802.15.4 epoch for cross-node alignment */
 #include "c6_sync_espnow.h" /* ADR-110 §A0.11: mesh-aligned epoch for sync packet */
 #include "csi_he_gate.h"     /* ADR-423 D1: HE-LTF validity gate */
+#include "c5_lltf8.h"        /* C5L8/v1 8-bit L-LTF producer */
 
 #include <string.h>
+#include <stdio.h>
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "esp_timer.h"
@@ -27,6 +29,10 @@
 #include "esp_netif.h"          /* #954: STA gateway lookup for self-ping CSI source */
 #include "ping/ping_sock.h"     /* #954: esp_ping gateway traffic generator */
 #include "lwip/ip_addr.h"       /* #954: ip_addr_t target for esp_ping */
+#ifdef CONFIG_CSI_C5_LLTF8_V1
+#include "esp_idf_version.h"     /* C5L8/v1 PHY readback gate */
+#include "soc/soc.h"            /* REG_READ for the C5L8/v1 PHY readback */
+#endif
 
 /* ADR-060: Access the global NVS config for MAC filter and channel override. */
 extern nvs_config_t g_nvs_config;
@@ -149,6 +155,14 @@ static uint8_t  s_hop_index   = 0;
 
 /** Handle for the periodic hop timer. NULL when timer is not running. */
 static esp_timer_handle_t s_hop_timer = NULL;
+
+#ifdef CONFIG_CSI_C5_LLTF8_V1
+/* C5L8/v1 claim inputs fixed at init by SDK readback (never assumed). */
+static bool     s_c5l8_readback_ok = false;
+static uint8_t  s_c5l8_sta_bw_mhz  = 0;
+static uint32_t s_c5l8_emitted = 0;
+static uint32_t s_c5l8_reject[C5L8_REJECT_COUNT] = {0};
+#endif
 
 /**
  * Serialize CSI data into ADR-018 binary frame format.
@@ -337,6 +351,24 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
     }
 #endif
 
+#ifdef CONFIG_CSI_C5_LLTF8_V1
+    /* C5L8/v1: a callback that can never carry the C5L8/v1 claim
+     * (HT/VHT/HE, secondary channel, invalid estimate, not 106 bytes) must
+     * not claim the 20 ms slot a qualifying non-HT frame would fill. Same
+     * starvation reasoning as the ADR-060 move above. c5l8_build() re-checks. */
+    if (info->rx_ctrl.cur_bb_format != C5L8_BB_FORMAT_NON_HT_OFDM
+        || info->rx_ctrl.second != 0
+        || !info->rx_ctrl.rx_channel_estimate_info_vld
+        || info->len != C5L8_IQ_BYTES) {
+        c5l8_status_t pre = info->rx_ctrl.cur_bb_format != C5L8_BB_FORMAT_NON_HT_OFDM ? C5L8_REJECT_BB_FORMAT
+                          : info->rx_ctrl.second != 0 ? C5L8_REJECT_SECONDARY
+                          : !info->rx_ctrl.rx_channel_estimate_info_vld ? C5L8_REJECT_ESTIMATE_INVALID
+                          : C5L8_REJECT_LENGTH;
+        s_c5l8_reject[pre]++;
+        return;
+    }
+#endif
+
     /* Early rate gate: drop excess callbacks to ~50 Hz to prevent
      * SPI flash cache crash in WiFi ISR (wDev_ProcessFiq).
      *
@@ -405,10 +437,55 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
 #endif
 
     uint8_t frame_buf[CSI_MAX_FRAME_SIZE];
+#ifdef CONFIG_CSI_C5_LLTF8_V1
+    /* C5L8/v1: emit ONLY the exact C5L8/v1 datagram. Callbacks that
+     * do not meet every claimed field are counted and dropped without samples;
+     * a bare 106-byte ADR-018 frame is never sent (the host rejects it). */
+    size_t frame_len = 0;
+    {
+        c5l8_input_t c5in = {
+            .node_id            = s_node_id,
+            .sequence           = s_sequence,
+            .primary_channel    = (uint8_t)info->rx_ctrl.channel,
+            .rssi               = (int8_t)info->rx_ctrl.rssi,
+            .noise_floor        = (int8_t)info->rx_ctrl.noise_floor,
+            .bb_format          = (uint8_t)info->rx_ctrl.cur_bb_format,
+            .secondary_channel  = (uint8_t)info->rx_ctrl.second,
+            .estimate_valid     = info->rx_ctrl.rx_channel_estimate_info_vld != 0,
+            .first_word_invalid = info->first_word_invalid,
+            .sync_valid         = c6_sync_espnow_is_valid(),
+            .format_readback_ok = s_c5l8_readback_ok,
+            .sta_bandwidth_mhz  = s_c5l8_sta_bw_mhz,
+            .iq                 = (const uint8_t *)info->buf,
+            .iq_len             = (uint16_t)info->len,
+        };
+        c5l8_status_t st = c5l8_build(&c5in, frame_buf, sizeof(frame_buf), &frame_len);
+        if (st != C5L8_OK) {
+            s_c5l8_reject[st]++;
+            uint32_t n = s_c5l8_reject[st];
+            if (n <= 3 || (n % 1000) == 0) {
+                ESP_LOGW(TAG, "C5L8/v1 withheld: %s (count=%lu, len=%d bb=%u ch=%u)",
+                         c5l8_status_str(st), (unsigned long)n, info->len,
+                         (unsigned)info->rx_ctrl.cur_bb_format, (unsigned)info->rx_ctrl.channel);
+            }
+            return;
+        }
+        s_sequence++;
+        s_c5l8_emitted++;
+        if (s_c5l8_emitted <= 3 || (s_c5l8_emitted % 1000) == 0) {
+            ESP_LOGI(TAG, "C5L8/v1 emitted #%lu (%u B, flags=0x%02x, %lu MHz)",
+                     (unsigned long)s_c5l8_emitted, (unsigned)frame_len, frame_buf[19],
+                     (unsigned long)(5000u + 5u * info->rx_ctrl.channel));
+        }
+    }
+    const size_t edge_iq_len = C5L8_IQ_BYTES;
+#else
     size_t frame_len = csi_serialize_frame(info, frame_buf, sizeof(frame_buf));
     if (he_action == CSI_HE_ACTION_TAG && frame_len > 19) {
         frame_buf[19] |= CSI_FRAME_FLAG_HE_ESTIMATE_INVALID;  /* ADR-423 D1 */
     }
+    const size_t edge_iq_len = frame_len > CSI_HEADER_SIZE ? frame_len - CSI_HEADER_SIZE : 0;
+#endif
 
     if (frame_len > 0) {
         /* Rate-limit UDP sends to avoid ENOMEM from lwIP pbuf exhaustion.
@@ -446,7 +523,7 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
             /* Reuse the sanitized ADR-018 payload. Feeding info->buf here
              * would reintroduce first_word_invalid artifacts on device. */
             (void)edge_enqueue_csi(&frame_buf[CSI_HEADER_SIZE],
-                                   (uint16_t)(frame_len - CSI_HEADER_SIZE),
+                                   (uint16_t)edge_iq_len,
                                    (int8_t)info->rx_ctrl.rssi, info->rx_ctrl.channel);
 
             /* Preserve the configured sample clock instead of resetting it to
@@ -647,7 +724,11 @@ void csi_collector_init(void)
 
     /* ADR-060: Determine the CSI channel.
      * Priority: 1) NVS override (--channel), 2) connected AP channel, 3) Kconfig default. */
+#if defined(CONFIG_CSI_C5_LLTF8_V1)
+    uint8_t csi_channel = (uint8_t)CONFIG_C5_LLTF8_CHANNEL;
+#else
     uint8_t csi_channel = (uint8_t)CONFIG_CSI_WIFI_CHANNEL;
+#endif
 
     if (g_nvs_config.csi_channel > 0) {
         /* Explicit NVS override via provision.py --channel */
@@ -703,7 +784,19 @@ void csi_collector_init(void)
 
     ESP_LOGI(TAG, "Promiscuous mode enabled (MGMT-only, RuView#396)");
 
-#if CONFIG_SOC_WIFI_HE_SUPPORT
+#if defined(CONFIG_CSI_C5_LLTF8_V1)
+    /* C5L8/v1: legacy + forced L-LTF only, 8-bit components,
+     * zero scaling, nothing else. The claim is only made if the SDK reads the
+     * same configuration back. */
+    wifi_csi_config_t csi_config;
+    memset(&csi_config, 0, sizeof(csi_config));
+    csi_config.enable = 1U;
+    csi_config.acquire_csi_legacy = 1U;
+    csi_config.acquire_csi_force_lltf = 1U;
+    csi_config.val_scale_cfg = 0U;
+    csi_config.lltf_bit_mode = 1U;   /* 1 = 8-bit I/Q (SDK default 0 = 12-bit) */
+    csi_config.dump_ack_en = 0U;
+#elif CONFIG_SOC_WIFI_HE_SUPPORT
     /* Wi-Fi 6 targets (e.g. ESP32-C6): wifi_csi_config_t is wifi_csi_acquire_config_t
      * (bitfields), not the legacy 802.11n bool layout used on ESP32-S3. */
     wifi_csi_config_t csi_config;
@@ -739,6 +832,49 @@ void csi_collector_init(void)
 #endif
 
     ESP_ERROR_CHECK(esp_wifi_set_csi_config(&csi_config));
+#ifdef CONFIG_CSI_C5_LLTF8_V1
+    {
+        wifi_csi_config_t rb;
+        memset(&rb, 0, sizeof(rb));
+        esp_err_t rb_err = esp_wifi_get_csi_config(&rb);
+        /* In the pinned esp-idf-espsdr 6.2.0 C5 blobs, esp_wifi_get_csi_config()
+         * (hal_mac_get_csi_filter) rebuilds only bits 0-11 (enable + acquire_*)
+         * from MAC registers and leaves val_scale_cfg / dump_ack_en / lltf_bit_mode
+         * as the caller passed them, so those fields are NOT a readback. The set
+         * path (ic_csi_set_config -> phy_lltf_mask_en / phy_chan_dump_cfg) writes
+         * them to PHY register 0x600A790C: bit12 = lltf_bit_mode (1 = 8-bit),
+         * bit3 = val_scale_cfg bit0. The format fields are read from that register. */
+        const bool api_ok = rb_err == ESP_OK && rb.enable == 1U
+            && rb.acquire_csi_legacy == 1U && rb.acquire_csi_force_lltf == 1U
+            && rb.acquire_csi_ht20 == 0U && rb.acquire_csi_ht40 == 0U
+            && rb.acquire_csi_vht == 0U && rb.acquire_csi_su == 0U
+            && rb.acquire_csi_mu == 0U && rb.acquire_csi_dcm == 0U
+            && rb.acquire_csi_beamformed == 0U;
+#if CONFIG_IDF_TARGET_ESP32C5 && ESP_IDF_VERSION == ESP_IDF_VERSION_VAL(6, 2, 0)
+        const uint32_t phy_csi = REG_READ(0x600A790CU);
+        const bool phy_ok = ((phy_csi >> 12) & 1U) == 1U && ((phy_csi >> 3) & 1U) == 0U;
+#else
+        const uint32_t phy_csi = 0;
+        const bool phy_ok = false;   /* register map verified only for the pinned C5 SDK */
+#endif
+        s_c5l8_readback_ok = api_ok && phy_ok;
+        rb.lltf_bit_mode = (phy_csi >> 12) & 1U;   /* log the register, not the echo */
+        rb.val_scale_cfg = (phy_csi >> 3) & 1U;
+        ESP_LOGI(TAG, "C5L8/v1 readback sources: api_bits0-11=%s phy_0x600A790C=0x%08lx",
+                 api_ok ? "match" : "MISMATCH", (unsigned long)phy_csi);
+        wifi_bandwidths_t bw = {0};
+        esp_err_t bw_err = esp_wifi_get_bandwidths(WIFI_IF_STA, &bw);
+        s_c5l8_sta_bw_mhz = (bw_err == ESP_OK && bw.ghz_5g == WIFI_BW20) ? 20 : 0;
+        ESP_LOGI(TAG, "C5L8/v1 readback: csi_config=%s (err=%s lltf_bit_mode=%u scale=%u) "
+                 "sta_bw_5g=%s (err=%s)",
+                 s_c5l8_readback_ok ? "match" : "MISMATCH", esp_err_to_name(rb_err),
+                 (unsigned)rb.lltf_bit_mode, (unsigned)rb.val_scale_cfg,
+                 s_c5l8_sta_bw_mhz == 20 ? "20MHz" : "NOT-20MHz", esp_err_to_name(bw_err));
+        if (!s_c5l8_readback_ok || s_c5l8_sta_bw_mhz != 20) {
+            ESP_LOGE(TAG, "C5L8/v1 claim cannot be made; every CSI frame will be withheld");
+        }
+    }
+#endif
     ESP_ERROR_CHECK(esp_wifi_set_csi_rx_cb(wifi_csi_callback, NULL));
     ESP_ERROR_CHECK(esp_wifi_set_csi(true));
 
@@ -759,6 +895,33 @@ void csi_collector_init(void)
      * starved (display builds / quiet networks). Additive to #396/#893. */
     csi_start_self_ping();
 }
+
+#ifdef CONFIG_CSI_C5_LLTF8_V1
+void csi_collector_c5l8_serial_selftest(void)
+{
+    /* USB/UART frame-format check that needs no Wi-Fi: each line carries one
+     * SYNTHETIC C5L8/v1 datagram as hex for the host validator. */
+    uint8_t buf[C5L8_FRAME_BYTES];
+    for (unsigned k = 0; k < C5L8_SELFTEST_CASES; k++) {
+        size_t len = 0;
+        c5l8_status_t st = c5l8_selftest_frame(k, s_node_id, buf, sizeof(buf), &len);
+        printf("C5L8-SELFTEST-SYNTHETIC v1 case=%u status=%s len=%u hex=", k, c5l8_status_str(st),
+               (unsigned)len);
+        for (size_t i = 0; i < len; i++) printf("%02x", buf[i]);
+        printf("\n");
+    }
+    printf("C5L8-SELFTEST-END cases=%u\n", (unsigned)C5L8_SELFTEST_CASES);
+    fflush(stdout);
+}
+
+void csi_collector_get_c5l8_counts(uint32_t *emitted, uint32_t *rejected_total)
+{
+    uint32_t r = 0;
+    for (unsigned i = 1; i < C5L8_REJECT_COUNT; i++) r += s_c5l8_reject[i];
+    if (emitted) *emitted = s_c5l8_emitted;
+    if (rejected_total) *rejected_total = r;
+}
+#endif
 
 /* Accessor for other modules that need the authoritative runtime node_id. */
 uint8_t csi_collector_get_node_id(void)

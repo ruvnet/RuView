@@ -1,0 +1,22 @@
+# Producer -> server validator contract test for the ESP32-C5 C5L8/v1 producer
+# (main/c5_lltf8.c). It runs frames from the firmware's own serializer, and live captures,
+# through the room_learner::native validator unchanged and by path. The validator source is
+# a read-only archive made by ./prepare-validator-src.sh (default ref 198528075cb1, the
+# stack where the C5L8/v1 decoder lives). Cargo.lock starts as a copy of v2/Cargo.lock at
+# that ref so dependency versions match the server build.
+[package]
+name = "c5l8v1-validator"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "ruview_c5l8v1_check"
+
+[workspace]
+exclude = ["validator-src"]
+
+[dependencies]
+wifi-densepose-sensing-server = { path = "validator-src/v2/crates/wifi-densepose-sensing-server" }
+wifi-densepose-hardware = { path = "validator-src/v2/crates/wifi-densepose-hardware" }
+serde_json = "1"

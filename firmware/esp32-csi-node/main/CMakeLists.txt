@@ -1,5 +1,5 @@
 set(SRCS
-    "main.c" "csi_collector.c" "config_api.c" "config_rules.c" "node_log.c"
+    "main.c" "csi_collector.c" "c5_lltf8.c" "config_api.c" "config_rules.c" "node_log.c"
     "thermal.c" "stream_sender.c" "nvs_config.c"
     "serial_onboarding.c" "serial_onboarding_protocol.c"
     "edge_processing.c" "ota_update.c" "ota_health.c" "power_mgmt.c"

@@ -120,7 +120,15 @@ static void event_handler(void *arg, esp_event_base_t event_base,
 #if defined(CONFIG_IDF_TARGET_ESP32C5)
         /* The band API requires started WiFi. Set it before association,
          * using the same 2.4 GHz radio domain as existing CSI nodes. */
+#if defined(CONFIG_CSI_C5_LLTF8_V1)
+        /* C5L8/v1: 5 GHz only, STA explicitly 20 MHz. The
+         * collector reads the bandwidth back before claiming the format. */
+        ESP_ERROR_CHECK(esp_wifi_set_band_mode(WIFI_BAND_MODE_5G_ONLY));
+        wifi_bandwidths_t c5l8_bw = { .ghz_2g = WIFI_BW20, .ghz_5g = WIFI_BW20 };
+        ESP_ERROR_CHECK(esp_wifi_set_bandwidths(WIFI_IF_STA, &c5l8_bw));
+#else
         ESP_ERROR_CHECK(esp_wifi_set_band_mode(WIFI_BAND_MODE_2G_ONLY));
+#endif
 #endif
         esp_wifi_connect();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
@@ -230,6 +238,10 @@ static void wifi_init_sta(void)
         wifi_config.sta.threshold.authmode = WIFI_AUTH_OPEN;
     }
 
+#if defined(CONFIG_CSI_C5_LLTF8_V1)
+    /* Scan hint only; the AP decides the operating channel. */
+    wifi_config.sta.channel = (uint8_t)CONFIG_C5_LLTF8_CHANNEL;
+#endif
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
 
@@ -385,6 +397,11 @@ void app_main(void)
      * reset unless it confirms itself. Start the clock before anything that
      * can block (WiFi waits up to ~2 min for an AP), so the deadline is real. */
     ota_health_start();
+
+#if defined(CONFIG_C5_LLTF8_SERIAL_SELFTEST)
+    /* C5L8/v1: frame-format check over USB serial, before Wi-Fi. */
+    csi_collector_c5l8_serial_selftest();
+#endif
 
     /* Apply the opt-in XIAO RF path before WiFi starts. Generic C6 boards keep
      * ownership of GPIO3 and GPIO14 because the default implementation is a
