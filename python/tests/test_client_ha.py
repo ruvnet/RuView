@@ -65,6 +65,15 @@ def test_parse_discovery_topic_event() -> None:
     assert out == ("event", "aabbccddeeff", "fall")
 
 
+def test_parse_discovery_topic_accepts_default_server_node_id() -> None:
+    """The sensing-server's node id defaults to its MQTT client id,
+    `wifi-densepose-<8 hex>`, with `-node<N>` appended per node."""
+    out = parse_discovery_topic(
+        "homeassistant/binary_sensor/wifi_densepose_wifi-densepose-1a2b3c4d-node1/presence/config"
+    )
+    assert out == ("binary_sensor", "wifi-densepose-1a2b3c4d-node1", "presence")
+
+
 def test_parse_discovery_topic_returns_none_for_non_discovery() -> None:
     assert parse_discovery_topic("homeassistant/binary_sensor/foo/state") is None
     assert parse_discovery_topic("ruview/aabbccddeeff/raw/edge_vitals") is None

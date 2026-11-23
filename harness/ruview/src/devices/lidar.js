@@ -41,17 +41,21 @@ export function parseRplidar(bytes) {
 const median = (xs) => {
   if (!xs.length) return null;
   const s = [...xs].sort((a, b) => a - b);
-  return s[Math.floor(s.length / 2)];
+  const middle = Math.floor(s.length / 2);
+  return s.length % 2 ? s[middle] : (s[middle - 1] + s[middle]) / 2;
 };
 
 export function summarizeScan({ points, invalid, revolutions }, seconds) {
   const valid = points.filter((p) => p.distanceMm > 0);
   const d = valid.map((p) => p.distanceMm);
   const sectors = new Set(valid.map((p) => Math.floor(p.angle / 10) % 36));
+  let min = Infinity;
+  let max = -Infinity;
+  for (const value of d) { min = Math.min(min, value); max = Math.max(max, value); }
   return {
     points: points.length, validPoints: valid.length, resyncBytes: invalid, revolutions,
     scanRateHz: Number((revolutions / seconds).toFixed(2)),
-    rangeMm: d.length ? { min: Math.min(...d), median: median(d), max: Math.max(...d) } : null,
+    rangeMm: d.length ? { min, median: median(d), max } : null,
     angularCoverage: Number((sectors.size / 36).toFixed(2)),
   };
 }
@@ -69,7 +73,7 @@ export async function readRplidar(args, deps) {
   if (!summary.validPoints) {
     return { ok: false, reason: 'no_scan_points', bytes: cap.bytes.length, ...summary, remedy: 'A2/A3/S-series need 115200/256000/1000000 baud per model; check the USB adapter powers the motor (A1 motor follows DTR).' };
   }
-  return { ok: true, source: 'rplidar', bytes: cap.bytes.length, ...summary, ...(cap.warnings ? { warnings: cap.warnings } : {}), evidence: 'MEASURED: live scan read on this host' };
+  return { ok: true, source: 'rplidar', bytes: cap.bytes.length, ...summary, ...(cap.captureIncomplete ? { captureIncomplete: true } : {}), ...(cap.warnings ? { warnings: cap.warnings } : {}), evidence: 'MEASURED: live scan read on this host' };
 }
 
 /** Validate and reduce one ruview.lidar.depth.v1 packet to statistics. */
@@ -162,6 +166,7 @@ export function readIphoneLidar(args, deps = {}) {
     ws.onclose = (event) => {
       if (!opened) finish();
       else if (!frames.length && event?.code && event.code !== 1000) finish({ ok: false, reason: 'relay_closed', detail: `close code ${event.code}${event.code === 1008 ? ' (token rejected?)' : ''}` });
+      else finish(); // The closed stream cannot contribute another frame.
     };
   });
 }

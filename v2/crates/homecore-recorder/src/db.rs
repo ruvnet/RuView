@@ -823,6 +823,22 @@ mod tests {
             .expect("open in-memory DB")
     }
 
+    /// RUSTSEC-2026-0459: the bundled SQLite must be >= 3.54.0. Guards the
+    /// vendored sqlx-sqlite patch against a lockfile walking libsqlite3-sys back.
+    #[tokio::test]
+    async fn bundled_sqlite_includes_wal_page_size_fix() {
+        let recorder = open_memory().await;
+        let (version,): (String,) = sqlx::query_as("SELECT sqlite_version()")
+            .fetch_one(&recorder.pool)
+            .await
+            .unwrap();
+        let parts: Vec<u32> = version.split('.').map(|s| s.parse().unwrap()).collect();
+        assert!(
+            parts.as_slice() >= [3, 54, 0].as_slice(),
+            "RUSTSEC-2026-0459 requires SQLite >= 3.54.0; loaded {version}"
+        );
+    }
+
     fn entity(s: &str) -> EntityId {
         EntityId::parse(s).unwrap()
     }

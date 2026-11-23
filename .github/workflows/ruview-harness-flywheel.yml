@@ -4,6 +4,12 @@ on:
   pull_request:
     paths:
       - 'harness/ruview/**'
+      - 'scripts/csi-udp-relay.py'
+      - 'scripts/esp32_jsonl_to_rvcsi.py'
+      - 'scripts/overnight-empty-capture.py'
+      - 'scripts/record-csi-udp.py'
+      - 'scripts/collect-training-data.py'
+      - 'scripts/align-ground-truth.js'
       - '.github/scripts/nightly-sota/**'
       - '.github/workflows/nightly-sota-agent.yml'
       - '.github/workflows/ruview-harness-flywheel.yml'
@@ -25,8 +31,12 @@ concurrency:
 
 jobs:
   verify:
-    name: Verify contributor harness
-    runs-on: ubuntu-latest
+    name: Verify contributor harness (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     defaults:
       run:
         working-directory: harness/ruview
@@ -39,9 +49,13 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: harness/ruview/package-lock.json
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
       - run: npm ci --ignore-scripts
       - run: npm audit --omit=optional
       - run: npm test
+      - run: npm run test:security
       - run: npm run brain:verify
       - run: npm run flywheel:plan
       - run: npm run flywheel:verify

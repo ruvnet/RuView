@@ -24,6 +24,7 @@ bool display_is_active(void) { return s_display_active; }
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
+#include "esp_timer.h"
 #include "lvgl.h"
 
 #include "display_hal.h"
@@ -66,6 +67,21 @@ static void lvgl_touch_cb(lv_indev_drv_t *drv, lv_indev_data_t *data)
         data->state = LV_INDEV_STATE_RELEASED;
     }
 }
+
+/* ---- LVGL tick source ----
+ * The managed lvgl component is Kconfig-configured (CONFIG_LV_CONF_SKIP=y), so
+ * main/lv_conf.h -- including its LV_TICK_CUSTOM esp_timer hook -- is ignored,
+ * CONFIG_LV_TICK_CUSTOM is unset, and nothing else calls lv_tick_inc(). LVGL's
+ * tick then never advances, its refresh timer never fires, and the panel only
+ * ever shows the boot frame (RuView#889). Drive the tick from an esp_timer. */
+#if !CONFIG_LV_TICK_CUSTOM
+#define LVGL_TICK_PERIOD_MS 2
+static void lvgl_tick_cb(void *arg)
+{
+    (void)arg;
+    lv_tick_inc(LVGL_TICK_PERIOD_MS);
+}
+#endif
 
 /* ---- Display task ---- */
 static void display_task(void *arg)
@@ -129,6 +145,21 @@ esp_err_t display_task_start(void)
 
     /* Initialize LVGL */
     lv_init();
+
+#if !CONFIG_LV_TICK_CUSTOM
+    /* Start the LVGL tick -- without it the display never refreshes (#889). */
+    const esp_timer_create_args_t tick_args = {
+        .callback = &lvgl_tick_cb,
+        .name     = "lvgl_tick",
+    };
+    esp_timer_handle_t tick_timer = NULL;
+    if (esp_timer_create(&tick_args, &tick_timer) == ESP_OK &&
+        esp_timer_start_periodic(tick_timer, LVGL_TICK_PERIOD_MS * 1000) == ESP_OK) {
+        ESP_LOGI(TAG, "LVGL tick timer started (%d ms)", LVGL_TICK_PERIOD_MS);
+    } else {
+        ESP_LOGE(TAG, "LVGL tick timer failed -- display will not refresh");
+    }
+#endif
 
     /* Double-buffered draw buffers — prefer PSRAM, fall back to internal DMA */
     size_t buf_lines = use_psram ? DISP_BUF_LINES : 10;  /* Smaller buffers without PSRAM */

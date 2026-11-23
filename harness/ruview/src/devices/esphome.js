@@ -135,9 +135,9 @@ async function resolveHost(host, deps) {
 
 // --- radar roles -----------------------------------------------------------------
 const ROLES = [
-  ['heartBpm', (e) => /heart/i.test(e.name + e.objectId)],
-  ['breathingBpm', (e) => /respir|breath/i.test(e.name + e.objectId)],
-  ['distanceCm', (e) => /distance/i.test(e.name + e.objectId)],
+  ['heartBpm', (e) => e.kind === 'sensor' && /heart/i.test(e.name + e.objectId)],
+  ['breathingBpm', (e) => e.kind === 'sensor' && /respir|breath/i.test(e.name + e.objectId)],
+  ['distanceCm', (e) => e.kind === 'sensor' && /distance/i.test(e.name + e.objectId)],
   ['targets', (e) => /target/i.test(e.name + e.objectId) && e.kind === 'sensor'],
   ['present', (e) => e.kind === 'binary' && /person|presence|occup|motion|human/i.test(e.name + e.objectId)],
 ];
@@ -151,7 +151,11 @@ export function summarizeEsphome(session, seconds) {
   for (const e of entities) { const r = roleOf(e); if (r && !byRole[r]) byRole[r] = e; }
   const values = (e) => (e ? e.samples.filter((s) => !s.missing).map((s) => s.value) : []);
   const presence = values(byRole.present);
-  const toCm = (e) => (e && /^m$/i.test(e.unit || '') ? values(e).map((v) => v * 100) : values(e));
+  const toCm = (e) => {
+    const unit = (e?.unit || '').toLowerCase();
+    const scale = unit === 'm' ? 100 : unit === 'mm' ? 0.1 : 1;
+    return values(e).map((value) => value * scale);
+  };
   return {
     source: 'esphome',
     device: session.device,
@@ -166,7 +170,7 @@ export function summarizeEsphome(session, seconds) {
     targetsMax: values(byRole.targets).length ? Math.max(...values(byRole.targets)) : null,
     entities: entities.map((e) => ({
       kind: e.kind, name: e.name, unit: e.unit || undefined, role: roleOf(e) || undefined,
-      updates: e.samples.length, last: e.last ? (e.last.missing ? null : e.last.value) : null,
+      updates: e.updates ?? e.samples.length, sampledUpdates: e.samples.length, droppedSamples: Math.max(0, (e.updates ?? e.samples.length) - e.samples.length), last: e.last ? (e.last.missing ? null : e.last.value) : null,
     })),
   };
 }
@@ -250,7 +254,7 @@ export async function readEsphome(args = {}, deps = {}) {
             break;
           case T.LIST_BINARY: case T.LIST_SENSOR: case T.LIST_TEXT: {
             const key = fKey(f, 2);
-            if (key !== null) session.entities.set(key, { kind: type === T.LIST_BINARY ? 'binary' : type === T.LIST_SENSOR ? 'sensor' : 'text', objectId: fStr(f, 1), name: fStr(f, 3), unit: type === T.LIST_SENSOR ? fStr(f, 6) : '', samples: [], last: null });
+            if (key !== null) session.entities.set(key, { kind: type === T.LIST_BINARY ? 'binary' : type === T.LIST_SENSOR ? 'sensor' : 'text', objectId: fStr(f, 1), name: fStr(f, 3), unit: type === T.LIST_SENSOR ? fStr(f, 6) : '', samples: [], last: null, updates: 0 });
             break;
           }
           case T.LIST_DONE:
@@ -260,8 +264,9 @@ export async function readEsphome(args = {}, deps = {}) {
             const e = session.entities.get(fKey(f, 1));
             if (!e) break;
             const value = type === T.STATE_SENSOR ? fFloat(f, 2) : type === T.STATE_BINARY ? fBool(f, 2) : fStr(f, 2);
-            const sample = { value, missing: fBool(f, 3) };
+            const sample = { value, missing: fBool(f, 3) || (type === T.STATE_SENSOR && !Number.isFinite(value)) };
             session.updates += 1;
+            e.updates += 1;
             if (e.samples.length < 10_000) e.samples.push(sample);
             e.last = sample;
             break;

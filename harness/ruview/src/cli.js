@@ -45,12 +45,15 @@ const BOOLEAN_FLAGS = new Set(['confirm', 'cuda', 'allow_unverified', 'analyze',
 // Presentation-only flags never reach a tool schema.
 const UI_FLAGS = new Set(['json', 'watch', 'interval']);
 
+// Leave absent flag values uncoerced so the tool schema rejects them.
+const numericFlag = (value) => typeof value === 'boolean' || (typeof value === 'string' && value.trim() === '') ? value : Number(value);
+
 function toSchemaArgs(flags) {
   const out = {};
   for (const [key, value] of Object.entries(flags)) {
     const k = key.replaceAll('-', '_');
     if (UI_FLAGS.has(k)) continue;
-    if (NUMERIC_FLAGS.has(k)) out[k] = Number(value);
+    if (NUMERIC_FLAGS.has(k)) out[k] = numericFlag(value);
     else if (BOOLEAN_FLAGS.has(k)) out[k] = value === true || value === 'true';
     else if (k === 'train_subjects' || k === 'test_subjects') out[k] = String(value).split(',').filter(Boolean);
     else out[k] = value;
@@ -90,15 +93,20 @@ async function watchCapture(args, flags) {
   const tty = process.stdout.isTTY && flags.json !== true;
   while (!stop) {
     const res = await runTool('ruview_esp32_capture', window, { source: 'cli' });
+    const present = new Set((res.nodes || []).map(n => `${n.source}:${n.nodeId}`));
+    for (const [key, values] of history) {
+      if (!present.has(key)) history.set(key, [...values, null].slice(-30));
+    }
     for (const n of res.nodes || []) {
       const key = `${n.source}:${n.nodeId}`;
       history.set(key, [...(history.get(key) || []), n.csiRateHz].slice(-30));
     }
-    if (!tty) { console.log(JSON.stringify(res)); continue; }
+    const terminalError = ['port_in_use', 'invalid_port', 'invalid_bind', 'invalid_arguments'].includes(res.reason);
+    if (!tty) { console.log(JSON.stringify(res)); if (terminalError) return 1; continue; }
     process.stdout.write('\x1b[2J\x1b[H');
     console.log(renderResult('ruview_esp32_capture', res, { color: colorEnabled(), history }));
     console.log(`\n${new Date().toLocaleTimeString()} · ${window.seconds}s windows · Ctrl+C to stop`);
-    if (res.reason === 'port_in_use' || res.reason === 'invalid_port' || res.reason === 'invalid_bind') return 1;
+    if (terminalError) return 1;
   }
   return 0;
 }
@@ -170,7 +178,7 @@ Operator tools:
 
 Firmware (ADR-370, cross-platform esptool):
   ports                                                  list serial ports (pyserial)
-  flash-plan --port <p> --bundle <dir> [--variant s3-8mb|s3-4mb|c6]   verify + print the plan
+  flash-plan --port <p> --bundle <dir> [--variant s3-8mb|s3-4mb|c6|c5]   verify + print the plan
   flash --port <p> --bundle <dir> [--variant ...] [--baud 460800] --confirm
         [--boot-log-seconds 15] [--allow-unverified]     write flash, then capture boot evidence
 

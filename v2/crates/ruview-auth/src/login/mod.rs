@@ -40,6 +40,7 @@ pub mod callback;
 pub use crate::pkce;
 pub mod client;
 pub mod flow;
+pub mod lock;
 pub mod store;
 
 pub use client::{OAuthError, TokenResponse, CLIENT_ID, CLIENT_ID_ENV, OOB_REDIRECT_URI};

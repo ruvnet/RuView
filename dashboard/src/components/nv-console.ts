@@ -66,7 +66,7 @@ export class NvConsole extends LitElement {
       border-left: 2px solid transparent;
     }
     .line:hover { background: var(--bg-1); }
-    .ts { color: var(--ink-4); font-size: 10.5px; padding-top: 1px; }
+    .ts { color: var(--ink-3); font-size: 10.5px; padding-top: 1px; }
     .lvl {
       font-size: 10px; font-weight: 600;
       text-transform: uppercase; letter-spacing: 0.04em; padding-top: 1px;

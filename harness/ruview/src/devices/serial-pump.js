@@ -72,5 +72,8 @@ export async function readSerial(opts, deps) {
   for (const line of out.split(/\r?\n/)) if (/^HEX [0-9a-f]*$/.test(line)) chunks.push(Buffer.from(line.slice(4), 'hex'));
   const bytes = Buffer.concat(chunks);
   if (!r.ok && !bytes.length) return { ok: false, reason: 'capture_failed', detail: (r.stderr || r.error || '').slice(-400), bytes };
-  return { ok: true, bytes, seconds, ...(out.includes('DTR_UNSUPPORTED') ? { warnings: ['port does not support DTR control; an RPLIDAR A1 motor may not spin'] } : {}) };
+  const warnings = [];
+  if (out.includes('DTR_UNSUPPORTED')) warnings.push('port does not support DTR control; an RPLIDAR A1 motor may not spin');
+  if (!r.ok) warnings.push('serial capture process failed; partial bytes retained');
+  return { ok: true, bytes, seconds, ...(!r.ok ? { captureIncomplete: true } : {}), ...(warnings.length ? { warnings } : {}) };
 }

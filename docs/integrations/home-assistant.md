@@ -153,13 +153,10 @@ Per ADR-115 §3.11.1, the Matter Bridge exposes a subset on standard clusters so
 | `--mqtt-rate-pose <HZ>` | 1.0 | Unused while no pose entity is announced |
 | `--privacy-mode` | off | Strip HR/BR/pose from MQTT, Matter, REST, WebSocket and recordings |
 | `--data-dir <DIR>` | `data` | Holds `mqtt_client_id` (and other server state) |
-| `--matter` | off | Enable the HA-FABRIC Matter Bridge |
-| `--matter-setup-file <PATH>` | — | Where to write the QR + manual code |
-| `--matter-reset` | off | Wipe fabric credentials and re-commission |
-| `--matter-vendor-id <VID>` | `0xFFF1` (dev) | CSA-assigned vendor ID |
-| `--matter-product-id <PID>` | `0x8001` | Product ID |
 
 The `--semantic`, `--semantic-thresholds-file`, `--semantic-zones-file` and `--no-semantic` flags from ADR-115 §3.12.5 are **not accepted by `sensing-server` yet**. The primitives always run with the defaults in `PrimitiveConfig`, and no zone map is loaded.
+
+The same goes for the Matter Bridge flags (`--matter`, `--matter-setup-file`, `--matter-reset`, `--matter-vendor-id`, `--matter-product-id`). They're defined in the library's `cli::Args` but the binary doesn't parse them, so the Matter Bridge can't be started yet.
 
 ### Zone tags and threshold overrides (not implemented)
 
@@ -395,6 +392,8 @@ Per [ADR-115 §3.9](../adr/ADR-115-home-assistant-integration.md#39-tls--auth), 
 - Move the broker to `localhost` (e.g. run Mosquitto inside the same host as `sensing-server`).
 
 ### Matter pairing fails
+
+The Matter Bridge can't be started from `sensing-server` yet (see the note under the CLI flags), so this is for when it is.
 
 1. Check the setup code in your `--matter-setup-file` log (defaults to printing on startup).
 2. Make sure the host running `sensing-server` is on the same WiFi subnet as the controller.

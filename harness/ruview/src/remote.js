@@ -9,7 +9,7 @@
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir, userInfo } from 'node:os';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 const NAME_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
@@ -36,16 +36,41 @@ export function loadHosts(path = hostsFile()) {
   return { path, hosts: (data.hosts || []).map(validateHost) };
 }
 
+// A fixed program receives the path as JSON on stdin, never PowerShell source.
+// Construct a fresh protected DACL: icacls /inheritance:r /grant:r leaves other
+// explicit grants intact (including grants on hosted Windows temporary files).
+const OWNER_ONLY_ACL = [
+  "$ErrorActionPreference = 'Stop'",
+  '[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)',
+  '$request = [Console]::In.ReadToEnd() | ConvertFrom-Json',
+  '$sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User',
+  '$acl = [System.Security.AccessControl.FileSecurity]::new()',
+  '$acl.SetOwner($sid)',
+  '$acl.SetAccessRuleProtection($true, $false)',
+  '$rule = [System.Security.AccessControl.FileSystemAccessRule]::new($sid, [System.Security.AccessControl.FileSystemRights]::FullControl, [System.Security.AccessControl.AccessControlType]::Allow)',
+  '$acl.AddAccessRule($rule)',
+  '[System.IO.File]::SetAccessControl([string]$request.path, $acl)',
+  '$applied = Get-Acl -LiteralPath $request.path',
+  '$rules = @($applied.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))',
+  'if (-not $applied.AreAccessRulesProtected -or $rules.Count -ne 1 -or $rules[0].IdentityReference.Value -ne $sid.Value -or $rules[0].AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow -or $rules[0].FileSystemRights -ne [System.Security.AccessControl.FileSystemRights]::FullControl) { throw "owner-only ACL verification failed" }',
+].join('\n');
+
 /**
  * Windows ignores POSIX modes, so 0o600 alone leaves the file readable through
  * inherited ACLs. Replace them with a single full-control grant for the owner.
  * Fails closed: an unrestricted hosts file is an error, not a warning.
  */
-export function restrictToOwner(path, { platform = process.platform, exec = spawnSync, user = () => userInfo().username } = {}) {
+export function restrictToOwner(path, { platform = process.platform, exec = spawnSync, env = process.env } = {}) {
   if (platform !== 'win32') return 'posix-0600';
-  const r = exec('icacls', [path, '/inheritance:r', '/grant:r', `${user()}:F`], { encoding: 'utf8', windowsHide: true });
+  // pwsh -> node -> powershell.exe otherwise inherits PS7's incompatible
+  // module paths. Let Windows PowerShell construct its own defaults without
+  // changing the caller's environment or execution policy (about_PSModulePath).
+  const childEnv = Object.fromEntries(Object.entries(env).filter(([key]) => key.toUpperCase() !== 'PSMODULEPATH'));
+  const r = exec('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', OWNER_ONLY_ACL], {
+    input: JSON.stringify({ path }), env: childEnv, encoding: 'utf8', windowsHide: true, timeout: 10_000, maxBuffer: 16_384,
+  });
   if (r.error || r.status !== 0) {
-    throw new Error(`could not restrict ${path} to the current user (icacls exit ${r.status ?? r.error?.code}); the hosts file was not made private`);
+    throw new Error(`could not restrict ${path} to the current user (ACL helper exit ${r.status ?? r.error?.code}); the hosts file was not made private`);
   }
   return 'windows-acl-owner-only';
 }

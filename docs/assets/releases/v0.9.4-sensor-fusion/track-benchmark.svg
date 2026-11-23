@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="320" viewBox="0 0 880 320" role="img" aria-labelledby="title desc"><title id="title">Track-aware benchmark window classes</title><desc id="desc">A timeline of reference windows for one room. Each window is classed clear, ambiguous or unusable. Windows where two people stand closer than the reference can separate, or where someone has just entered, are ambiguous: they are reported with their share and never forced into a count. A cursor sweeps across the timeline. Conceptual animation; not a measurement.</desc><defs><linearGradient id="wash" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0b303a"/><stop offset=".55" stop-color="#06171e"/><stop offset="1" stop-color="#030c13"/></linearGradient></defs><style>
+text{font-family:"Avenir Next","Segoe UI",Helvetica,Arial,sans-serif;fill:#d9f3f2}
+.mono{font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace;letter-spacing:1.2px}
+.dim{fill:#7fa6ad}
+.sweep{animation:sweep 9s linear infinite}
+.pulse{animation:pulse 3s ease-in-out infinite}
+.walk1{animation:walk1 9s ease-in-out infinite}
+.walk2{animation:walk2 9s ease-in-out infinite}
+@keyframes sweep{from{transform:translateX(0)}to{transform:translateX(784px)}}
+@keyframes pulse{0%,100%{opacity:.55}50%{opacity:1}}
+@keyframes walk1{0%{transform:translate(0,0)}45%{transform:translate(300px,0)}60%{transform:translate(360px,0)}100%{transform:translate(700px,0)}}
+@keyframes walk2{0%,25%{transform:translate(0,0);opacity:0}30%{opacity:1}45%{transform:translate(-250px,0)}60%{transform:translate(-300px,0)}100%{transform:translate(-520px,0);opacity:1}}
+@media (prefers-reduced-motion:reduce){.sweep,.pulse,.walk1,.walk2{animation:none}}
+</style>
+<rect width="880" height="320" rx="18" fill="url(#wash)"/>
+<text x="32" y="44" font-size="20" font-weight="600">Track-aware benchmark: ambiguity is a result</text>
+<text x="32" y="66" font-size="12.5" class="dim">per-person labels · held-out rooms · windows the reference cannot resolve are reported, never forced</text>
+
+<text x="32" y="104" class="mono dim" font-size="10.5">reference tracks</text>
+<line x1="48" y1="128" x2="832" y2="128" stroke="#12414c" stroke-width="1"/>
+<circle cx="70" cy="128" r="7" fill="#91f6df" class="walk1"/>
+<circle cx="800" cy="128" r="7" fill="#26bad7" class="walk2"/>
+
+<text x="32" y="172" class="mono dim" font-size="10.5">window class</text>
+<g>
+<rect x="48" y="184" width="196" height="30" fill="#1f8f7a"/>
+<rect x="244" y="184" width="49" height="30" fill="#c99a2e" class="pulse"/>
+<rect x="293" y="184" width="98" height="30" fill="#1f8f7a"/>
+<rect x="391" y="184" width="98" height="30" fill="#c99a2e" class="pulse"/>
+<rect x="489" y="184" width="147" height="30" fill="#1f8f7a"/>
+<rect x="636" y="184" width="49" height="30" fill="#4a5d63"/>
+<rect x="685" y="184" width="147" height="30" fill="#1f8f7a"/>
+</g>
+<g fill="none" stroke="#030c13" stroke-width="2">
+<path d="M97 184v30M146 184v30M195 184v30M244 184v30M293 184v30M342 184v30M391 184v30M440 184v30M489 184v30M538 184v30M587 184v30M636 184v30M685 184v30M734 184v30M783 184v30"/>
+</g>
+<text x="268" y="232" class="mono" font-size="9.5" text-anchor="middle" style="fill:#f4d58a">track_change</text>
+<text x="440" y="232" class="mono" font-size="9.5" text-anchor="middle" style="fill:#f4d58a">tracks_too_close</text>
+<text x="660" y="232" class="mono dim" font-size="9.5" text-anchor="middle">stale</text>
+
+<g class="sweep"><line x1="48" y1="112" x2="48" y2="220" stroke="#d9f3f2" stroke-width="1.5" stroke-opacity=".8"/></g>
+
+<g font-size="12">
+<rect x="48" y="262" width="14" height="14" rx="3" fill="#1f8f7a"/><text x="70" y="274">clear: scored (count, detection, identity switches, position)</text>
+<rect x="470" y="262" width="14" height="14" rx="3" fill="#c99a2e"/><text x="492" y="274">ambiguous: share and reasons reported</text>
+<rect x="740" y="262" width="14" height="14" rx="3" fill="#4a5d63"/><text x="762" y="274">unusable</text>
+</g>
+<text x="32" y="302" class="mono dim" font-size="10.5">Illustrative timeline. No hardware run has been done under this protocol.</text>
+</svg>

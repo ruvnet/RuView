@@ -154,7 +154,7 @@ test('RPLIDAR scan stream parses with resync and summarizes coverage', async () 
   const r = await readRplidar({ port: '/dev/ttyUSB1', seconds: 2 }, deps);
   assert.equal(r.ok, true);
   assert.equal(r.angularCoverage, 1);
-  assert.deepEqual(r.rangeMm, { min: 1000, median: 1180, max: 1350 });
+  assert.deepEqual(r.rangeMm, { min: 1000, median: 1175, max: 1350 });
   const pumpArgs = deps.calls[0].args;
   assert.deepEqual(pumpArgs.slice(-3), ['a520', 'a525', 'low'], 'SCAN on start, STOP on exit, A1 motor via DTR');
 });
@@ -181,7 +181,7 @@ test('iPhone LiDAR relay client returns statistics only and keeps the token out 
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.equal(r.frames, 1);
   assert.equal(r.rejectedFrames, 1);
-  assert.equal(r.last.medianDepthM, 1.504);
+  assert.equal(r.last.medianDepthM, 1.5035);
   assert.match(opened, /token=tok123/);
   assert.equal(r.relay, 'ws://10.0.0.5:8787/ws/lidar', 'token never echoed');
   assert.ok(!JSON.stringify(r).includes('tok123'));

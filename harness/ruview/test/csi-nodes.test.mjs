@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import dgram from 'node:dgram';
-import { binAmplitudes, captureEsp32, crc32, parsePacket, RAC1_MAGIC, RHB1_MAGIC, SpectrumCollector } from '../src/devices/esp32.js';
+import { binAmplitudes, captureEsp32, crc32, parsePacket, RAC1_MAGIC, RHB1_MAGIC, SpectrumCollector, NodeStats, SEQ_WINDOW } from '../src/devices/esp32.js';
 import { classifyPort } from '../src/devices/registry.js';
 import { kernelAnalyzer } from '../src/kernel.js';
 import { runTool, TOOLS } from '../src/tools.js';
@@ -242,4 +242,148 @@ test('spectrum draws multi-antenna ESP32 nodes from their first chain (ADR-018 a
   const [s] = res.spectrum;
   assert.deepEqual([s.nodeId, s.shape, s.bins], [9, '2x8', 8]);
   assert.ok(s.frames.every((f) => f.every((v) => v === 3)));
+});
+
+
+test('only missing CSI sequence numbers recover counted packet loss', async () => {
+  for (const [seqs, gaps] of [
+    [[100, 103, 101, 101], 1], // duplicated recovery must not fill missing 102
+    [[100, 102, 100], 1], // an already-received packet cannot fill missing 101
+    [[100, 102, 99], 1], // a pre-capture packet cannot fill missing 101
+    [[100, 103, 102, 101], 0], // distinct actual gap recoveries still work
+  ]) {
+    const result = await capture({ max_packets: seqs.length }, seqs.map((seq) => rac1({ seq })));
+    assert.equal(result.nodes[0].csiLossFraction, Number((gaps / (seqs.length + gaps)).toFixed(4)),
+      `loss for ${seqs.join(',')}`);
+  }
+});
+
+
+test('CSI recovery bookkeeping stays within the reorder window', () => {
+  const stats = new NodeStats();
+  for (let seq = 0; seq <= SEQ_WINDOW * 10; seq += 64) {
+    stats.add(parsePacket(rac1({ seq })), '127.0.0.1');
+    const node = stats.nodes.get('realtek:3');
+    assert.ok(node.missingSeq.size < SEQ_WINDOW);
+  }
+  const node = stats.nodes.get('realtek:3');
+  const historicalGaps = node.seqGaps;
+  stats.add(parsePacket(rac1({ seq: 1 })), '127.0.0.1');
+  stats.add(parsePacket(rac1({ seq: 2 })), '127.0.0.1');
+  assert.equal(node.missingSeq.size, 0, 'a confirmed counter reset clears old recovery identities');
+  assert.equal(node.seqGaps, historicalGaps, 'historical loss remains counted');
+});
+test('packet-limited captures report the observed interval and rate', async () => {
+  const r = await capture({ seconds: 30, max_packets: 2 }, [esp32Csi({ seq: 1 }), esp32Csi({ seq: 2 })]);
+  assert.equal(r.truncated, true);
+  assert.equal(r.seconds, 30, 'configured duration remains available');
+  assert.ok(r.elapsedSeconds > 0 && r.elapsedSeconds < 5, JSON.stringify(r));
+  assert.equal(r.nodes[0].csiRateHz, Number((2 / r.elapsedSeconds).toFixed(2)));
+ });
+test('synthetic Realtek frames retain provenance in kernel analysis', async () => {
+  const r = await capture({ analyze: true, max_packets: 3 }, [rac1({ seq: 1, synthetic: 1 }), rac1({ seq: 2 }), rac1({ seq: 3 })], {
+    analyze: async () => ({ ok: true, estimate: 1 }),
+  });
+  assert.equal(r.analysis.ok, true);
+  assert.equal(r.analysis.input.synthetic, true);
+  assert.match(r.analysis.note, /synthetic/i);
+});
+
+test('unmarked Realtek frames keep ordinary analysis provenance', async () => {
+  const r = await capture({ analyze: true, max_packets: 2 }, [rac1({ seq: 1 }), rac1({ seq: 2 })], { analyze: async () => ({ ok: true }) });
+  assert.equal(r.analysis.input.synthetic, false);
+  assert.doesNotMatch(r.analysis.note, /synthetic/i);
+});
+
+test('ordinary CSI shape summaries retain synthetic provenance across the window', async () => {
+  const result = await capture({ max_packets: 2 }, [rac1({ seq: 1, synthetic: 1 }), rac1({ seq: 2 })]);
+  assert.equal(result.nodes[0].csi.frames, 2);
+  assert.equal(result.nodes[0].csi.synthetic, true);
+});
+
+test('ordinary unmarked CSI shape summaries remain unmarked', async () => {
+  const result = await capture({ max_packets: 2 }, [rac1({ seq: 1 }), rac1({ seq: 2 })]);
+  assert.equal(result.nodes[0].csi.synthetic, false);
+});
+
+test('kernel analysis selects the busiest stream after both buffers reach their cap', async () => {
+  const datagrams = [];
+  for (let seq = 0; seq < 70; seq++) datagrams.push(esp32Csi({ node: 1, seq }));
+  for (let seq = 0; seq < 100; seq++) datagrams.push(esp32Csi({ node: 2, seq }));
+  const result = await capture({ analyze: true, analyze_max_frames: 64, max_packets: datagrams.length }, datagrams, { analyze: async () => ({ ok: true }) });
+  assert.equal(result.analysis.input.nodeId, 2);
+  assert.equal(result.analysis.input.frames, 64);
+  assert.equal(result.analysis.input.droppedOverCap, 36);
+});
+
+test('requested node selection remains authoritative after analysis buffers fill', async () => {
+  const datagrams = [];
+  for (let seq = 0; seq < 70; seq++) datagrams.push(esp32Csi({ node: 1, seq }));
+  for (let seq = 0; seq < 100; seq++) datagrams.push(esp32Csi({ node: 2, seq }));
+  const result = await capture({ analyze: true, node_id: 1, analyze_max_frames: 64, max_packets: datagrams.length }, datagrams, { analyze: async () => ({ ok: true }) });
+  assert.equal(result.analysis.input.nodeId, 1);
+  assert.equal(result.analysis.input.frames, 64);
+  assert.equal(result.analysis.input.droppedOverCap, 6);
+});
+
+function fusedVitals() {
+  // Exact packed edge_fused_vitals_pkt_t offsets from edge_processing.h.
+  const packet = Buffer.alloc(48);
+  packet.writeUInt32LE(0xC5110004, 0); packet[4] = 7; packet[5] = 9;
+  packet.writeUInt16LE(1500, 6); packet.writeUInt32LE(720000, 8);
+  packet.writeInt8(-45, 12); packet[13] = 1; packet[14] = 2; packet[15] = 85;
+  packet.writeFloatLE(0.25, 16); packet.writeFloatLE(0.75, 20); packet.writeUInt32LE(12345, 24);
+  packet.writeFloatLE(73, 28); packet.writeFloatLE(16, 32); packet.writeFloatLE(120, 36);
+  packet[40] = 2; packet[41] = 90;
+  return packet;
+}
+
+test('firmware fused vitals update public node diagnostics with wire units', async () => {
+  const result = await capture({ max_packets: 1 }, [fusedVitals()]);
+  assert.equal(result.ok, true);
+  const node = result.nodes[0];
+  assert.equal(node.packets['fused-vitals'], 1);
+  assert.equal(node.rssiMean, -45);
+  assert.equal(node.lastVitals.heartBpm, 72);
+  assert.equal(node.lastVitals.breathingBpm, 15);
+  assert.equal(node.lastVitals.uptimeMs, 12345);
+  assert.equal(node.lastVitals.mmwavePresent, true);
+  assert.equal(node.lastVitals.mmwaveHeartBpm, 73);
+  assert.equal(node.lastVitals.mmwaveBreathingBpm, 16);
+  assert.equal(node.lastVitals.mmwaveDistanceCm, 120);
+  assert.equal(node.lastVitals.mmwaveTargets, 2);
+  assert.equal(node.lastVitals.mmwaveConfidence, 90);
+  assert.equal(node.lastVitals.fusionConfidence, 85);
+});
+
+test('truncated fused-vitals packets are not accepted as decoded node reports', () => {
+  for (const length of [4, 28, 32, 47]) {
+    assert.equal(parsePacket(fusedVitals().subarray(0, length)).kind, 'malformed');
+  }
+});
+
+function auxiliaryPackets() {
+  const features = Buffer.alloc(48); features.writeUInt32LE(0xC5110003, 0); features[4] = 7;
+  const compressed = Buffer.alloc(12); compressed.writeUInt32LE(0xC5110005, 0); compressed[4] = 7;
+  compressed.writeUInt16LE(4, 6); compressed.writeUInt16LE(2, 8); compressed[11] = 4; // identical prior frame: RLE [0, 4]
+  const state = Buffer.alloc(60); state.writeUInt32LE(0xC5110006, 0); state[4] = 7; state.writeUInt32LE(crc32(state, 56), 56);
+  const wasm = Buffer.alloc(13); wasm.writeUInt32LE(0xC5110007, 0); wasm[4] = 7; wasm.writeUInt16LE(1, 6); wasm[8] = 1; wasm.writeFloatLE(50, 9);
+  return [features, compressed, state, wasm];
+}
+
+test('auxiliary node reports require complete wire payloads and feature-state CRC', async () => {
+  const valid = auxiliaryPackets();
+  const prefixes = valid.map((packet) => packet.subarray(0, 4));
+  const corruptState = Buffer.from(valid[2]); corruptState[20] ^= 1;
+  const shortCompressed = valid[1].subarray(0, 11);
+  const shortWasm = valid[3].subarray(0, 12);
+  const shortFeatures = valid[0].subarray(0, 47);
+  const invalid = [...prefixes, corruptState, shortCompressed, shortWasm, shortFeatures];
+  const result = await capture({ max_packets: invalid.length + valid.length }, [...invalid, ...valid]);
+  assert.equal(result.ok, true);
+  assert.equal(result.packets, 12);
+  assert.equal(result.malformedPackets, 8);
+  assert.equal(result.decodedPackets, 4);
+  assert.equal(result.nodes.length, 1, 'invalid prefixes must not create phantom node -1');
+  assert.deepEqual(result.nodes[0].packets, { features: 1, compressed: 1, 'feature-state': 1, 'wasm-output': 1 });
 });

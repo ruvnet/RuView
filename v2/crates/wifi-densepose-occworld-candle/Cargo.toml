@@ -20,6 +20,7 @@ safetensors = "0.4"
 
 [dev-dependencies]
 approx = "0.5"
+tempfile = "3.10"
 
 [features]
 default = []

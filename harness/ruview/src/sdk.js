@@ -31,22 +31,22 @@ export class RuViewError extends Error {
 }
 
 export function createRuView({ strict = false, deps = OPERATOR_DEPS } = {}) {
-  const call = async (tool, args = {}) => {
-    const result = await runTool(tool, args, { source: 'sdk' });
+  const checked = (tool, result) => {
     if (strict && result?.ok === false && !result.dryRun) throw new RuViewError(tool, result);
     return result;
   };
+  const call = async (tool, args = {}) => checked(tool, await runTool(tool, args, { source: 'sdk' }));
   return Object.freeze({
     /** Raw access to any registry tool by canonical name. */
     call,
     tools: () => listTools(),
 
     /** Structured diagnostics; options: { groups, port, probe_port, sensing_url }. */
-    doctor: (options = {}) => runDoctor(options, deps),
+    doctor: async (options = {}) => checked('ruview_doctor', await runDoctor(options, deps)),
 
     onboard: (path) => call('ruview_onboard', path ? { path } : {}),
     guidance: (args = {}) => call('ruview_guidance', args),
-    memorySearch: (query, limit) => call('ruview_memory_search', limit ? { query, limit } : { query }),
+    memorySearch: (query, limit) => call('ruview_memory_search', limit !== undefined ? { query, limit } : { query }),
     claimCheck: (text) => call('ruview_claim_check', { text }),
     verify: (repo) => call('ruview_verify', repo ? { repo } : {}),
     spaces: (args = {}) => call('ruview_spaces_list', args),

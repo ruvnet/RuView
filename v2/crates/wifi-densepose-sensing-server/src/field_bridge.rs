@@ -24,6 +24,9 @@ pub const CALIBRATION_MODEL_RECEIPT_SCHEMA: &str =
 pub const CALIBRATED_PRESENCE_EVIDENCE_SCHEMA: &str =
     "ruview.calibration.calibrated-presence-evidence.v2";
 
+/// Schema for bounded explanations, independent from calibration authority.
+pub const DETECTOR_DIAGNOSTICS_SCHEMA: &str = "ruview.calibration.detector-diagnostics.v1";
+
 /// Length-only canonicalizer for calibration frames (issue #1170 pattern,
 /// shared with `multistatic_bridge`). Raw ESP32 amplitudes arrive at the
 /// hardware's native width (HT20 ≈ 64, HT40 ≈ 128/192); the FieldModel is
@@ -90,7 +93,7 @@ fn mean_frame(frames: &[Vec<f64>]) -> Option<Vec<f64>> {
     Some(mean)
 }
 
-fn perturbation_occupancy(field: &FieldModel, frames: &[Vec<f64>]) -> Option<usize> {
+fn perturbation_occupancy_with_diagnostics(field: &FieldModel, frames: &[Vec<f64>]) -> Option<(usize, OccupancyDiagnostics)> {
     let adaptive_threshold = field.empty_room_residual_energy_threshold();
     let frame = match adaptive_threshold {
         Some(_) => mean_frame(frames)?,
@@ -122,7 +125,19 @@ fn perturbation_occupancy(field: &FieldModel, frames: &[Vec<f64>]) -> Option<usi
             }
         }
     };
-    Some(count)
+    let threshold = adaptive_threshold.unwrap_or(1.0).max(1.0);
+    let energy = perturbation.total_energy;
+    Some((count, OccupancyDiagnostics {
+        residual_energy: energy.is_finite().then_some(energy),
+        decision_threshold: Some(threshold),
+        signed_margin: (energy - threshold).is_finite().then_some(energy - threshold),
+        window_frames: frames.len(),
+        fallback_reason: Some("eigenvalue_estimator_unavailable"),
+    }))
+}
+
+fn perturbation_occupancy(field: &FieldModel, frames: &[Vec<f64>]) -> Option<usize> {
+    perturbation_occupancy_with_diagnostics(field, frames).map(|(count, _)| count)
 }
 
 /// Provenance for a count produced by the calibrated field model. Callers
@@ -143,10 +158,21 @@ impl CalibratedOccupancyMethod {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Explanation of the very same scoring operation; it grants no authority.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+pub struct OccupancyDiagnostics {
+    pub residual_energy: Option<f64>,
+    pub decision_threshold: Option<f64>,
+    pub signed_margin: Option<f64>,
+    pub window_frames: usize,
+    pub fallback_reason: Option<&'static str>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CalibratedOccupancy {
     pub person_count: usize,
     pub method: CalibratedOccupancyMethod,
+    pub diagnostics: OccupancyDiagnostics,
 }
 
 /// Create a FieldModelConfig for single-link mode (one ESP32 node = one link).
@@ -284,11 +310,15 @@ pub fn calibrated_occupancy(
         return Some(CalibratedOccupancy {
             person_count: person_count.min(MAX_SINGLE_LINK_OCCUPANCY),
             method: CalibratedOccupancyMethod::Eigenvalue,
+            diagnostics: OccupancyDiagnostics {
+                residual_energy: None, decision_threshold: None, signed_margin: None,
+                window_frames: frames.len(), fallback_reason: None,
+            },
         });
     }
+    let (person_count, diagnostics) = perturbation_occupancy_with_diagnostics(field, &frames)?;
     Some(CalibratedOccupancy {
-        person_count: perturbation_occupancy(field, &frames)?,
-        method: CalibratedOccupancyMethod::PerturbationEnergy,
+        person_count, method: CalibratedOccupancyMethod::PerturbationEnergy, diagnostics,
     })
 }
 
@@ -797,6 +827,27 @@ mod tests {
             calibrated_occupancy(&field, &VecDeque::new(), 1_500_000),
             None
         );
+    }
+
+    #[test]
+    fn diagnostic_margin_explains_the_same_perturbation_decision() {
+        let field = fresh_test_model();
+        let baseline = field.modes().unwrap().baseline[0].clone();
+        for offset in [0.0, 0.3, 5.0, 20.0] {
+            let history: VecDeque<Vec<f64>> = (0..50)
+                .map(|_| baseline.iter().map(|value| value + offset).collect()).collect();
+            let result = calibrated_occupancy(&field, &history, 1_500_000).unwrap();
+            assert_eq!(result.person_count, occupancy_or_fallback(&field, &history, 1_500_000, 0.0, 0));
+            if result.method == CalibratedOccupancyMethod::PerturbationEnergy {
+                let energy = result.diagnostics.residual_energy.unwrap();
+                let threshold = result.diagnostics.decision_threshold.unwrap();
+                assert_eq!(result.diagnostics.signed_margin, Some(energy - threshold));
+                assert_eq!(result.person_count > 0, energy > threshold);
+                assert_eq!(result.diagnostics.window_frames, 50);
+            } else {
+                assert_eq!(result.diagnostics.signed_margin, None);
+            }
+        }
     }
 
     #[test]

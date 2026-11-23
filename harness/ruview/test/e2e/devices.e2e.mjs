@@ -75,7 +75,9 @@ test('RPLIDAR over pyserial: SCAN/STOP handshake, full revolutions and coverage'
     assert.ok(r.json.revolutions >= 10, `revolutions=${r.json.revolutions}`);
     assert.equal(r.json.angularCoverage, 1);
     assert.equal(r.json.resyncBytes, 0);
-    assert.deepEqual(r.json.rangeMm, { min: 1200, median: 1500, max: 1500 });
+    // Each complete synthetic sweep has 18 points at each distance; the two
+    // central distances are 1200 and 1500 mm, so their median is 1350 mm.
+    assert.deepEqual(r.json.rangeMm, { min: 1200, median: 1350, max: 1500 });
   });
 });
 
@@ -125,7 +127,8 @@ test('iPhone LiDAR through the real relay: frames accepted, token enforced and n
     phone.close();
     assert.equal(ok.code, 0, JSON.stringify(ok.json));
     assert.ok(ok.json.frames >= 10, `frames=${ok.json.frames}`);
-    assert.equal(ok.json.last.medianDepthM, 1.824);
+    // For these 192 pixels, sorted positions 96/97 are 1823/1824 mm.
+    assert.equal(ok.json.last.medianDepthM, 1.8235);
     assert.ok(!JSON.stringify(ok.json).includes(token), 'token never echoed');
     assert.equal(bad.json.reason, 'connect_failed');
   } finally {

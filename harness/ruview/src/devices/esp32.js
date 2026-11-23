@@ -141,8 +141,8 @@ export function parsePacket(buf, opts = {}) {
       ...(chain0 ? { chain0Amplitudes: chain0 } : {}),
     };
   }
-  if (kind === 'vitals') {
-    if (buf.length < 32) return { kind: 'malformed', reason: 'vitals length' };
+  if (kind === 'vitals' || kind === 'fused-vitals') {
+    if (buf.length < (kind === 'fused-vitals' ? 48 : 32)) return { kind: 'malformed', reason: `${kind} length` };
     const flags = buf.readUInt8(5);
     return {
       kind, source: 'esp32', nodeId: buf.readUInt8(4),
@@ -150,6 +150,11 @@ export function parsePacket(buf, opts = {}) {
       breathingBpm: buf.readUInt16LE(6) / 100, heartBpm: buf.readUInt32LE(8) / 10000,
       rssi: buf.readInt8(12), persons: buf.readUInt8(13),
       motionEnergy: buf.readFloatLE(16), presenceScore: buf.readFloatLE(20), uptimeMs: buf.readUInt32LE(24),
+      ...(kind === 'fused-vitals' ? {
+        mmwavePresent: Boolean(flags & 8), mmwaveType: buf.readUInt8(14), fusionConfidence: buf.readUInt8(15),
+        mmwaveHeartBpm: buf.readFloatLE(28), mmwaveBreathingBpm: buf.readFloatLE(32), mmwaveDistanceCm: buf.readFloatLE(36),
+        mmwaveTargets: buf.readUInt8(40), mmwaveConfidence: buf.readUInt8(41),
+      } : {}),
     };
   }
   if (kind === 'sync') {
@@ -158,6 +163,22 @@ export function parsePacket(buf, opts = {}) {
       kind, source: 'esp32', nodeId: buf.readUInt8(4), protoVer: buf.readUInt8(5),
       leader: Boolean(buf.readUInt8(6) & 1), highWaterSeq: buf.readUInt32LE(24),
     };
+  }
+  if (kind === 'features' && buf.length < 48) return { kind: 'malformed', reason: 'features length' };
+  if (kind === 'compressed') {
+    if (buf.length < 10) return { kind: 'malformed', reason: 'compressed header' };
+    const originalLength = buf.readUInt16LE(6);
+    const compressedLength = buf.readUInt16LE(8);
+    if (!originalLength || !compressedLength || buf.length !== 10 + compressedLength) return { kind: 'malformed', reason: 'compressed payload' };
+  }
+  if (kind === 'feature-state') {
+    if (buf.length !== 60) return { kind: 'malformed', reason: 'feature-state length' };
+    if (crc32(buf, 56) !== buf.readUInt32LE(56)) return { kind: 'malformed', reason: 'feature-state crc' };
+  }
+  if (kind === 'wasm-output') {
+    if (buf.length < 8) return { kind: 'malformed', reason: 'wasm-output header' };
+    const events = buf.readUInt16LE(6);
+    if (events > 16 || buf.length !== 8 + 5 * events) return { kind: 'malformed', reason: 'wasm-output payload' };
   }
   return { kind, source: 'esp32', nodeId: buf.length > 4 ? buf.readUInt8(4) : null, bytes: buf.length };
 }
@@ -178,15 +199,22 @@ function trackSequence(n, seq) {
   if (n.lastSeq === null) { n.lastSeq = seq; return; }
   const d = seq - n.lastSeq;
   if (d >= 1 && d <= SEQ_WINDOW) {
+    // Only distinct packets corresponding to counted holes can recover loss.
+    // Retain at most the existing reorder window; older gaps remain counted.
+    for (const missing of n.missingSeq) {
+      if (seq - missing >= SEQ_WINDOW) n.missingSeq.delete(missing);
+    }
+    for (let missing = n.lastSeq + 1; missing < seq; missing++) n.missingSeq.add(missing);
     n.seqGaps += d - 1;
     n.lastSeq = seq;
     n.pendingSeq = null;
   } else if (d <= 0 && d > -SEQ_WINDOW) {
     n.reordered += 1; // late or duplicate; a late packet fills one counted gap
-    if (d < 0 && n.seqGaps > 0) n.seqGaps -= 1;
+    if (d < 0 && n.missingSeq.delete(seq)) n.seqGaps -= 1;
   } else if (n.pendingSeq != null && seq - n.pendingSeq >= 1 && seq - n.pendingSeq <= SEQ_WINDOW) {
     n.strays -= 1; // the previous out-of-window frame started a new range
     n.resyncs += 1;
+    n.missingSeq.clear();
     n.lastSeq = seq;
     n.pendingSeq = null;
   } else {
@@ -226,7 +254,7 @@ export class NodeStats {
     const key = `${pkt.source}:${pkt.nodeId ?? -1}`;
     let n = this.nodes.get(key);
     if (!n) {
-      n = { source: pkt.source, nodeId: pkt.nodeId ?? -1, packets: {}, rssiSum: 0, rssiCount: 0, lastSeq: null, pendingSeq: null, seqGaps: 0, reordered: 0, strays: 0, resyncs: 0, shapes: new Map(), vitals: null };
+      n = { source: pkt.source, nodeId: pkt.nodeId ?? -1, packets: {}, rssiSum: 0, rssiCount: 0, lastSeq: null, pendingSeq: null, seqGaps: 0, missingSeq: new Set(), reordered: 0, strays: 0, resyncs: 0, shapes: new Map(), vitals: null };
       this.nodes.set(key, n);
     }
     n.packets[pkt.kind] = (n.packets[pkt.kind] || 0) + 1;
@@ -234,10 +262,10 @@ export class NodeStats {
       n.rssiSum += pkt.rssi; n.rssiCount += 1;
       trackSequence(n, pkt.seq);
       const shape = shapeKey(pkt);
-      const sh = n.shapes.get(shape) || { count: 0, ampSum: 0, last: null };
-      sh.count += 1; sh.ampSum += pkt.meanAmplitude; sh.last = pkt;
+      const sh = n.shapes.get(shape) || { count: 0, ampSum: 0, last: null, synthetic: false };
+      sh.count += 1; sh.ampSum += pkt.meanAmplitude; sh.last = pkt; sh.synthetic ||= Boolean(pkt.synthetic);
       n.shapes.set(shape, sh);
-    } else if (pkt.kind === 'vitals') {
+    } else if (pkt.kind === 'vitals' || pkt.kind === 'fused-vitals') {
       n.rssiSum += pkt.rssi; n.rssiCount += 1;
       const { kind, nodeId, source, ...rest } = pkt;
       n.vitals = rest;
@@ -255,7 +283,7 @@ export class NodeStats {
           const p = sh.last;
           return {
             shape, frames: sh.count, antennas: p.antennas, subcarriers: p.subcarriers,
-            ...(p.source === 'esp32' ? { freqMhz: p.freqMhz, ppdu: p.ppdu } : { channel: p.channel, protocol: p.protocol, bitsPerTone: p.bitsPerTone, synthetic: p.synthetic }),
+            ...(p.source === 'esp32' ? { freqMhz: p.freqMhz, ppdu: p.ppdu } : { channel: p.channel, protocol: p.protocol, bitsPerTone: p.bitsPerTone, synthetic: sh.synthetic }),
             bw40: p.bw40, meanAmplitude: Number((sh.ampSum / sh.count).toFixed(2)),
           };
         };
@@ -297,15 +325,16 @@ class FrameCollector {
     if (pkt.kind !== 'csi' || !pkt.amplitudes) return;
     const key = `${pkt.source}:${pkt.nodeId}|${shapeKey(pkt)}`;
     let c = this.byNode.get(key);
-    if (!c) { c = { source: pkt.source, nodeId: pkt.nodeId, subcarriers: pkt.subcarriers, frames: [], first: t, last: t, dropped: 0 }; this.byNode.set(key, c); }
+    if (!c) { c = { source: pkt.source, nodeId: pkt.nodeId, subcarriers: pkt.subcarriers, frames: [], first: t, last: t, dropped: 0, synthetic: false }; this.byNode.set(key, c); }
     if (c.frames.length >= this.max) { c.dropped += 1; return; }
+    c.synthetic ||= Boolean(pkt.synthetic);
     c.frames.push({ amplitudes: pkt.amplitudes, phases: pkt.phases });
     c.last = t;
   }
   /** The requested node's (or the busiest node's) dominant shape. */
   pick(nodeId) {
     const all = [...this.byNode.values()].filter((c) => nodeId === undefined || c.nodeId === nodeId);
-    return all.sort((a, b) => b.frames.length - a.frames.length)[0] || null;
+    return all.sort((a, b) => (b.frames.length + b.dropped) - (a.frames.length + a.dropped))[0] || null;
   }
 }
 
@@ -397,13 +426,15 @@ export function captureEsp32(args = {}, deps = {}) {
   return new Promise((resolve) => {
     const socket = createSocket(bind.includes(':') ? 'udp6' : 'udp4');
     let timer;
+    let startedAt = null;
     let done = false;
     const finish = async (extra = {}) => {
       if (done) return;
       done = true;
       clearTimeout(timer);
       try { socket.close(); } catch { /* already closed */ }
-      const summary = stats.summary(seconds);
+      const elapsedSeconds = startedAt === null ? 0 : Math.max((performance.now() - startedAt) / 1000, Number.EPSILON);
+      const summary = stats.summary(elapsedSeconds || seconds);
       const csiNodes = summary.nodes.filter((n) => (n.packets.csi || 0) > 0).length;
       const decoded = packets - summary.unknownPackets - summary.malformedPackets;
       let failure = null;
@@ -417,7 +448,7 @@ export function captureEsp32(args = {}, deps = {}) {
       const result = {
         ok: !failure,
         ...(failure || {}),
-        listen: `${bind}:${port}`, seconds, packets, decodedPackets: decoded, csiNodes, ...summary,
+        listen: `${bind}:${port}`, seconds, elapsedSeconds, packets, decodedPackets: decoded, csiNodes, ...summary,
         evidence: failure ? null : 'MEASURED: live UDP packets received and decoded on this host',
         ...extra,
       };
@@ -445,7 +476,7 @@ export function captureEsp32(args = {}, deps = {}) {
       }
       if (packets >= maxPackets) finish({ truncated: true });
     });
-    socket.bind(port, bind, () => { timer = setTimeout(() => finish(), seconds * 1000); });
+    socket.bind(port, bind, () => { startedAt = performance.now(); timer = setTimeout(() => finish(), seconds * 1000); });
   });
 }
 
@@ -456,14 +487,16 @@ async function runAnalysis(collector, nodeId, analyzeFn) {
   }
   const spanSec = (c.last - c.first) / 1000;
   const sampleRateHz = spanSec > 0 ? (c.frames.length - 1) / spanSec : 0;
-  const input = { source: c.source, nodeId: c.nodeId, frames: c.frames.length, droppedOverCap: c.dropped, subcarriers: c.subcarriers, sampleRateHz: Number(sampleRateHz.toFixed(3)) };
+  const input = { source: c.source, nodeId: c.nodeId, frames: c.frames.length, droppedOverCap: c.dropped, synthetic: c.synthetic, subcarriers: c.subcarriers, sampleRateHz: Number(sampleRateHz.toFixed(3)) };
   if (!(sampleRateHz > 0)) return { ok: false, input, reason: 'no_frames', detail: 'frames arrived without a measurable time span' };
   const config = { n_subcarriers: c.subcarriers, sample_rate_hz: input.sampleRateHz };
   try {
     const out = await analyzeFn(c.frames, config);
     return {
       input, ...out,
-      note: 'Signal-processing estimates from live CSI with no reference measurement; not clinical or camera-grade. The sample rate is the measured arrival rate.',
+      note: c.synthetic
+        ? 'Signal-processing estimates include firmware-marked synthetic CSI with no reference measurement; not clinical or camera-grade. The sample rate is the measured arrival rate.'
+        : 'Signal-processing estimates from live CSI with no reference measurement; not clinical or camera-grade. The sample rate is the measured arrival rate.',
     };
   } catch (error) {
     return { ok: false, input, reason: error?.code || 'kernel_error', detail: String(error?.message || error) };

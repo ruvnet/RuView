@@ -9,6 +9,7 @@
  */
 
 #include "ota_update.h"
+#include "config_api.h"
 
 #include <string.h>
 #include "esp_log.h"
@@ -23,7 +24,7 @@
 static const char *TAG = "ota_update";
 
 /** OTA HTTP server port. */
-#define OTA_PORT 8032
+#define OTA_PORT OTA_UPDATE_PORT
 
 /** NVS namespace and key for the OTA pre-shared key. */
 #define OTA_NVS_NAMESPACE "security"
@@ -40,7 +41,7 @@ static char s_ota_psk[OTA_PSK_MAX_LEN] = {0};
  * Returns true only when a PSK is provisioned AND the Bearer token
  * matches it. An unprovisioned node refuses all OTA requests
  * (fail-closed, see RuView#596 audit). The OTA server still starts so
- * the operator can `provision.py --ota-psk <hex>` over USB-CDC without
+ * the operator can `provision.py --ota-psk-file <path>` over USB without
  * a reflash, but the upload endpoint will reject every request until
  * the PSK is set.
  */
@@ -53,7 +54,7 @@ static bool ota_check_auth(httpd_req_t *req)
          * Plain HTTP transport + no Secure Boot V2 + no signed-image
          * verification meant a single LAN call could brick or back-
          * door a node. Reject until provisioned. */
-        ESP_LOGW(TAG, "OTA rejected: no PSK in NVS (run provision.py --ota-psk <hex>)");
+        ESP_LOGW(TAG, "OTA rejected: no PSK in NVS (run provision.py --ota-psk-file <path>)");
         return false;
     }
 
@@ -79,6 +80,11 @@ static bool ota_check_auth(httpd_req_t *req)
         result |= (uint8_t)(s_ota_psk[i] ^ token[i]);
     }
     return result == 0;
+}
+
+bool ota_auth_check(httpd_req_t *req)
+{
+    return ota_check_auth(req);
 }
 
 /**
@@ -265,7 +271,7 @@ static esp_err_t ota_start_server(httpd_handle_t *out_handle)
      * httpd", RTC_SW_CPU_RST), so no OTA had ever completed on this firmware.
      * See CONFIG_OTA_HTTPD_STACK_SIZE for the sizing. */
     config.stack_size = CONFIG_OTA_HTTPD_STACK_SIZE;
-    config.max_uri_handlers = 12;  /* Extra slots for WASM endpoints (ADR-040). */
+    config.max_uri_handlers = 14;  /* WASM endpoints (ADR-040) + /config. */
     /* Increase receive timeout for large uploads. */
     config.recv_wait_timeout = 30;
 
@@ -294,6 +300,12 @@ static esp_err_t ota_start_server(httpd_handle_t *out_handle)
     };
     httpd_register_uri_handler(server, &upload_uri);
 
+    /* Remote configuration shares this server so it inherits the OTA PSK,
+     * the port, and the same fail-closed auth path (config_api.c). */
+    if (config_api_register(server) != ESP_OK) {
+        ESP_LOGW(TAG, "remote config endpoints unavailable");
+    }
+
     ESP_LOGI(TAG, "OTA HTTP server started on port %d", OTA_PORT);
     ESP_LOGI(TAG, "  GET  /ota/status — firmware version info");
     ESP_LOGI(TAG, "  POST /ota        — upload new firmware binary");
@@ -319,7 +331,7 @@ static void ota_load_psk_from_nvs(void)
             ESP_LOGI(TAG, "OTA PSK loaded from NVS (%d chars) — authentication enabled", (int)len - 1);
         } else {
             ESP_LOGW(TAG, "No OTA PSK in NVS — OTA upload endpoint will REJECT all requests until "
-                          "provisioned (provision.py --ota-psk <hex>). Fail-closed per RuView#596.");
+                          "provisioned (provision.py --ota-psk-file <path>). Fail-closed per RuView#596.");
         }
         nvs_close(nvs);
     } else {

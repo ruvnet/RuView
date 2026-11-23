@@ -3,19 +3,15 @@
 //! `--listen` is the only route to a `mediatek:physical-unvalidated` label, so
 //! it must not accept datagrams from sources the operator did not name.
 
-use std::io::Read;
+use std::io::{BufRead, BufReader, Read};
 use std::net::UdpSocket;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::{Child, ChildStderr, Command, Stdio};
+use std::sync::mpsc;
 use std::time::Duration;
 
 fn bridge_bin() -> PathBuf {
-    let mut path = std::env::current_exe().expect("test exe path");
-    path.pop();
-    if path.ends_with("deps") {
-        path.pop();
-    }
-    path.join("wifi-densepose-mtk-bridge")
+    PathBuf::from(env!("CARGO_BIN_EXE_wifi-densepose-mtk-bridge"))
 }
 
 /// One MtkCSIdump datagram: 20-byte packed header then `{f64 i, f64 q}` pairs.
@@ -32,12 +28,53 @@ fn datagram(antenna: u32) -> Vec<u8> {
     buf
 }
 
-fn free_port() -> u16 {
-    UdpSocket::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
+/// Start the bridge on an OS-assigned loopback port and wait for it to report
+/// the bound address. Picking a free port first and passing it in races any
+/// other socket that takes the port before the bridge binds it.
+fn spawn_listening(args: &[&str]) -> (Child, BufReader<ChildStderr>, String, String) {
+    let mut child = Command::new(bridge_bin())
+        .args(["--listen", "127.0.0.1:0"])
+        .args(args)
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn wifi-densepose-mtk-bridge");
+    let mut stderr = BufReader::new(child.stderr.take().unwrap());
+    let (send, receive) = mpsc::sync_channel(1);
+    let reader = std::thread::spawn(move || {
+        let mut seen = String::new();
+        loop {
+            let mut line = String::new();
+            match stderr.read_line(&mut line) {
+                Ok(0) => {
+                    let _ = send.send(Err(format!("bridge exited before listening: {seen}")));
+                    return;
+                }
+                Err(error) => {
+                    let _ = send.send(Err(format!("read bridge stderr: {error}")));
+                    return;
+                }
+                Ok(_) => {}
+            }
+            seen.push_str(&line);
+            if let Some(rest) = line.strip_prefix("listening for MtkCSIdump datagrams on ") {
+                let addr = rest.split(',').next().unwrap().to_string();
+                let _ = send.send(Ok((stderr, addr, seen)));
+                return;
+            }
+        }
+    });
+    match receive.recv_timeout(Duration::from_secs(10)) {
+        Ok(Ok((stderr, addr, seen))) => {
+            reader.join().expect("stderr reader panicked");
+            (child, stderr, addr, seen)
+        }
+        error => {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = reader.join();
+            panic!("bridge did not become ready within ten seconds: {error:?}");
+        }
+    }
 }
 
 #[test]
@@ -70,29 +107,21 @@ fn a_datagram_from_outside_the_allowlist_is_dropped_and_never_assembled() {
     sink.set_read_timeout(Some(Duration::from_millis(700)))
         .unwrap();
     let sink_addr = sink.local_addr().unwrap().to_string();
-    let listen_port = free_port();
 
     // Allow only a network the loopback sender is not in.
-    let mut child = Command::new(bridge_bin())
-        .args([
-            "--listen",
-            &format!("127.0.0.1:{listen_port}"),
-            "--listen-allow",
-            "10.99.0.0/16",
-            "--sink",
-            &sink_addr,
-            "--node",
-            "listen-gate",
-        ])
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn wifi-densepose-mtk-bridge");
+    let (mut child, mut child_stderr, listen_addr, mut stderr) = spawn_listening(&[
+        "--listen-allow",
+        "10.99.0.0/16",
+        "--sink",
+        &sink_addr,
+        "--node",
+        "listen-gate",
+    ]);
 
-    std::thread::sleep(Duration::from_millis(500));
     let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
     for antenna in 0..4u32 {
         sender
-            .send_to(&datagram(antenna % 2), format!("127.0.0.1:{listen_port}"))
+            .send_to(&datagram(antenna % 2), &listen_addr)
             .unwrap();
     }
     std::thread::sleep(Duration::from_millis(500));
@@ -105,13 +134,7 @@ fn a_datagram_from_outside_the_allowlist_is_dropped_and_never_assembled() {
     );
 
     child.kill().expect("kill bridge");
-    let mut stderr = String::new();
-    child
-        .stderr
-        .take()
-        .unwrap()
-        .read_to_string(&mut stderr)
-        .unwrap();
+    child_stderr.read_to_string(&mut stderr).unwrap();
     let _ = child.wait();
 
     assert!(stderr.contains("rejected_source"), "{stderr}");
@@ -127,32 +150,22 @@ fn a_datagram_from_inside_the_allowlist_is_admitted() {
     let sink = UdpSocket::bind("127.0.0.1:0").unwrap();
     sink.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
     let sink_addr = sink.local_addr().unwrap().to_string();
-    let listen_port = free_port();
 
     // Same setup, but loopback is named this time.
-    let mut child = Command::new(bridge_bin())
-        .args([
-            "--listen",
-            &format!("127.0.0.1:{listen_port}"),
-            "--listen-allow",
-            "127.0.0.1",
-            "--sink",
-            &sink_addr,
-            "--node",
-            "listen-gate",
-            "--max-frames",
-            "1",
-        ])
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn wifi-densepose-mtk-bridge");
+    let (mut child, _stderr, listen_addr, _) = spawn_listening(&[
+        "--listen-allow",
+        "127.0.0.1",
+        "--sink",
+        &sink_addr,
+        "--node",
+        "listen-gate",
+        "--max-frames",
+        "1",
+    ]);
 
-    std::thread::sleep(Duration::from_millis(500));
     let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
     for antenna in 0..2u32 {
-        sender
-            .send_to(&datagram(antenna), format!("127.0.0.1:{listen_port}"))
-            .unwrap();
+        sender.send_to(&datagram(antenna), &listen_addr).unwrap();
     }
 
     let mut buf = vec![0u8; 65_535];

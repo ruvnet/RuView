@@ -29,12 +29,13 @@ export function bar(frac, width = 10) {
   return '█'.repeat(full) + (full < width ? (f * width - full >= 0.5 ? '▌' : ' ') : '') + ' '.repeat(Math.max(0, width - full - 1));
 }
 
-/** Sparkline of a numeric series (min..max scaled). */
+/** Sparkline of capture windows; missing samples retain their time position. */
 export function sparkline(values) {
   const v = values.filter((x) => typeof x === 'number' && Number.isFinite(x));
-  if (!v.length) return '';
+  if (!v.length) return '·'.repeat(values.length);
   const lo = Math.min(...v); const hi = Math.max(...v);
-  return v.map((x) => BARS[hi === lo ? 3 : Math.round(((x - lo) / (hi - lo)) * 7)]).join('');
+  return values.map((x) => typeof x === 'number' && Number.isFinite(x)
+    ? BARS[hi === lo ? 3 : Math.round(((x - lo) / (hi - lo)) * 7)] : '·').join('');
 }
 
 /** Align rows (arrays of cells) into columns. */

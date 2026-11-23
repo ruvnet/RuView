@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="360" viewBox="0 0 880 360" role="img" aria-labelledby="title desc"><title id="title">Any-source sensor fusion</title><desc id="desc">Three sources send readings into one fused presence estimate for a zone: a Wi-Fi CSI node, a 60 GHz radar, and a context-only door sensor. The radar reading arrives over the open ingest route and is labelled unverified, so the fused result is graded CLAIMED. Conceptual animation with illustrative values; it is not a measurement.</desc><defs><linearGradient id="wash" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0b303a"/><stop offset=".55" stop-color="#06171e"/><stop offset="1" stop-color="#030c13"/></linearGradient><linearGradient id="accent"><stop stop-color="#91f6df"/><stop offset="1" stop-color="#26bad7"/></linearGradient><radialGradient id="halo"><stop stop-color="#35d4db" stop-opacity=".22"/><stop offset="1" stop-color="#35d4db" stop-opacity="0"/></radialGradient></defs><style>
+text{font-family:"Avenir Next","Segoe UI",Helvetica,Arial,sans-serif;fill:#d9f3f2}
+.mono{font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace;letter-spacing:1.2px}
+.dim{fill:#7fa6ad}
+.flow{stroke-dasharray:5 12;animation:flow 3.2s linear infinite}
+.flowslow{stroke-dasharray:3 14;animation:flow 6s linear infinite}
+.breathe{animation:breathe 4s ease-in-out infinite;transform-origin:650px 178px}
+.fill{animation:fill 6s ease-in-out infinite;transform-box:fill-box;transform-origin:left center}
+.blink{animation:blink 6s ease-in-out infinite}
+@keyframes flow{to{stroke-dashoffset:-170}}
+@keyframes breathe{0%,100%{transform:scale(1);opacity:.75}50%{transform:scale(1.12);opacity:1}}
+@keyframes fill{0%,100%{transform:scaleX(.62)}50%{transform:scaleX(.86)}}
+@keyframes blink{0%,45%,100%{opacity:.25}55%,90%{opacity:1}}
+@media (prefers-reduced-motion:reduce){.flow,.flowslow,.breathe,.fill,.blink{animation:none}}
+</style>
+<rect width="880" height="360" rx="18" fill="url(#wash)"/>
+<text x="32" y="44" font-size="20" font-weight="600">Any sensor in, one fused zone out</text>
+<text x="32" y="66" font-size="12.5" class="dim">POST /api/v1/sources/readings  →  GET /api/v1/zones</text>
+
+<g font-size="13">
+<rect x="32" y="96" width="232" height="58" rx="10" fill="#082028" stroke="#26bad7" stroke-opacity=".55"/>
+<text x="48" y="120" font-weight="600">Wi-Fi CSI node</text>
+<text x="48" y="140" class="mono dim" font-size="10.5">wifi_csi · server hardware · verified</text>
+
+<rect x="32" y="170" width="232" height="58" rx="10" fill="#082028" stroke="#26bad7" stroke-opacity=".55"/>
+<text x="48" y="194" font-weight="600">60 GHz radar</text>
+<text x="48" y="214" class="mono dim" font-size="10.5">mmwave_radar · open route · unverified</text>
+
+<rect x="32" y="244" width="232" height="58" rx="10" fill="#07191f" stroke="#5f7f86" stroke-opacity=".55" stroke-dasharray="4 4"/>
+<text x="48" y="268" font-weight="600" class="dim">Door contact</text>
+<text x="48" y="288" class="mono dim" font-size="10.5">no descriptor · context only</text>
+</g>
+
+<path d="M264 125 C360 125 380 165 470 172" fill="none" stroke="url(#accent)" stroke-width="2" class="flow"/>
+<path d="M264 199 C350 199 390 186 470 182" fill="none" stroke="url(#accent)" stroke-width="2" class="flow"/>
+<path d="M264 273 C350 273 400 235 470 205" fill="none" stroke="#5f7f86" stroke-width="1.5" class="flowslow"/>
+<text x="330" y="262" class="mono dim" font-size="10">not fused</text>
+
+<circle cx="650" cy="178" r="118" fill="url(#halo)" class="breathe"/>
+<rect x="470" y="96" width="378" height="206" rx="14" fill="#06171e" stroke="#35d4db" stroke-opacity=".6"/>
+<text x="490" y="124" font-size="14" font-weight="600">zone office / desk</text>
+<text x="490" y="150" class="mono dim" font-size="10.5">presence_probability</text>
+<rect x="490" y="160" width="338" height="14" rx="7" fill="#0c2c35"/>
+<rect x="490" y="160" width="338" height="14" rx="7" fill="url(#accent)" class="fill"/>
+
+<text x="490" y="204" class="mono dim" font-size="10.5">confidence</text>
+<text x="590" y="204" class="mono" font-size="11">live weight ÷ known weight</text>
+<text x="490" y="226" class="mono dim" font-size="10.5">agreement</text>
+<text x="590" y="226" class="mono" font-size="11">sources on the same side of 0.5</text>
+<text x="490" y="248" class="mono dim" font-size="10.5">evidence</text>
+<rect x="586" y="235" width="76" height="19" rx="9.5" fill="#3b2f0a" stroke="#e8b84a"/>
+<text x="624" y="248.5" class="mono" font-size="10.5" text-anchor="middle" style="fill:#f4d58a">CLAIMED</text>
+<text x="672" y="248" class="mono dim" font-size="10">one input is unverified</text>
+<text x="490" y="280" class="mono dim" font-size="10">stale source → lower confidence, never “empty”</text>
+<circle cx="826" cy="118" r="5" fill="#91f6df" class="blink"/>
+
+<text x="32" y="336" class="mono dim" font-size="10.5">Illustrative values. Weights are placeholders until a benchmark measures them (weights_measured: false).</text>
+</svg>

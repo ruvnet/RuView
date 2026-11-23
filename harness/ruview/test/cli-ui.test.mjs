@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { bar, colorEnabled, renderResult, sparkline, table, createStyle } from '../src/cli-ui.js';
 import { MONITOR_SCRIPT } from '../src/tools.js';
 
@@ -92,5 +93,21 @@ test('monitor script flags Ameba CSI buffer starvation', (t) => {
     assert.match(r.stdout, /LINES=3 CSI=0 STARVED=2/);
   } finally {
     rmSync(fake, { recursive: true, force: true });
+  }
+});
+
+
+test('piped watch exits after one permanent input failure', () => {
+  const cli = fileURLToPath(new URL('../bin/cli.js', import.meta.url));
+  for (const options of [['--udp-port', '1024.5'], ['--bind', 'invalid-bind']]) {
+    const child = spawnSync(process.execPath, [cli, 'esp32', '--watch', '--json', ...options],
+      { encoding: 'utf8', timeout: 2000, maxBuffer: 256 * 1024 });
+    assert.equal(child.status, 1, 'permanent errors must exit instead of retrying forever');
+    assert.equal(child.error, undefined);
+    const lines = child.stdout.trim().split('\n');
+    assert.equal(lines.length, 1, 'one structured failure is emitted');
+    const result = JSON.parse(lines[0]);
+    assert.equal(result.ok, false);
+    assert.ok(['invalid_port', 'invalid_arguments'].includes(result.reason));
   }
 });

@@ -192,7 +192,26 @@ class CsiRecorder:
         self._file = None
 
     def open(self):
-        self._file = open(self.file_path, "a", encoding="utf-8")
+        # Whole-second names can collide between quick or concurrent captures.
+        # Allocate exclusively so one session never appends to another's data.
+        base_id = self.session_id
+        suffix = 0
+        while True:
+            session_id = base_id if suffix == 0 else f"{base_id}-{suffix}"
+            file_path = self.output_dir / f"{session_id}.csi.jsonl"
+            meta_path = self.output_dir / f"{session_id}.csi.meta.json"
+            if meta_path.exists():
+                suffix += 1
+                continue
+            try:
+                self._file = open(file_path, "x", encoding="utf-8")
+            except FileExistsError:
+                suffix += 1
+                continue
+            self.session_id = session_id
+            self.file_path = file_path
+            self.meta_path = meta_path
+            break
         log.info(f"Recording to: {self.file_path}")
 
     def write_frame(self, frame: dict):

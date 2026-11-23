@@ -56,7 +56,7 @@ See [PR #405](https://github.com/ruvnet/RuView/pull/405) for full details.
 
 | Capability | What it does | ADR |
 |-----------|-------------|-----|
-| **Camera ground-truth collection** | MediaPipe PoseLandmarker captures 17 COCO keypoints at 30fps, synced with ESP32 CSI | [ADR-079](docs/adr/ADR-079-camera-ground-truth-training.md) |
+| **Camera ground-truth collection** | MediaPipe PoseLandmarker captures 17 COCO keypoints at 30fps, synced with ESP32 CSI | [ADR-079](../docs/adr/ADR-079-camera-ground-truth-training.md) |
 | **ruvector subcarrier selection** | Variance-based top-K reduces input by 50% (70→35 subcarriers) | ADR-079 O6 |
 | **Stoer-Wagner min-cut** | Person-specific subcarrier cluster separation for multi-person training | ADR-079 O8 |
 | **Scalable WiFlow model** | 4 presets: lite (189K) → small (474K) → medium (800K) → full (7.7M params) | ADR-079 |
@@ -183,11 +183,11 @@ All scripts support `--replay data/recordings/*.csi.jsonl` for offline analysis 
 
 | Capability | What it does | ADR |
 |-----------|-------------|-----|
-| **Spiking Neural Network** | Adapts to your room in <30s with STDP online learning — no labels, no batches, 16-160x less compute | [ADR-074](docs/adr/ADR-074-spiking-neural-csi-sensing.md) |
-| **MinCut Person Counting** | Stoer-Wagner min-cut on subcarrier correlation graph — **fixes #348** (was always 4, now correct) | [ADR-075](docs/adr/ADR-075-mincut-person-separation.md) |
-| **CNN Spectrogram Embeddings** | Treat CSI as a 64×20 image → 128-dim embedding for environment fingerprinting (0.95+ similarity) | [ADR-076](docs/adr/ADR-076-csi-spectrogram-embeddings.md) |
-| **WiFlow SOTA Architecture** | TCN + axial attention + pose decoder → 17 COCO keypoints, 1.8M params (881 KB at 4-bit) | [ADR-072](docs/adr/ADR-072-wiflow-architecture.md) |
-| **Multi-Frequency Mesh** | Channel hopping across 6 bands, neighbor WiFi as passive radar illuminators | [ADR-073](docs/adr/ADR-073-multifrequency-mesh-scan.md) |
+| **Spiking Neural Network** | Adapts to your room in <30s with STDP online learning — no labels, no batches, 16-160x less compute | [ADR-074](../docs/adr/ADR-074-spiking-neural-csi-sensing.md) |
+| **MinCut Person Counting** | Stoer-Wagner min-cut on subcarrier correlation graph — **fixes #348** (was always 4, now correct) | [ADR-075](../docs/adr/ADR-075-mincut-person-separation.md) |
+| **CNN Spectrogram Embeddings** | Treat CSI as a 64×20 image → 128-dim embedding for environment fingerprinting (0.95+ similarity) | [ADR-076](../docs/adr/ADR-076-csi-spectrogram-embeddings.md) |
+| **WiFlow SOTA Architecture** | TCN + axial attention + pose decoder → 17 COCO keypoints, 1.8M params (881 KB at 4-bit) | [ADR-072](../docs/adr/ADR-072-wiflow-architecture.md) |
+| **Multi-Frequency Mesh** | Channel hopping across 6 bands, neighbor WiFi as passive radar illuminators | [ADR-073](../docs/adr/ADR-073-multifrequency-mesh-scan.md) |
 
 ```bash
 # Live RF room scan (spectrum visualization)
@@ -282,7 +282,7 @@ node scripts/benchmark-ruvllm.js --model models/csi-ruvllm
 | **Test suite** | **1,463 tests passed** | Rock-solid foundation |
 | **Total hardware cost** | **$140** | ESP32 ($9) + [Cognitum Seed](https://cognitum.one) ($131) |
 
-See [ADR-069](docs/adr/ADR-069-cognitum-seed-csi-pipeline.md), [ADR-071](docs/adr/ADR-071-ruvllm-training-pipeline.md), and the [Cognitum Seed tutorial](docs/tutorials/cognitum-seed-pretraining.md) for full details.
+See [ADR-069](../docs/adr/ADR-069-cognitum-seed-csi-pipeline.md), [ADR-071](../docs/adr/ADR-071-ruvllm-training-pipeline.md), and the [Cognitum Seed tutorial](../docs/tutorials/cognitum-seed-pretraining.md) for full details.
 
 </details>
 
@@ -301,8 +301,8 @@ See people, breathing, and heartbeats through walls — using only WiFi signals 
 | 👥 | **Multi-Person** | Tracks multiple people simultaneously, each with independent pose and vitals — no hard software limit (physics: ~3-5 per AP with 56 subcarriers, more with multi-AP) |
 | 🧱 | **Through-Wall** | WiFi passes through walls, furniture, and debris — works where cameras cannot |
 | 🚑 | **Disaster Response** | Detects trapped survivors through rubble and classifies injury severity (START triage) |
-| 📡 | **Multistatic Mesh** | 4-6 low-cost sensor nodes work together, combining 12+ overlapping signal paths for full 360-degree room coverage with sub-inch accuracy and no person mix-ups ([ADR-029](docs/adr/ADR-029-ruvsense-multistatic-sensing-mode.md)) |
-| 🌐 | **Persistent Field Model** | The system learns the RF signature of each room — then subtracts the room to isolate human motion, detect drift over days, predict intent before movement starts, and flag spoofing attempts ([ADR-030](docs/adr/ADR-030-ruvsense-persistent-field-model.md)) |
+| 📡 | **Multistatic Mesh** | 4-6 low-cost sensor nodes work together, combining 12+ overlapping signal paths for full 360-degree room coverage with sub-inch accuracy and no person mix-ups ([ADR-029](../docs/adr/ADR-029-ruvsense-multistatic-sensing-mode.md)) |
+| 🌐 | **Persistent Field Model** | The system learns the RF signature of each room — then subtracts the room to isolate human motion, detect drift over days, predict intent before movement starts, and flag spoofing attempts ([ADR-030](../docs/adr/ADR-030-ruvsense-persistent-field-model.md)) |
 
 ### Intelligence
 
@@ -310,13 +310,13 @@ The system learns on its own and gets smarter over time — no hand-tuning, no l
 
 | | Feature | What It Means |
 |---|---------|---------------|
-| 🧠 | **Self-Learning** | Teaches itself from raw WiFi data — no labeled training sets, no cameras needed to bootstrap ([ADR-024](docs/adr/ADR-024-contrastive-csi-embedding-model.md)) |
+| 🧠 | **Self-Learning** | Teaches itself from raw WiFi data — no labeled training sets, no cameras needed to bootstrap ([ADR-024](../docs/adr/ADR-024-contrastive-csi-embedding-model.md)) |
 | 🎯 | **AI Signal Processing** | Attention networks, graph algorithms, and smart compression replace hand-tuned thresholds — adapts to each room automatically ([RuVector](https://github.com/ruvnet/ruvector)) |
-| 🌍 | **Works Everywhere** | Train once, deploy in any room — adversarial domain generalization strips environment bias so models transfer across rooms, buildings, and hardware ([ADR-027](docs/adr/ADR-027-cross-environment-domain-generalization.md)) |
-| 👁️ | **Cross-Viewpoint Fusion** | AI combines what each sensor sees from its own angle — fills in blind spots and depth ambiguity that no single viewpoint can resolve on its own ([ADR-031](docs/adr/ADR-031-ruview-sensing-first-rf-mode.md)) |
-| 🔮 | **Signal-Line Protocol** | A 6-stage processing pipeline transforms raw WiFi signals into structured body representations — from signal cleanup through graph-based spatial reasoning to final pose output ([ADR-033](docs/adr/ADR-033-crv-signal-line-sensing-integration.md)) |
-| 🔒 | **QUIC Mesh Security** | All sensor-to-sensor communication is encrypted end-to-end with tamper detection, replay protection, and seamless reconnection if a node moves or drops offline ([ADR-032](docs/adr/ADR-032-multistatic-mesh-security-hardening.md)) |
-| 🎯 | **Adaptive Classifier** | Records labeled CSI sessions, trains a 15-feature logistic regression model in pure Rust, and learns your room's unique signal characteristics — replaces hand-tuned thresholds with data-driven classification ([ADR-048](docs/adr/ADR-048-adaptive-csi-classifier.md)) |
+| 🌍 | **Works Everywhere** | Train once, deploy in any room — adversarial domain generalization strips environment bias so models transfer across rooms, buildings, and hardware ([ADR-027](../docs/adr/ADR-027-cross-environment-domain-generalization.md)) |
+| 👁️ | **Cross-Viewpoint Fusion** | AI combines what each sensor sees from its own angle — fills in blind spots and depth ambiguity that no single viewpoint can resolve on its own ([ADR-031](../docs/adr/ADR-031-ruview-sensing-first-rf-mode.md)) |
+| 🔮 | **Signal-Line Protocol** | A 6-stage processing pipeline transforms raw WiFi signals into structured body representations — from signal cleanup through graph-based spatial reasoning to final pose output ([ADR-033](../docs/adr/ADR-033-crv-signal-line-sensing-integration.md)) |
+| 🔒 | **QUIC Mesh Security** | All sensor-to-sensor communication is encrypted end-to-end with tamper detection, replay protection, and seamless reconnection if a node moves or drops offline ([ADR-032](../docs/adr/ADR-032-multistatic-mesh-security-hardening.md)) |
+| 🎯 | **Adaptive Classifier** | Records labeled CSI sessions, trains a 15-feature logistic regression model in pure Rust, and learns your room's unique signal characteristics — replaces hand-tuned thresholds with data-driven classification ([ADR-048](../docs/adr/ADR-048-adaptive-csi-classifier.md)) |
 
 ### Performance & Deployment
 
@@ -329,8 +329,8 @@ Fast enough for real-time use, small enough for edge devices, simple enough for 
 | 🐳 | **One-Command Setup** | `docker pull ruvnet/wifi-densepose:latest` — live sensing in 30 seconds, no toolchain needed (amd64 + arm64 / Apple Silicon) |
 | 📡 | **Fully Local** | Runs completely on a $9 ESP32 — no internet connection, no cloud account, no recurring fees. Detects presence, vital signs, and falls on-device with instant response |
 | 📦 | **Portable Models** | Trained models package into a single `.rvf` file — runs on edge, cloud, or browser (WASM) |
-| 🔭 | **Observatory Visualization** | Cinematic Three.js dashboard with 5 holographic panels — subcarrier manifold, vital signs oracle, presence heatmap, phase constellation, convergence engine — all driven by live or demo CSI data ([ADR-047](docs/adr/ADR-047-psychohistory-observatory-visualization.md)) |
-| 📟 | **AMOLED Display** | ESP32-S3 boards with built-in AMOLED screens show real-time presence, vital signs, and room status directly on the sensor — no phone or PC needed ([ADR-045](docs/adr/ADR-045-amoled-display-support.md)) |
+| 🔭 | **Observatory Visualization** | Cinematic Three.js dashboard with 5 holographic panels — subcarrier manifold, vital signs oracle, presence heatmap, phase constellation, convergence engine — all driven by live or demo CSI data ([ADR-047](../docs/adr/ADR-047-psychohistory-observatory-visualization.md)) |
+| 📟 | **AMOLED Display** | ESP32-S3 boards with built-in AMOLED screens show real-time presence, vital signs, and room status directly on the sensor — no phone or PC needed ([ADR-045](../docs/adr/ADR-045-amoled-display-support.md)) |
 
 ---
 
@@ -469,7 +469,7 @@ cargo add wifi-densepose-ruvector   # RuVector v2.0.4 integration layer (ADR-017
 
 All crates integrate with [RuVector v2.0.4](https://github.com/ruvnet/ruvector) — see [AI Backbone](#ai-backbone-ruvector) below.
 
-**[rUv Neural](v2/crates/ruv-neural/)** — A separate 12-crate workspace for brain network topology analysis, neural decoding, and medical sensing. See [rUv Neural](#ruv-neural) in Models & Training.
+**[rUv Neural](https://github.com/ruvnet/ruv-neural)** — A separate 12-crate workspace for brain network topology analysis, neural decoding, and medical sensing. See [rUv Neural](#ruv-neural) in Models & Training.
 
 </details>
 
@@ -551,11 +551,11 @@ The signal processing stack transforms raw WiFi Channel State Information into a
 |---------|-------------|------|
 | [Key Features](#key-features) | Sensing, Intelligence, and Performance & Deployment capabilities | — |
 | [How It Works](#how-it-works) | End-to-end pipeline: radio waves → CSI capture → signal processing → AI → pose + vitals | — |
-| [ESP32-S3 Hardware Pipeline](#esp32-s3-hardware-pipeline) | 20 Hz CSI streaming, binary frame parsing, flash & provision | [ADR-018](docs/adr/ADR-018-esp32-dev-implementation.md) · [Tutorial #34](https://github.com/ruvnet/RuView/issues/34) |
-| [Vital Sign Detection](#vital-sign-detection) | Breathing 6-30 BPM, heartbeat 40-120 BPM, FFT peak detection | [ADR-021](docs/adr/ADR-021-vital-sign-detection-rvdna-pipeline.md) |
-| [WiFi Scan Domain Layer](#wifi-scan-domain-layer) | 8-stage RSSI pipeline, multi-BSSID fingerprinting, Windows WiFi | [ADR-022](docs/adr/ADR-022-windows-wifi-enhanced-fidelity-ruvector.md) · [Tutorial #36](https://github.com/ruvnet/RuView/issues/36) |
-| [WiFi-Mat Disaster Response](#wifi-mat-disaster-response) | Search & rescue, START triage, 3D localization through debris | [ADR-001](docs/adr/ADR-001-wifi-mat-disaster-detection.md) · [User Guide](docs/wifi-mat-user-guide.md) |
-| [SOTA Signal Processing](#sota-signal-processing) | SpotFi, Hampel, Fresnel, STFT spectrogram, subcarrier selection, BVP | [ADR-014](docs/adr/ADR-014-sota-signal-processing.md) |
+| [ESP32-S3 Hardware Pipeline](#esp32-s3-hardware-pipeline) | 20 Hz CSI streaming, binary frame parsing, flash & provision | [ADR-018](../docs/adr/ADR-018-esp32-dev-implementation.md) · [Tutorial #34](https://github.com/ruvnet/RuView/issues/34) |
+| [Vital Sign Detection](#vital-sign-detection) | Breathing 6-30 BPM, heartbeat 40-120 BPM, FFT peak detection | [ADR-021](../docs/adr/ADR-021-vital-sign-detection-rvdna-pipeline.md) |
+| [WiFi Scan Domain Layer](#wifi-scan-domain-layer) | 8-stage RSSI pipeline, multi-BSSID fingerprinting, Windows WiFi | [ADR-022](../docs/adr/ADR-022-windows-wifi-enhanced-fidelity-ruvector.md) · [Tutorial #36](https://github.com/ruvnet/RuView/issues/36) |
+| [WiFi-Mat Disaster Response](#wifi-mat-disaster-response) | Search & rescue, START triage, 3D localization through debris | [ADR-001](../docs/adr/ADR-001-wifi-mat-disaster-detection.md) · [User Guide](../docs/wifi-mat-user-guide.md) |
+| [SOTA Signal Processing](#sota-signal-processing) | SpotFi, Hampel, Fresnel, STFT spectrogram, subcarrier selection, BVP | [ADR-014](../docs/adr/ADR-014-sota-signal-processing.md) |
 
 </details>
 
@@ -566,13 +566,13 @@ The neural pipeline uses a graph transformer with cross-attention to map CSI fea
 
 | Section | Description | Docs |
 |---------|-------------|------|
-| [RVF Model Container](#rvf-model-container) | Binary packaging with Ed25519 signing, progressive 3-layer loading, SIMD quantization | [ADR-023](docs/adr/ADR-023-trained-densepose-model-ruvector-pipeline.md) |
-| [Training & Fine-Tuning](#training--fine-tuning) | 8-phase pure Rust pipeline (7,832 lines), MM-Fi/Wi-Pose pre-training, 6-term composite loss, SONA LoRA | [ADR-023](docs/adr/ADR-023-trained-densepose-model-ruvector-pipeline.md) |
-| [RuVector Crates](#ruvector-crates) | 11 vendored Rust crates from [ruvector](https://github.com/ruvnet/ruvector): attention, min-cut, solver, GNN, HNSW, temporal compression, sparse inference | [GitHub](https://github.com/ruvnet/ruvector) · [Source](vendor/ruvector/) |
-| [rUv Neural](#ruv-neural) | 12-crate brain topology analysis ecosystem: neural decoding, quantum sensor integration, cognitive state classification, BCI output | [README](v2/crates/ruv-neural/README.md) |
+| [RVF Model Container](#rvf-model-container) | Binary packaging with Ed25519 signing, progressive 3-layer loading, SIMD quantization | [ADR-023](../docs/adr/ADR-023-trained-densepose-model-ruvector-pipeline.md) |
+| [Training & Fine-Tuning](#training--fine-tuning) | 8-phase pure Rust pipeline (7,832 lines), MM-Fi/Wi-Pose pre-training, 6-term composite loss, SONA LoRA | [ADR-023](../docs/adr/ADR-023-trained-densepose-model-ruvector-pipeline.md) |
+| [RuVector Crates](#ruvector-crates) | 11 vendored Rust crates from [ruvector](https://github.com/ruvnet/ruvector): attention, min-cut, solver, GNN, HNSW, temporal compression, sparse inference | [GitHub](https://github.com/ruvnet/ruvector) · [Source](../vendor/) |
+| [rUv Neural](#ruv-neural) | 12-crate brain topology analysis ecosystem: neural decoding, quantum sensor integration, cognitive state classification, BCI output | [README](https://github.com/ruvnet/ruv-neural#readme) |
 | [AI Backbone (RuVector)](#ai-backbone-ruvector) | 5 AI capabilities replacing hand-tuned thresholds: attention, graph min-cut, sparse solvers, tiered compression | [crates.io](https://crates.io/crates/wifi-densepose-ruvector) |
-| [Self-Learning WiFi AI (ADR-024)](#self-learning-wifi-ai-adr-024) | Contrastive self-supervised learning, room fingerprinting, anomaly detection, 55 KB model | [ADR-024](docs/adr/ADR-024-contrastive-csi-embedding-model.md) |
-| [Cross-Environment Generalization (ADR-027)](docs/adr/ADR-027-cross-environment-domain-generalization.md) | Domain-adversarial training, geometry-conditioned inference, hardware normalization, zero-shot deployment | [ADR-027](docs/adr/ADR-027-cross-environment-domain-generalization.md) |
+| [Self-Learning WiFi AI (ADR-024)](#self-learning-wifi-ai-adr-024) | Contrastive self-supervised learning, room fingerprinting, anomaly detection, 55 KB model | [ADR-024](../docs/adr/ADR-024-contrastive-csi-embedding-model.md) |
+| [Cross-Environment Generalization (ADR-027)](../docs/adr/ADR-027-cross-environment-domain-generalization.md) | Domain-adversarial training, geometry-conditioned inference, hardware normalization, zero-shot deployment | [ADR-027](../docs/adr/ADR-027-cross-environment-domain-generalization.md) |
 
 </details>
 
@@ -585,7 +585,7 @@ The Rust sensing server is the primary interface, offering a comprehensive CLI w
 |---------|-------------|------|
 | [CLI Usage](#cli-usage) | `--source`, `--train`, `--benchmark`, `--export-rvf`, `--model`, `--progressive` | — |
 | [REST API & WebSocket](#rest-api--websocket) | 6 REST endpoints (sensing, vitals, BSSID, SONA), WebSocket real-time stream | — |
-| [Hardware Support](#hardware-support-1) | ESP32-S3 ($8), Intel 5300 ($15), Atheros AR9580 ($20), Windows RSSI ($0) | [ADR-012](docs/adr/ADR-012-esp32-csi-sensor-mesh.md) · [ADR-013](docs/adr/ADR-013-feature-level-sensing-commodity-gear.md) |
+| [Hardware Support](#hardware-support-1) | ESP32-S3 ($8), Intel 5300 ($15), Atheros AR9580 ($20), Windows RSSI ($0) | [ADR-012](../docs/adr/ADR-012-esp32-csi-sensor-mesh.md) · [ADR-013](../docs/adr/ADR-013-feature-level-sensing-commodity-gear.md) |
 
 </details>
 
@@ -621,8 +621,8 @@ WiFi DensePose is MIT-licensed open source, developed by [ruvnet](https://github
 
 | Section | Description | Link |
 |---------|-------------|------|
-| [Changelog](#changelog) | v3.0.0 (AETHER AI + Docker), v2.0.0 (Rust port + SOTA + WiFi-Mat) | [CHANGELOG.md](CHANGELOG.md) |
-| [License](#license) | MIT License | [LICENSE](LICENSE) |
+| [Changelog](#changelog) | v3.0.0 (AETHER AI + Docker), v2.0.0 (Rust port + SOTA + WiFi-Mat) | [CHANGELOG.md](../CHANGELOG.md) |
+| [License](#license) | MIT License | [LICENSE](../LICENSE) |
 | [Support](#support) | Bug reports, feature requests, community discussion | [Issues](https://github.com/ruvnet/RuView/issues) · [Discussions](https://github.com/ruvnet/RuView/discussions) |
 
 </details>
@@ -667,14 +667,14 @@ CSI Encoder (existing) ──→ latent features
 - Atomic instance counter ensures unique weight initialization across threads
 - Division-by-zero guards on all augmentation parameters
 
-See [`docs/adr/ADR-027-cross-environment-domain-generalization.md`](docs/adr/ADR-027-cross-environment-domain-generalization.md) for full architectural details.
+See [`docs/adr/ADR-027-cross-environment-domain-generalization.md`](../docs/adr/ADR-027-cross-environment-domain-generalization.md) for full architectural details.
 
 </details>
 
 <details>
 <summary><strong>🔍 Independent Capability Audit (ADR-028)</strong> — 1,031 tests, SHA-256 proof, self-verifying witness bundle</summary>
 
-A [3-agent parallel audit](docs/adr/ADR-028-esp32-capability-audit.md) independently verified every claim in this repository — ESP32 hardware, signal processing, neural networks, training pipeline, deployment, and security. Results:
+A [3-agent parallel audit](../docs/adr/ADR-028-esp32-capability-audit.md) independently verified every claim in this repository — ESP32 hardware, signal processing, neural networks, training pipeline, deployment, and security. Results:
 
 ```
 Rust tests:     1,031 passed, 0 failed
@@ -699,9 +699,9 @@ cd dist/witness-bundle-ADR028-*/ && bash VERIFY.sh
 
 | Document | What it contains |
 |----------|-----------------|
-| [ADR-028](docs/adr/ADR-028-esp32-capability-audit.md) | Full audit: ESP32 specs, signal algorithms, NN architectures, training phases, deployment infra |
-| [Witness Log](docs/WITNESS-LOG-028.md) | 11 reproducible verification steps + 33-row attestation matrix with evidence per row |
-| [`generate-witness-bundle.sh`](scripts/generate-witness-bundle.sh) | Creates self-contained tar.gz with test logs, proof output, firmware hashes, crate versions, VERIFY.sh |
+| [ADR-028](../docs/adr/ADR-028-esp32-capability-audit.md) | Full audit: ESP32 specs, signal algorithms, NN architectures, training phases, deployment infra |
+| [Witness Log](../docs/WITNESS-LOG-028.md) | 11 reproducible verification steps + 33-row attestation matrix with evidence per row |
+| [`generate-witness-bundle.sh`](../scripts/generate-witness-bundle.sh) | Creates self-contained tar.gz with test logs, proof output, firmware hashes, crate versions, VERIFY.sh |
 
 </details>
 
@@ -721,9 +721,9 @@ A single WiFi receiver can track people, but has blind spots — limbs behind th
 
 | ADR | Codename | What it adds |
 |-----|----------|-------------|
-| [ADR-029](docs/adr/ADR-029-ruvsense-multistatic-sensing-mode.md) | **RuvSense** | Channel hopping, TDM protocol, multi-node fusion, coherence gating, 17-keypoint Kalman tracker |
-| [ADR-030](docs/adr/ADR-030-ruvsense-persistent-field-model.md) | **RuvSense Field** | Room electromagnetic eigenstructure (SVD), RF tomography, longitudinal drift detection, intention prediction, gesture recognition, adversarial detection |
-| [ADR-031](docs/adr/ADR-031-ruview-sensing-first-rf-mode.md) | **RuView** | Cross-viewpoint attention with geometric bias, viewpoint diversity optimization, embedding-level fusion |
+| [ADR-029](../docs/adr/ADR-029-ruvsense-multistatic-sensing-mode.md) | **RuvSense** | Channel hopping, TDM protocol, multi-node fusion, coherence gating, 17-keypoint Kalman tracker |
+| [ADR-030](../docs/adr/ADR-030-ruvsense-persistent-field-model.md) | **RuvSense Field** | Room electromagnetic eigenstructure (SVD), RF tomography, longitudinal drift detection, intention prediction, gesture recognition, adversarial detection |
+| [ADR-031](../docs/adr/ADR-031-ruview-sensing-first-rf-mode.md) | **RuView** | Cross-viewpoint attention with geometric bias, viewpoint diversity optimization, embedding-level fusion |
 
 **Architecture**
 
@@ -786,7 +786,7 @@ Pose Tracker + DensePose     17-keypoint Kalman, re-ID via AETHER embeddings
 | `csi_collector.c` | Channel hop table, timer-driven hop, NDP injection stub |
 | `nvs_config.c` | 5 new NVS keys: hop_count, channel_list, dwell_ms, tdm_slot, tdm_node_count |
 
-**DDD Domain Model** — 6 bounded contexts: Multistatic Sensing, Coherence, Pose Tracking, Field Model, Cross-Room Identity, Adversarial Detection. Full specification: [`docs/ddd/ruvsense-domain-model.md`](docs/ddd/ruvsense-domain-model.md).
+**DDD Domain Model** — 6 bounded contexts: Multistatic Sensing, Coherence, Pose Tracking, Field Model, Cross-Room Identity, Adversarial Detection. Full specification: [`docs/ddd/ruvsense-domain-model.md`](../docs/ddd/ruvsense-domain-model.md).
 
 See the ADR documents for full architectural details, GOAP integration plans, and research references.
 
@@ -876,11 +876,11 @@ Download a pre-built binary — no build toolchain needed:
 | [v0.7.0](https://github.com/ruvnet/RuView/releases/tag/v0.7.0) | **Latest** — Camera-supervised WiFlow model (accuracy figure retracted 2026-06-10, see above), ground-truth training pipeline, ruvector optimizations | `v0.7.0` |
 | [v0.6.0](https://github.com/ruvnet/RuView/releases/tag/v0.6.0-esp32) | [Pre-trained models on HuggingFace](https://huggingface.co/ruv/ruview), 17 sensing apps, 51.6% contrastive improvement, 0.008ms inference | `v0.6.0-esp32` |
 | [v0.5.5](https://github.com/ruvnet/RuView/releases/tag/v0.5.5-esp32) | SNN + MinCut (#348 fix) + CNN spectrogram + WiFlow + multi-freq mesh + graph transformer | `v0.5.5-esp32` |
-| [v0.5.4](https://github.com/ruvnet/RuView/releases/tag/v0.5.4-esp32) | Cognitum Seed integration ([ADR-069](docs/adr/ADR-069-cognitum-seed-csi-pipeline.md)), 8-dim feature vectors, RVF store, witness chain, security hardening | `v0.5.4-esp32` |
-| [v0.5.0](https://github.com/ruvnet/RuView/releases/tag/v0.5.0-esp32) | mmWave sensor fusion ([ADR-063](docs/adr/ADR-063-mmwave-sensor-fusion.md)), auto-detect MR60BHA2/LD2410, 48-byte fused vitals, all v0.4.3.1 fixes | `v0.5.0-esp32` |
+| [v0.5.4](https://github.com/ruvnet/RuView/releases/tag/v0.5.4-esp32) | Cognitum Seed integration ([ADR-069](../docs/adr/ADR-069-cognitum-seed-csi-pipeline.md)), 8-dim feature vectors, RVF store, witness chain, security hardening | `v0.5.4-esp32` |
+| [v0.5.0](https://github.com/ruvnet/RuView/releases/tag/v0.5.0-esp32) | mmWave sensor fusion ([ADR-063](../docs/adr/ADR-063-mmwave-sensor-fusion.md)), auto-detect MR60BHA2/LD2410, 48-byte fused vitals, all v0.4.3.1 fixes | `v0.5.0-esp32` |
 | [v0.4.3.1](https://github.com/ruvnet/RuView/releases/tag/v0.4.3.1-esp32) | Fall detection fix ([#263](https://github.com/ruvnet/RuView/issues/263)), 4MB flash ([#265](https://github.com/ruvnet/RuView/issues/265)), watchdog fix ([#266](https://github.com/ruvnet/RuView/issues/266)) | `v0.4.3.1-esp32` |
-| [v0.4.1](https://github.com/ruvnet/RuView/releases/tag/v0.4.1-esp32) | CSI build fix, compile guard, AMOLED display, edge intelligence ([ADR-057](docs/adr/ADR-057-firmware-csi-build-guard.md)) | `v0.4.1-esp32` |
-| [v0.3.0-alpha](https://github.com/ruvnet/RuView/releases/tag/v0.3.0-alpha-esp32) | Alpha — adds on-device edge intelligence and WASM modules ([ADR-039](docs/adr/ADR-039-esp32-edge-intelligence.md), [ADR-040](docs/adr/ADR-040-wasm-programmable-sensing.md)) | `v0.3.0-alpha-esp32` |
+| [v0.4.1](https://github.com/ruvnet/RuView/releases/tag/v0.4.1-esp32) | CSI build fix, compile guard, AMOLED display, edge intelligence ([ADR-057](../docs/adr/ADR-057-firmware-csi-build-guard.md)) | `v0.4.1-esp32` |
+| [v0.3.0-alpha](https://github.com/ruvnet/RuView/releases/tag/v0.3.0-alpha-esp32) | Alpha — adds on-device edge intelligence and WASM modules ([ADR-039](../docs/adr/ADR-039-esp32-edge-intelligence.md), [ADR-040](../docs/adr/ADR-040-wasm-programmable-sensing.md)) | `v0.3.0-alpha-esp32` |
 | [v0.2.0](https://github.com/ruvnet/RuView/releases/tag/v0.2.0-esp32) | Raw CSI streaming, multi-node TDM, channel hopping | `v0.2.0-esp32` |
 
 ```bash
@@ -921,7 +921,7 @@ python firmware/esp32-csi-node/provision.py --port COM8 \
   --node-id 1 --tdm-slot 1 --tdm-total 3
 ```
 
-Nodes can also hop across WiFi channels (1, 6, 11) to increase sensing bandwidth — configured via [ADR-029](docs/adr/ADR-029-ruvsense-multistatic-sensing-mode.md) channel hopping.
+Nodes can also hop across WiFi channels (1, 6, 11) to increase sensing bandwidth — configured via [ADR-029](../docs/adr/ADR-029-ruvsense-multistatic-sensing-mode.md) channel hopping.
 
 ### Cognitum Seed integration (ADR-069)
 
@@ -949,7 +949,7 @@ python scripts/seed_csi_bridge.py \
 python scripts/seed_csi_bridge.py --token "$SEED_TOKEN" --stats
 ```
 
-The 8-dim feature vector captures: presence, motion, breathing rate, heart rate, phase variance, person count, fall detection, and RSSI — all normalized to [0.0, 1.0]. See [ADR-069](docs/adr/ADR-069-cognitum-seed-csi-pipeline.md) for the full architecture.
+The 8-dim feature vector captures: presence, motion, breathing rate, heart rate, phase variance, person count, fall detection, and RSSI — all normalized to [0.0, 1.0]. See [ADR-069](../docs/adr/ADR-069-cognitum-seed-csi-pipeline.md) for the full architecture.
 
 ### On-device intelligence (v0.3.0-alpha)
 
@@ -960,7 +960,7 @@ The alpha firmware can analyze signals locally and send compact results instead 
 | **0** | Off — streams raw CSI only (same as v0.2.0) | 0 KB |
 | **1** | Cleans up signals, picks the best subcarriers, compresses data (saves 30-50% bandwidth) | ~30 KB |
 | **2** | Everything in Tier 1 + detects presence, measures breathing and heart rate, detects falls | ~33 KB |
-| **3** | Everything in Tier 2 + runs custom WASM modules (gesture recognition, intrusion detection, and [63 more](docs/edge-modules/README.md)) | ~160 KB/module |
+| **3** | Everything in Tier 2 + runs custom WASM modules (gesture recognition, intrusion detection, and [63 more](../docs/edge-modules/README.md)) | ~160 KB/module |
 
 Enable without reflashing — just reprovision:
 
@@ -977,7 +977,7 @@ python firmware/esp32-csi-node/provision.py --port COM7 \
 
 When Tier 2 is active, the node sends a 32-byte vitals packet once per second containing: presence, motion level, breathing BPM, heart rate BPM, confidence scores, fall alert flag, and occupancy count.
 
-See [firmware/esp32-csi-node/README.md](firmware/esp32-csi-node/README.md), [ADR-039](docs/adr/ADR-039-esp32-edge-intelligence.md), [ADR-044](docs/adr/ADR-044-provisioning-tool-enhancements.md), and [Tutorial #34](https://github.com/ruvnet/RuView/issues/34).
+See [firmware/esp32-csi-node/README.md](../firmware/esp32-csi-node/README.md), [ADR-039](../docs/adr/ADR-039-esp32-edge-intelligence.md), [ADR-050](../docs/adr/ADR-050-provisioning-tool-enhancements.md), and [Tutorial #34](https://github.com/ruvnet/RuView/issues/34).
 
 </details>
 
@@ -1026,7 +1026,7 @@ cargo bench --package wifi-densepose-signal
 curl http://localhost:3000/api/v1/vital-signs
 ```
 
-See [ADR-021](docs/adr/ADR-021-vital-sign-detection-rvdna-pipeline.md).
+See [ADR-021](../docs/adr/ADR-021-vital-sign-detection-rvdna-pipeline.md).
 
 </details>
 
@@ -1048,7 +1048,7 @@ See [ADR-021](docs/adr/ADR-021-vital-sign-detection-rvdna-pipeline.md).
 cargo test -p wifi-densepose-wifiscan
 ```
 
-See [ADR-022](docs/adr/ADR-022-windows-wifi-enhanced-fidelity-ruvector.md) and [Tutorial #36](https://github.com/ruvnet/RuView/issues/36).
+See [ADR-022](../docs/adr/ADR-022-windows-wifi-enhanced-fidelity-ruvector.md) and [Tutorial #36](https://github.com/ruvnet/RuView/issues/36).
 
 </details>
 
@@ -1093,7 +1093,7 @@ response.start_scanning().await?;
 
 **Safety guarantees:** fail-safe defaults (assume life present on ambiguous signals), redundant multi-algorithm voting, complete audit trail, offline-capable (no network required).
 
-- [WiFi-Mat User Guide](docs/wifi-mat-user-guide.md) | [ADR-001](docs/adr/ADR-001-wifi-mat-disaster-detection.md) | [Domain Model](docs/ddd/wifi-mat-domain-model.md)
+- [WiFi-Mat User Guide](../docs/wifi-mat-user-guide.md) | [ADR-001](../docs/adr/ADR-001-wifi-mat-disaster-detection.md) | [Domain Model](../docs/ddd/wifi-mat-domain-model.md)
 
 </details>
 
@@ -1113,7 +1113,7 @@ The signal processing layer bridges the gap between raw commodity WiFi hardware 
 
 **Processing pipeline order:** Raw CSI → Conjugate multiplication (phase cleaning) → Hampel filter (outlier removal) → Subcarrier selection (top-K) → CSI spectrogram (time-frequency) → Fresnel model (breathing) + BVP (activity)
 
-See [ADR-014](docs/adr/ADR-014-sota-signal-processing.md) for full mathematical derivations.
+See [ADR-014](../docs/adr/ADR-014-sota-signal-processing.md) for full mathematical derivations.
 
 </details>
 
@@ -1141,7 +1141,7 @@ Clean, structured signal --> DensePose Neural Network --> 17-keypoint body pose
                          --> ruvector-solver ------------> physics-based localization
 ```
 
-The [`wifi-densepose-ruvector`](https://crates.io/crates/wifi-densepose-ruvector) crate ([ADR-017](docs/adr/ADR-017-ruvector-signal-mat-integration.md)) connects all 7 integration points:
+The [`wifi-densepose-ruvector`](https://crates.io/crates/wifi-densepose-ruvector) crate ([ADR-017](../docs/adr/ADR-017-ruvector-signal-mat-integration.md)) connects all 7 integration points:
 
 | AI Capability | What It Replaces | RuVector Crate | Result |
 |--------------|-----------------|----------------|--------|
@@ -1214,7 +1214,7 @@ The [RuVector Format (RVF)](https://github.com/ruvnet/ruvector/tree/main/crates/
 docker run --rm -v $(pwd):/out ruvnet/wifi-densepose:latest --export-rvf /out/model.rvf
 ```
 
-Built on the [rvf](https://github.com/ruvnet/ruvector/tree/main/crates/rvf) crate family (rvf-types, rvf-wire, rvf-manifest, rvf-index, rvf-quant, rvf-crypto, rvf-runtime). See [ADR-023](docs/adr/ADR-023-trained-densepose-model-ruvector-pipeline.md).
+Built on the [rvf](https://github.com/ruvnet/ruvector/tree/main/crates/rvf) crate family (rvf-types, rvf-wire, rvf-manifest, rvf-index, rvf-quant, rvf-crypto, rvf-runtime). See [ADR-023](../docs/adr/ADR-023-trained-densepose-model-ruvector-pipeline.md).
 
 </details>
 
@@ -1265,7 +1265,7 @@ docker run --rm -v $(pwd)/data:/data ruvnet/wifi-densepose:latest \
   --train --dataset /data --epochs 100 --export-rvf /data/model.rvf
 ```
 
-See [ADR-023](docs/adr/ADR-023-trained-densepose-model-ruvector-pipeline.md) · [SONA crate](https://github.com/ruvnet/ruvector/tree/main/crates/sona) · [arXiv:2301.00250](https://arxiv.org/abs/2301.00250)
+See [ADR-023](../docs/adr/ADR-023-trained-densepose-model-ruvector-pipeline.md) · [SONA crate](https://github.com/ruvnet/ruvector/tree/main/crates/sona) · [arXiv:2301.00250](https://arxiv.org/abs/2301.00250)
 
 </details>
 
@@ -1293,14 +1293,14 @@ See [ADR-023](docs/adr/ADR-023-trained-densepose-model-ruvector-pipeline.md) · 
 | [`ruvector-nervous-system`](https://github.com/ruvnet/ruvector/tree/main/crates/ruvector-nervous-system) | PredictiveLayer, OscillatoryRouter, Hopfield associative memory | [crate](https://crates.io/crates/ruvector-nervous-system) |
 | [`ruvector-coherence`](https://github.com/ruvnet/ruvector/tree/main/crates/ruvector-coherence) | Spectral coherence monitoring, HNSW graph health, Fiedler connectivity | [crate](https://crates.io/crates/ruvector-coherence) |
 
-The full RuVector ecosystem includes 90+ crates. See [github.com/ruvnet/ruvector](https://github.com/ruvnet/ruvector) for the complete library, and [`vendor/ruvector/`](vendor/ruvector/) for the vendored source in this project.
+The full RuVector ecosystem includes 90+ crates. See [github.com/ruvnet/ruvector](https://github.com/ruvnet/ruvector) for the complete library, and [`vendor/ruvector/`](../vendor/) for the vendored source in this project.
 
 </details>
 
 <details>
 <summary><a id="ruv-neural"></a><strong>🧠 rUv Neural</strong> — Brain topology analysis ecosystem for neural decoding and medical sensing</summary>
 
-[**rUv Neural**](v2/crates/ruv-neural/README.md) is a 12-crate Rust ecosystem that extends RuView's signal processing into brain network topology analysis. It transforms neural magnetic field measurements from quantum sensors (NV diamond magnetometers, optically pumped magnetometers) into dynamic connectivity graphs, using minimum cut algorithms to detect cognitive state transitions in real time. The ecosystem includes crates for signal processing (`ruv-neural-signal`), graph construction (`ruv-neural-graph`), HNSW-indexed pattern memory (`ruv-neural-memory`), graph embeddings (`ruv-neural-embed`), cognitive state decoding (`ruv-neural-decoder`), and ESP32/WASM edge targets. Medical and research applications include early neurological disease detection via topology signatures, brain-computer interfaces, clinical neurofeedback, and non-invasive biomedical sensing -- bridging RuView's RF sensing architecture with the emerging field of quantum biomedical diagnostics.
+[**rUv Neural**](https://github.com/ruvnet/ruv-neural#readme) is a 12-crate Rust ecosystem that extends RuView's signal processing into brain network topology analysis. It transforms neural magnetic field measurements from quantum sensors (NV diamond magnetometers, optically pumped magnetometers) into dynamic connectivity graphs, using minimum cut algorithms to detect cognitive state transitions in real time. The ecosystem includes crates for signal processing (`ruv-neural-signal`), graph construction (`ruv-neural-graph`), HNSW-indexed pattern memory (`ruv-neural-memory`), graph embeddings (`ruv-neural-embed`), cognitive state decoding (`ruv-neural-decoder`), and ESP32/WASM edge targets. Medical and research applications include early neurological disease detection via topology signatures, brain-computer interfaces, clinical neurofeedback, and non-invasive biomedical sensing -- bridging RuView's RF sensing architecture with the emerging field of quantum biomedical diagnostics.
 
 </details>
 
@@ -1557,7 +1557,7 @@ WebSocket: `ws://localhost:3001/ws/sensing` (real-time sensing + vital signs)
 | Intel 5300 | Firmware mod | ~$15 | Linux `iwl-csi` |
 | Atheros AR9580 | ath9k patch | ~$20 | Linux only |
 | Any Windows WiFi | RSSI only | $0 | [Tutorial #36](https://github.com/ruvnet/RuView/issues/36) |
-| Any macOS WiFi | RSSI only (CoreWLAN) | $0 | [ADR-025](docs/adr/ADR-025-macos-corewlan-wifi-sensing.md) |
+| Any macOS WiFi | RSSI only (CoreWLAN) | $0 | [ADR-025](../docs/adr/ADR-025-macos-corewlan-wifi-sensing.md) |
 | Any Linux WiFi | RSSI only (`iw`) | $0 | Requires `iw` + `CAP_NET_ADMIN` |
 
 </details>
@@ -1603,7 +1603,7 @@ bash scripts/qemu-chaos-test.sh --faults all --duration 120
 
 **CI**: GitHub Actions workflow runs 7 NVS matrix configs, 3 fuzz targets, and NVS binary validation on every push to `firmware/`.
 
-See [ADR-061](docs/adr/ADR-061-qemu-esp32s3-firmware-testing.md) for the full architecture.
+See [ADR-061](../docs/adr/ADR-061-qemu-esp32s3-firmware-testing.md) for the full architecture.
 
 </details>
 
@@ -1634,7 +1634,7 @@ python3 scripts/qemu_swarm.py --preset standard --dry-run
 
 **9 swarm assertions**: boot check, crash detection, TDM collision, frame production, coordinator reception, fall detection, frame rate, boot time, heap health.
 
-See [ADR-062](docs/adr/ADR-062-qemu-swarm-configurator.md) and the [User Guide](docs/user-guide.md#testing-firmware-without-hardware-qemu) for step-by-step instructions.
+See [ADR-062](../docs/adr/ADR-062-qemu-swarm-configurator.md) and the [User Guide](../docs/user-guide.md#testing-firmware-without-hardware-qemu) for step-by-step instructions.
 
 </details>
 
@@ -1657,10 +1657,10 @@ wifi-densepose tasks list               # List background tasks
 <details>
 <summary><strong>Documentation Links</strong></summary>
 
-- [User Guide](docs/user-guide.md) — installation, first run, API, hardware setup, QEMU testing
-- [WiFi-Mat User Guide](docs/wifi-mat-user-guide.md) | [Domain Model](docs/ddd/wifi-mat-domain-model.md)
-- [ADR-061](docs/adr/ADR-061-qemu-esp32s3-firmware-testing.md) QEMU platform | [ADR-062](docs/adr/ADR-062-qemu-swarm-configurator.md) Swarm configurator
-- [ADR-021](docs/adr/ADR-021-vital-sign-detection-rvdna-pipeline.md) | [ADR-022](docs/adr/ADR-022-windows-wifi-enhanced-fidelity-ruvector.md) | [ADR-023](docs/adr/ADR-023-trained-densepose-model-ruvector-pipeline.md)
+- [User Guide](../docs/user-guide.md) — installation, first run, API, hardware setup, QEMU testing
+- [WiFi-Mat User Guide](../docs/wifi-mat-user-guide.md) | [Domain Model](../docs/ddd/wifi-mat-domain-model.md)
+- [ADR-061](../docs/adr/ADR-061-qemu-esp32s3-firmware-testing.md) QEMU platform | [ADR-062](../docs/adr/ADR-062-qemu-swarm-configurator.md) Swarm configurator
+- [ADR-021](../docs/adr/ADR-021-vital-sign-detection-rvdna-pipeline.md) | [ADR-022](../docs/adr/ADR-022-windows-wifi-enhanced-fidelity-ruvector.md) | [ADR-023](../docs/adr/ADR-023-trained-densepose-model-ruvector-pipeline.md)
 
 </details>
 

@@ -11,6 +11,17 @@ against a baseline — that rule is enforced in code (`ruview_claim_check`).
 
 ## Quick start
 
+The source candidate adds `--variant c5` for ESP32-C5 bundles. It verifies
+checksums and the attached chip before writing, and uses C5's `0x2000`
+bootloader address rather than S3/C6's `0x0`. C5 writes require esptool >=5.3
+for corrected security-layout handling; use an isolated active Python environment.
+The [C5 record](../../docs/validation/2026-10-28-esp32-c5-candidate.md) contains
+bounded real-board boot and CSI evidence, including AP-dependent cadence limits.
+Capture a real boot and sustained CSI run for each installation. Both flash
+validation and the SDK monitor reject watchdog/flash-busy evidence even if
+initial CSI callbacks were present. C5 skips unconfigured mmWave probing to
+avoid assigning the S3 sensor pins onto C5's flash/PSRAM bus.
+
 ```bash
 npx @ruvnet/ruview                       # onboard — pick a setup path
 npx @ruvnet/ruview claim-check --file REPORT.md   # the honesty guardrail (non-zero exit on untagged claims)
@@ -309,7 +320,8 @@ Clients that can send headers use `Authorization: Bearer <token>` on
 `http://127.0.0.1:8790/mcp`. ChatGPT connectors cannot, so expose the port over
 HTTPS (a tunnel or reverse proxy) and add `https://<host>/mcp/<token>` as the
 connector URL. Write grants (`hardware-write`, `workspace-write`) are never
-honoured over HTTP: flashing and calibration stay on the CLI and stdio.
+honoured over HTTP: flashing and calibration stay on the CLI and stdio. Malformed request targets return HTTP 400
+with `invalid_request_target`; the transport continues serving subsequent requests.
 
 In a terminal, commands print a formatted view; pipes and `--json` print JSON.
 `ruview esp32 --watch` redraws live capture windows with per-node trends.

@@ -90,6 +90,131 @@ pub struct BootstrapValidationResult {
     pub passed: bool,
 }
 
+/// Independent ADR-355 requirements. Refinement does not count empty votes.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct BootstrapValidationRequirements {
+    pub sample_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_empty_sample_count: Option<usize>,
+    pub max_stale_sample_count: usize,
+    pub max_vital_sign_sample_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct BootstrapValidationFailure {
+    pub check: &'static str,
+    pub observed: usize,
+    pub required: usize,
+    pub comparison: &'static str,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct BootstrapValidationDiagnostics {
+    pub requirements: BootstrapValidationRequirements,
+    pub failures: Vec<BootstrapValidationFailure>,
+}
+
+impl BootstrapValidationResult {
+    pub fn diagnostics(&self) -> BootstrapValidationDiagnostics {
+        validation_diagnostics(
+            self.sample_count,
+            Some(self.empty_sample_count),
+            self.stale_sample_count,
+            self.vital_sign_sample_count,
+        )
+    }
+}
+
+impl BootstrapValidationDiagnostics {
+    /// Describe every failed check, without interpreting estimates as people.
+    pub fn failure_summary(&self) -> String {
+        self.failures
+            .iter()
+            .map(|failure| match failure.check {
+                "sample_count" => format!(
+                    "{} samples collected (exactly {} required); check the CSI stream",
+                    failure.observed, failure.required,
+                ),
+                "empty_sample_count" => format!(
+                    "{} samples reported empty (at least {} required); vacate the room and check for moving objects",
+                    failure.observed, failure.required,
+                ),
+                "stale_sample_count" => format!(
+                    "{} stale samples ({} allowed); check the CSI stream",
+                    failure.observed, failure.required,
+                ),
+                _ => format!(
+                    "numeric vital-sign estimates in {}/{} samples ({} allowed); vacate the room and check for moving objects",
+                    failure.observed, self.requirements.sample_count, failure.required,
+                ),
+            })
+            .collect::<Vec<_>>()
+            .join("; ")
+    }
+}
+
+/// Explain existing gate counters without changing how samples are counted.
+/// Promotion supplies all attempted samples; refinement supplies only fresh
+/// residuals. Stale samples are a separate check, never added to sample_count.
+pub fn validation_diagnostics(
+    sample_count: usize,
+    empty_sample_count: Option<usize>,
+    stale_sample_count: usize,
+    vital_sign_sample_count: usize,
+) -> BootstrapValidationDiagnostics {
+    let requirements = BootstrapValidationRequirements {
+        sample_count: BOOTSTRAP_VALIDATION_SAMPLES,
+        min_empty_sample_count: empty_sample_count.map(|_| BOOTSTRAP_VALIDATION_MIN_EMPTY),
+        max_stale_sample_count: 0,
+        max_vital_sign_sample_count: 0,
+    };
+    let mut failures = Vec::new();
+    let checks = [
+        (
+            "sample_count",
+            sample_count,
+            requirements.sample_count,
+            "equal",
+            sample_count != requirements.sample_count,
+        ),
+        (
+            "empty_sample_count",
+            empty_sample_count.unwrap_or(0),
+            BOOTSTRAP_VALIDATION_MIN_EMPTY,
+            "at_least",
+            empty_sample_count.is_some_and(|count| count < BOOTSTRAP_VALIDATION_MIN_EMPTY),
+        ),
+        (
+            "stale_sample_count",
+            stale_sample_count,
+            requirements.max_stale_sample_count,
+            "at_most",
+            stale_sample_count != 0,
+        ),
+        (
+            "vital_sign_sample_count",
+            vital_sign_sample_count,
+            requirements.max_vital_sign_sample_count,
+            "at_most",
+            vital_sign_sample_count != 0,
+        ),
+    ];
+    for (check, observed, required, comparison, failed) in checks {
+        if failed {
+            failures.push(BootstrapValidationFailure {
+                check,
+                observed,
+                required,
+                comparison,
+            });
+        }
+    }
+    BootstrapValidationDiagnostics {
+        requirements,
+        failures,
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum BootstrapBaselineError {
     #[error("a stable installation_id is required for a local bootstrap baseline")]
@@ -503,6 +628,167 @@ mod tests {
         let mut vital = passing;
         vital[0].vital_signs_absent = false;
         assert!(!evaluate_validation(&vital).passed);
+    }
+
+    fn empty_validation_samples(count: usize) -> Vec<BootstrapValidationSample> {
+        vec![
+            BootstrapValidationSample {
+                fresh_tick: true,
+                calibrated_empty: true,
+                vital_signs_absent: true,
+            };
+            count
+        ]
+    }
+
+    #[test]
+    fn validation_diagnostics_keep_empty_tolerance_separate_from_vitals() {
+        let mut samples = empty_validation_samples(12);
+        samples[0].calibrated_empty = false;
+        samples[1].calibrated_empty = false;
+        let passing = evaluate_validation(&samples);
+        assert!(passing.passed);
+        assert_eq!(passing.empty_sample_count, 10);
+        assert!(passing.diagnostics().failures.is_empty());
+        assert!(passing.diagnostics().failure_summary().is_empty());
+
+        samples[2].calibrated_empty = false;
+        let rejected = evaluate_validation(&samples);
+        assert!(!rejected.passed);
+        assert_eq!(
+            rejected.diagnostics().failures,
+            vec![BootstrapValidationFailure {
+                check: "empty_sample_count",
+                observed: 9,
+                required: 10,
+                comparison: "at_least",
+            }]
+        );
+    }
+
+    #[test]
+    fn validation_diagnostics_explain_numeric_vital_veto_even_when_all_empty() {
+        for count in [1, 5] {
+            let mut samples = empty_validation_samples(12);
+            for sample in samples.iter_mut().take(count) {
+                sample.vital_signs_absent = false;
+            }
+            let result = evaluate_validation(&samples);
+            assert!(!result.passed);
+            assert_eq!(result.empty_sample_count, 12);
+            let diagnostics = result.diagnostics();
+            let json = serde_json::to_value(&diagnostics).unwrap();
+            assert_eq!(
+                json["requirements"],
+                serde_json::json!({
+                    "sample_count": 12,
+                    "min_empty_sample_count": 10,
+                    "max_stale_sample_count": 0,
+                    "max_vital_sign_sample_count": 0,
+                })
+            );
+            assert_eq!(
+                json["failures"],
+                serde_json::json!([{
+                    "check": "vital_sign_sample_count",
+                    "observed": count,
+                    "required": 0,
+                    "comparison": "at_most",
+                }])
+            );
+            assert!(diagnostics.failure_summary().contains(&format!(
+                "numeric vital-sign estimates in {count}/12 samples (0 allowed)"
+            )));
+        }
+    }
+
+    #[test]
+    fn validation_diagnostics_reject_stale_incomplete_and_oversized_windows() {
+        for count in [0, 11, 13] {
+            let result = evaluate_validation(&empty_validation_samples(count));
+            assert!(!result.passed);
+            let diagnostics = result.diagnostics();
+            assert_eq!(diagnostics.failures[0].check, "sample_count");
+            assert_eq!(diagnostics.failures[0].observed, count);
+            assert_eq!(diagnostics.failures[0].required, 12);
+            assert!(diagnostics
+                .failure_summary()
+                .contains("check the CSI stream"));
+        }
+        let mut samples = empty_validation_samples(12);
+        samples[0].fresh_tick = false;
+        let result = evaluate_validation(&samples);
+        assert!(!result.passed);
+        assert_eq!(result.sample_count, 12);
+        assert_eq!(result.empty_sample_count, 11);
+        assert_eq!(
+            result.diagnostics().failures,
+            vec![BootstrapValidationFailure {
+                check: "stale_sample_count",
+                observed: 1,
+                required: 0,
+                comparison: "at_most",
+            }]
+        );
+    }
+
+    #[test]
+    fn validation_diagnostics_report_all_simultaneous_failures() {
+        let mut samples = empty_validation_samples(11);
+        samples[0].fresh_tick = false;
+        samples[1].calibrated_empty = false;
+        samples[2].vital_signs_absent = false;
+        let result = evaluate_validation(&samples);
+        assert!(!result.passed);
+        let diagnostics = result.diagnostics();
+        assert_eq!(
+            diagnostics
+                .failures
+                .iter()
+                .map(|failure| failure.check)
+                .collect::<Vec<_>>(),
+            [
+                "sample_count",
+                "empty_sample_count",
+                "stale_sample_count",
+                "vital_sign_sample_count",
+            ]
+        );
+        let summary = diagnostics.failure_summary();
+        for expected in [
+            "11 samples collected (exactly 12 required)",
+            "9 samples reported empty (at least 10 required)",
+            "1 stale samples (0 allowed)",
+            "numeric vital-sign estimates in 1/12 samples (0 allowed)",
+        ] {
+            assert!(summary.contains(expected), "missing {expected}: {summary}");
+        }
+    }
+
+    #[test]
+    fn refinement_diagnostics_keep_fresh_count_and_omit_empty_vote_requirement() {
+        let diagnostics = validation_diagnostics(11, None, 1, 5);
+        let json = serde_json::to_value(&diagnostics).unwrap();
+        assert!(json["requirements"].get("min_empty_sample_count").is_none());
+        assert_eq!(
+            diagnostics
+                .failures
+                .iter()
+                .map(|failure| failure.check)
+                .collect::<Vec<_>>(),
+            [
+                "sample_count",
+                "stale_sample_count",
+                "vital_sign_sample_count",
+            ]
+        );
+        assert_eq!(diagnostics.failures[0].observed, 11);
+        assert!(diagnostics
+            .failure_summary()
+            .contains("5/12 samples (0 allowed)"));
+        let passing = validation_diagnostics(12, None, 0, 0);
+        assert!(passing.failures.is_empty());
+        assert!(passing.failure_summary().is_empty());
     }
 
     #[test]

@@ -2,6 +2,9 @@
 // negotiation, and the authenticated Streamable HTTP transport.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import http from 'node:http';
+import { createInterface } from 'node:readline';
 import { handleRpc, negotiateProtocol, SUPPORTED_PROTOCOLS, toCallToolResult } from '../src/mcp-server.js';
 import { generateToken, httpGrants, startMcpHttp } from '../src/mcp-http.js';
 import { CONSOLE_HTML, CONSOLE_URI, UI_MIME, UI_TOOLS } from '../src/ui/console-widget.js';
@@ -118,4 +121,55 @@ test('HTTP transport: auth, origin, method, size, protocol header, notifications
 
 test('HTTP transport refuses short tokens', async () => {
   await assert.rejects(startMcpHttp({ port: 0, token: 'short' }), /at least 16/);
+});
+
+
+test('HTTP transport rejects malformed request targets and continues serving', { timeout: 10_000 }, async (t) => {
+  // A child isolates the real transport: the old parser exception terminates it.
+  const moduleUrl = new URL('../src/mcp-http.js', import.meta.url).href;
+  const token = 'fixture-token-0123456789';
+  const child = spawn(process.execPath, ['--input-type=module', '-e', `
+    import { startMcpHttp } from ${JSON.stringify(moduleUrl)};
+    const srv = await startMcpHttp({ port: 0, token: ${JSON.stringify(token)}, log: () => {} });
+    console.log(srv.server.address().port);
+  `], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const lines = createInterface({ input: child.stdout });
+  let stderr = '';
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  t.after(async () => {
+    lines.close();
+    if (child.exitCode === null && child.signalCode === null) {
+      await new Promise((resolve) => { child.once('exit', resolve); child.kill(); });
+    }
+  });
+  const port = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('HTTP fixture did not start')), 3000);
+    lines.once('line', (line) => { clearTimeout(timer); resolve(Number(line)); });
+    child.once('error', (error) => { clearTimeout(timer); reject(error); });
+    child.once('exit', () => { clearTimeout(timer); reject(new Error(`HTTP fixture exited: ${stderr}`)); });
+  });
+  const base = `http://127.0.0.1:${port}`;
+  assert.equal((await fetch(`${base}/healthz`)).status, 200);
+  const malformed = await new Promise((resolve) => {
+    const request = http.request({ host: '127.0.0.1', port, path: 'http://[', method: 'GET' }, (response) => {
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk) => { body += chunk; });
+      response.on('end', () => resolve({ status: response.statusCode, body }));
+    });
+    request.setTimeout(3000, () => request.destroy(new Error('HTTP fixture request timed out')));
+    request.once('error', (error) => resolve({ error: error.code || error.message }));
+    request.end();
+  });
+  assert.equal(malformed.status, 400, 'malformed target must receive an HTTP response');
+  assert.deepEqual(JSON.parse(malformed.body), { error: 'invalid_request_target' });
+  assert.equal((await fetch(`${base}/healthz`)).status, 200, 'transport remains available');
+  assert.equal((await fetch(`${base}/mcp`, { method: 'POST', body: '{}' })).status, 401);
+  const initialized = await fetch(`${base}/mcp`, {
+    method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }),
+  });
+  assert.equal(initialized.status, 200);
+  assert.equal((await initialized.json()).id, 1);
+  assert.equal(child.exitCode, null);
 });

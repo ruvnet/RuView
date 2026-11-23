@@ -4,7 +4,9 @@ blueprint:
     When bed_exit fires in the morning window, ramp bedroom lights over
     a configurable duration, start the coffee maker, and disarm the
     home alarm. Time-window-gated so a midnight bathroom trip doesn't
-    trigger it. Part of the ADR-115 §3.12 starter blueprint set.
+    trigger it. Not yet published by the RuView server: bed_exit has no
+    server source yet, so this blueprint imports but does not fire.
+    Part of the ADR-115 §3.12 starter blueprint set.
   domain: automation
   source_url: https://github.com/ruvnet/RuView/blob/main/examples/ha-blueprints/03-wake-routine-on-bed-exit.yaml
   input:

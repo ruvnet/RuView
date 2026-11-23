@@ -119,7 +119,7 @@ const mean = (xs) => (xs.length ? Number((xs.reduce((a, b) => a + b, 0) / xs.len
 
 /** Summarize decoded frames from either model. */
 export function summarizeMmwave(model, frames, errors, bytes, seconds) {
-  const pick = (key) => frames.map((f) => f[key]).filter((v) => typeof v === 'number' && Number.isFinite(v));
+  const pick = (key, include = () => true) => frames.filter(include).map((f) => f[key]).filter((v) => typeof v === 'number' && Number.isFinite(v));
   const presence = frames.filter((f) => typeof f.present === 'boolean');
   const types = {};
   for (const f of frames) types[f.type] = (types[f.type] || 0) + 1;
@@ -129,7 +129,7 @@ export function summarizeMmwave(model, frames, errors, bytes, seconds) {
     presentFraction: presence.length ? Number((presence.filter((f) => f.present).length / presence.length).toFixed(3)) : null,
     breathingBpmMean: mean(pick('breathingBpm')),
     heartBpmMean: mean(pick('heartBpm')),
-    distanceCmMean: mean(pick('distanceCm')),
+    distanceCmMean: mean(pick('distanceCm', (f) => f.type !== 'target' || f.present !== false)),
     last: frames.slice(-5),
   };
 }
@@ -164,9 +164,11 @@ export async function readMmwave(args, deps) {
     if (!cap.ok) return { ok: false, reason: cap.reason, detail: cap.detail, remedy: cap.remedy };
     let { frames, errors } = parseMmwave(model, cap.bytes);
     attempts.push({ model, bytes: cap.bytes.length, frames: frames.length, errors });
-    if (frames.length < 2) continue;
+    if (frames.length < (auto ? 2 : 1)) continue;
     let bytes = cap.bytes.length;
     let elapsed = cap.seconds;
+    let captureIncomplete = Boolean(cap.captureIncomplete);
+    const warnings = [...(cap.warnings || [])];
     const remaining = seconds - probeSeconds;
     if (auto && remaining >= 0.5) {
       const more = await capture(model, remaining);
@@ -177,12 +179,19 @@ export async function readMmwave(args, deps) {
         errors += extra.errors;
         bytes += more.bytes.length;
         elapsed += more.seconds;
+        captureIncomplete ||= Boolean(more.captureIncomplete);
+        warnings.push(...(more.warnings || []));
+      } else {
+        captureIncomplete = true;
+        warnings.push('remaining serial capture failed; only probe frames retained');
       }
     }
     return {
       ok: true,
       ...summarizeMmwave(model, frames, errors, bytes, elapsed),
       ...(auto ? { detected: model } : {}),
+      ...(captureIncomplete ? { captureIncomplete: true } : {}),
+      ...(warnings.length ? { warnings } : {}),
       evidence: 'MEASURED: device-reported radar values read on this host (not an accuracy claim)',
     };
   }

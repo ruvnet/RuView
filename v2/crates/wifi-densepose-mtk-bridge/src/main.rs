@@ -307,8 +307,10 @@ fn listen(
             .map_err(BridgeError::Io)?;
         eprintln!("registered with CSIdump server at {server}");
     }
+    // Report the bound address, not `bind`, so `--listen <ip>:0` names its port.
     eprintln!(
-        "listening for MtkCSIdump datagrams on {bind}, sources limited to {}",
+        "listening for MtkCSIdump datagrams on {}, sources limited to {}",
+        socket.local_addr().map_err(BridgeError::Io)?,
         args.listen_allow.join(",")
     );
 

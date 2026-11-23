@@ -18,6 +18,7 @@ export const TRAIN_MODES = Object.freeze(['pose-smoke', 'pose', 'room']);
 
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
 const toPct = (v) => (v <= 1 ? v * 100 : v);
+const timeMillis = (value) => isNum(value) ? value : typeof value === 'string' ? Date.parse(value) : NaN;
 
 /**
  * Evaluate a training report. Fields:
@@ -44,8 +45,8 @@ export function trainingGate(report = {}) {
   } else warn('subjects_unreported', 'train_subjects/test_subjects not reported; cross-person generalization is unknown.');
 
   if (report.split === 'chronological' || report.split === 'blocked-gap') {
-    const end = Date.parse(report.train_end ?? '') || (isNum(report.train_end) ? report.train_end : NaN);
-    const start = Date.parse(report.test_start ?? '') || (isNum(report.test_start) ? report.test_start : NaN);
+    const end = timeMillis(report.train_end);
+    const start = timeMillis(report.test_start);
     if (!Number.isFinite(end) || !Number.isFinite(start)) fail('time_bounds_missing', 'chronological splits need train_end and test_start.');
     else if (start <= end) fail('temporal_leakage', 'test_start must be after train_end.');
   }

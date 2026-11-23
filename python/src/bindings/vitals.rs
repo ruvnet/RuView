@@ -13,14 +13,15 @@
 //!
 //! `wifi-densepose-vitals` has zero tokio deps and the extract loops
 //! are pure-sync DSP. Wrap the `.extract(...)` calls in
-//! `py.allow_threads(|| ...)` so Python users can run inference in a
+//! `py.detach(|| ...)` so Python users can run inference in a
 //! tokio-backed web server without GIL contention starving the
 //! event loop.
 
 use pyo3::prelude::*;
 
 use wifi_densepose_vitals::{
-    BreathingExtractor, HeartRateExtractor, VitalEstimate, VitalReading, VitalStatus,
+    BreathingExtractor, CsiFrame, CsiVitalPreprocessor, HeartRateExtractor, VitalEstimate,
+    VitalReading, VitalStatus,
 };
 
 // ─── VitalStatus enum ────────────────────────────────────────────────
@@ -35,7 +36,7 @@ use wifi_densepose_vitals::{
 /// VitalStatus.Unreliable  # single RSSI source / low quality
 /// VitalStatus.Unavailable # no measurement possible
 /// ```
-#[pyclass(eq, eq_int, hash, frozen, name = "VitalStatus")]
+#[pyclass(from_py_object, eq, eq_int, hash, frozen, name = "VitalStatus")]
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PyVitalStatus {
     Valid = 0,
@@ -81,7 +82,7 @@ impl PyVitalStatus {
 /// est = VitalEstimate(72.4, confidence=0.9, status=VitalStatus.Valid)
 /// print(est.value_bpm, est.confidence, est.status)
 /// ```
-#[pyclass(frozen, name = "VitalEstimate")]
+#[pyclass(from_py_object, frozen, name = "VitalEstimate")]
 #[derive(Clone)]
 pub struct PyVitalEstimate {
     inner: VitalEstimate,
@@ -182,6 +183,71 @@ impl PyVitalReading {
     }
 }
 
+// ─── CsiVitalPreprocessor ────────────────────────────────────────────
+
+/// Stage 1 of the vitals pipeline: EMA static-component suppression.
+/// Turns raw per-subcarrier amplitudes into body-modulated residuals,
+/// which are the input `BreathingExtractor` / `HeartRateExtractor` expect.
+///
+/// Python:
+/// ```python
+/// from wifi_densepose import CsiVitalPreprocessor
+///
+/// pre = CsiVitalPreprocessor.esp32_default()  # 56 subcarriers, alpha=0.05
+/// residuals = pre.process(amplitudes)          # list[float] | None
+/// ```
+#[pyclass(name = "CsiVitalPreprocessor")]
+pub struct PyCsiVitalPreprocessor {
+    inner: CsiVitalPreprocessor,
+}
+
+#[pymethods]
+impl PyCsiVitalPreprocessor {
+    /// Construct with explicit parameters. `alpha` is clamped to
+    /// `[0.001, 0.999]` by the Rust core.
+    #[new]
+    #[pyo3(signature = (n_subcarriers, alpha=0.05))]
+    fn new(n_subcarriers: usize, alpha: f64) -> Self {
+        Self { inner: CsiVitalPreprocessor::new(n_subcarriers, alpha) }
+    }
+
+    /// ESP32 defaults: 56 subcarriers, alpha = 0.05.
+    #[staticmethod]
+    fn esp32_default() -> Self {
+        Self { inner: CsiVitalPreprocessor::esp32_default() }
+    }
+
+    /// Process one frame of per-subcarrier amplitudes and return the
+    /// residual vector (observed minus EMA prediction). The first frame
+    /// seeds the EMA and returns zeros. Returns `None` for an empty frame.
+    fn process(&mut self, py: Python<'_>, amplitudes: Vec<f64>) -> Option<Vec<f64>> {
+        let n = amplitudes.len();
+        // Phases are unused by the preprocessor; CsiFrame::new only checks
+        // that the lengths agree, so pass a zero vector of matching length.
+        let frame = CsiFrame::new(amplitudes, vec![0.0; n], n, 0, 0.0)?;
+        py.detach(|| self.inner.process(&frame))
+    }
+
+    /// Clear all EMA state.
+    fn reset(&mut self) {
+        self.inner.reset();
+    }
+
+    #[getter]
+    fn alpha(&self) -> f64 { self.inner.alpha() }
+
+    #[getter]
+    fn n_subcarriers(&self) -> usize { self.inner.n_subcarriers() }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "CsiVitalPreprocessor(n_subcarriers={}, alpha={})",
+            self.inner.n_subcarriers(),
+            self.inner.alpha(),
+        )
+    }
+}
+
 // ─── BreathingExtractor ──────────────────────────────────────────────
 
 /// Extracts respiratory rate (6–30 BPM) from per-subcarrier amplitude
@@ -230,7 +296,7 @@ impl PyBreathingExtractor {
         // GIL release: see ADR-117 §7 and the Q5 tokio audit. The DSP
         // loop is pure sync, no Python objects touched, safe to run
         // without the GIL.
-        let est = py.allow_threads(|| self.inner.extract(&residuals, &weights));
+        let est = py.detach(|| self.inner.extract(&residuals, &weights));
         est.map(PyVitalEstimate::from_rust)
     }
 
@@ -293,7 +359,7 @@ impl PyHeartRateExtractor {
         residuals: Vec<f64>,
         phases: Vec<f64>,
     ) -> Option<PyVitalEstimate> {
-        let est = py.allow_threads(|| self.inner.extract(&residuals, &phases));
+        let est = py.detach(|| self.inner.extract(&residuals, &phases));
         est.map(PyVitalEstimate::from_rust)
     }
 
@@ -306,6 +372,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyVitalStatus>()?;
     m.add_class::<PyVitalEstimate>()?;
     m.add_class::<PyVitalReading>()?;
+    m.add_class::<PyCsiVitalPreprocessor>()?;
     m.add_class::<PyBreathingExtractor>()?;
     m.add_class::<PyHeartRateExtractor>()?;
     Ok(())

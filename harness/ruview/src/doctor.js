@@ -25,17 +25,33 @@ const sha = (value) => createHash('sha256').update(value).digest('hex');
 export function verifyPackageManifest(root = ROOT) {
   const path = join(root, '.harness', 'manifest.json');
   if (!existsSync(path)) return { ok: false, findings: ['manifest.json:missing'] };
-  const raw = readFileSync(path);
-  const manifest = JSON.parse(raw);
+  let raw; let manifest; let entries;
+  try {
+    raw = readFileSync(path);
+    manifest = JSON.parse(raw);
+    entries = Object.entries(manifest.files || {});
+  } catch {
+    return { ok: false, files: 0, findings: ['manifest.json:unreadable-or-invalid'] };
+  }
   const findings = [];
-  for (const [name, expected] of Object.entries(manifest.files || {})) {
+  for (const [name, expected] of entries) {
     const target = join(root, name);
     if (!existsSync(target)) findings.push(`${name}:missing`);
-    else if (sha(readFileSync(target, 'utf8').replace(/\r\n/g, '\n')) !== expected) findings.push(`${name}:hash-mismatch`);
+    else {
+      try {
+        if (sha(readFileSync(target, 'utf8').replace(/\r\n/g, '\n')) !== expected) findings.push(`${name}:hash-mismatch`);
+      } catch { findings.push(`${name}:unreadable`); }
+    }
   }
-  const outer = readFileSync(join(root, '.harness', 'manifest.sha256'), 'utf8').trim().split(/\s+/)[0];
-  if (sha(raw) !== outer) findings.push('manifest.sha256:mismatch');
-  return { ok: findings.length === 0, files: Object.keys(manifest.files || {}).length, findings };
+  const checksum = join(root, '.harness', 'manifest.sha256');
+  if (!existsSync(checksum)) findings.push('manifest.sha256:missing');
+  else {
+    try {
+      const outer = readFileSync(checksum, 'utf8').trim().split(/\s+/)[0];
+      if (sha(raw) !== outer) findings.push('manifest.sha256:mismatch');
+    } catch { findings.push('manifest.sha256:unreadable'); }
+  }
+  return { ok: findings.length === 0, files: entries.length, findings };
 }
 
 const firstLine = (text) => String(text || '').trim().split(/\r?\n/)[0]?.slice(0, 200) || '';

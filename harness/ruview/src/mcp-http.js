@@ -64,7 +64,10 @@ export function startMcpHttp(opts = {}) {
   const { dispatch } = createDispatcher({ source: 'mcp', transport: 'http', grants }, opts.handler || handleRpc);
 
   const server = http.createServer((req, res) => {
-    const url = new URL(req.url || '/', 'http://localhost');
+    let url;
+    try { url = new URL(req.url || '/', 'http://localhost'); } catch {
+      return send(res, 400, { error: 'invalid_request_target' });
+    }
     if (req.method === 'GET' && url.pathname === '/healthz') return send(res, 200, { ok: true, name: SERVER_INFO.name, version: SERVER_INFO.version });
 
     const segments = url.pathname.split('/').filter(Boolean);

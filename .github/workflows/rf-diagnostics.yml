@@ -1,0 +1,44 @@
+name: W1700K RF diagnostics
+on:
+  pull_request:
+    paths: ['tools/w1700k/**', 'docs/rf-diagnostics/**', '.github/workflows/rf-diagnostics.yml']
+  push:
+    branches: [main]
+    paths: ['tools/w1700k/**', 'docs/rf-diagnostics/**', '.github/workflows/rf-diagnostics.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: rf-diagnostics-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Bridge ABI and failure tests
+        run: make -C tools/w1700k check
+      - name: Viewer validation tests
+        run: |
+          node --test docs/rf-diagnostics/model.test.cjs
+          node --check docs/rf-diagnostics/app.js
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Stage static viewer only
+        run: |
+          mkdir -p _site
+          cp docs/rf-diagnostics/index.html docs/rf-diagnostics/model.js docs/rf-diagnostics/app.js docs/rf-diagnostics/style.css _site/
+      - name: Preserve existing Pages content
+        uses: peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./_site
+          destination_dir: rf-diagnostics
+          keep_files: true
+          commit_message: 'deploy(rf-diagnostics): ${{ github.sha }}'

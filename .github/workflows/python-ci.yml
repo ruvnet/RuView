@@ -36,6 +36,8 @@ on:
       - 'v2/crates/wifi-densepose-mat/**'
       - 'v2/crates/wifi-densepose-train/**'
       - 'v2/crates/wifi-densepose-signal/**'
+      - 'archive/v1/data/proof/sample_csi_data.json'
+      - 'archive/v1/data/proof/expected_features_v2.sha256'
       - '.github/workflows/python-ci.yml'
   pull_request:
     paths:
@@ -47,6 +49,8 @@ on:
       - 'v2/crates/wifi-densepose-mat/**'
       - 'v2/crates/wifi-densepose-train/**'
       - 'v2/crates/wifi-densepose-signal/**'
+      - 'archive/v1/data/proof/sample_csi_data.json'
+      - 'archive/v1/data/proof/expected_features_v2.sha256'
       - '.github/workflows/python-ci.yml'
   workflow_dispatch:
 
@@ -168,3 +172,66 @@ jobs:
             exit 1
           fi
           echo "Default wheel is within the 5 MiB budget."
+
+  # ADR-117 §11.3 / ADR-028 — v2 witness hash. Builds the release wheel with
+  # the same Rust pin as pip-release.yml (1.89), feeds the synthetic
+  # reference signal through the Rust vitals pipeline twice, and requires
+  # both hashes to agree. The hash is uploaded as an artifact (this is where
+  # the committed `expected_features_v2.sha256` came from) and, once that
+  # file is committed, must equal it.
+  witness-v2:
+    name: v2 witness hash (ADR-117 §11.3)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+
+      - name: Install Rust 1.89 (same pin as pip-release.yml)
+        run: |
+          rustup toolchain install 1.89 --profile minimal
+          rustup default 1.89
+          rustc --version
+
+      - name: Build release wheel
+        working-directory: python
+        run: |
+          python -m pip install --upgrade pip "maturin>=1.7,<2.0"
+          maturin build --release --out "$RUNNER_TEMP/wheel"
+
+      - name: Generate witness hash twice and compare
+        run: |
+          set -euo pipefail
+          python -m venv "$RUNNER_TEMP/wv"
+          "$RUNNER_TEMP/wv/bin/pip" install "$RUNNER_TEMP"/wheel/*.whl
+          DATA="$GITHUB_WORKSPACE/archive/v1/data/proof/sample_csi_data.json"
+          EXPECTED="$GITHUB_WORKSPACE/archive/v1/data/proof/expected_features_v2.sha256"
+          # Run outside the checkout: the repo root has a legacy
+          # wifi_densepose/ directory that would shadow the installed wheel.
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/wv/bin/python" -I -m wifi_densepose.witness --data "$DATA" | tee run1.txt
+          "$RUNNER_TEMP/wv/bin/python" -I -m wifi_densepose.witness --data "$DATA" | tee run2.txt
+          h1="$(awk '/^sha256:/ {print $2}' run1.txt)"
+          h2="$(awk '/^sha256:/ {print $2}' run2.txt)"
+          if [ -z "$h1" ] || [ "$h1" != "$h2" ]; then
+            echo "::error::witness is not deterministic: '$h1' vs '$h2'"
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/witness"
+          echo "$h1" > "$RUNNER_TEMP/witness/expected_features_v2.sha256"
+          if [ -s "$EXPECTED" ]; then
+            "$RUNNER_TEMP/wv/bin/python" -I -m wifi_densepose.witness --data "$DATA" --expected "$EXPECTED"
+          else
+            echo "::warning::expected_features_v2.sha256 not committed yet; generated $h1"
+          fi
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: witness-v2-hash
+          path: ${{ runner.temp }}/witness/expected_features_v2.sha256
+          if-no-files-found: error
