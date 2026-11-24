@@ -1,0 +1,4 @@
+{
+  "description": "The RuView live pane depends on Claude Code's function-hook engine and is unsupported on this host; this plugin's commands, skills and agents are unaffected. See harness/ruview/mod/hooks/hooks.json for the Claude Code manifest.",
+  "hooks": {}
+}
