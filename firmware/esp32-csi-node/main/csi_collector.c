@@ -52,6 +52,21 @@ static bool s_node_id_early_set = false;
 static uint8_t s_filter_mac[6] = {0};
 static bool    s_filter_mac_set = false;
 
+#if defined(CONFIG_CSI_AP_ONLY_SOURCE)
+/* AP-only source filter (all targets). MEASURED 2026-11-25 with two C5s on one
+ * AP: without it, 53-65% of emitted C5L8 frames came from the peer C5 and other
+ * stations, all passing the non-HT/106-byte/valid-estimate checks, so one
+ * "source" silently mixed transmitters. The BSSID is learned at association
+ * (WIFI_EVENT_STA_CONNECTED, or the AP record at CSI init), refreshed on
+ * reconnect/roam and cleared on disconnect. An explicit NVS filter_mac wins.
+ * Bypassed while channel hopping. With no AP known, C5L8/v1 withholds every
+ * frame (its claim needs the AP); other builds pass frames through. */
+static portMUX_TYPE s_ap_src_mux = portMUX_INITIALIZER_UNLOCKED;
+static uint8_t  s_ap_src_bssid[6] = {0};
+static bool     s_ap_src_set = false;
+static uint32_t s_ap_src_drop = 0;
+#endif
+
 /* ADR-057: Build-time guard — fail early if CSI is not enabled in sdkconfig.
  * Without this, the firmware compiles but crashes at runtime with:
  *   "E (xxxx) wifi:CSI not enabled in menuconfig!"
@@ -339,14 +354,19 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
             s_c5l8_stats_t0_us = t;
         } else if (t - s_c5l8_stats_t0_us >= (int64_t)CONFIG_C5_LLTF8_STATS_PERIOD_S * 1000000LL) {
             uint32_t cur[4 + 16 + C5L8_REJECT_COUNT];
-            cur[0] = s_c5l8_emitted; cur[1] = s_c5l8_pace_drop; cur[2] = s_early_drop; cur[3] = 0;
+            cur[0] = s_c5l8_emitted; cur[1] = s_c5l8_pace_drop; cur[2] = s_early_drop;
+#if defined(CONFIG_CSI_AP_ONLY_SOURCE)
+            cur[3] = s_ap_src_drop;
+#else
+            cur[3] = 0;
+#endif
             for (unsigned i = 0; i < 16; i++) cur[4 + i] = s_c5l8_bb_seen[i];
             for (unsigned i = 0; i < C5L8_REJECT_COUNT; i++) cur[20 + i] = s_c5l8_reject[i];
             uint32_t d[4 + 16 + C5L8_REJECT_COUNT];
             for (unsigned i = 0; i < sizeof(cur) / sizeof(cur[0]); i++) d[i] = cur[i] - s_c5l8_stats_prev[i];
             const double secs = (double)(t - s_c5l8_stats_t0_us) / 1e6;
             ESP_LOGI(TAG, "C5L8 cadence %.1fs: emitted=%lu (%.2f Hz) bb 11b=%lu legacy=%lu ht=%lu vht=%lu hesu=%lu hemu=%lu other=%lu "
-                     "| withheld fmt=%lu sec=%lu est=%lu len=%lu ch=%lu rb=%lu bw=%lu pace=%lu gate=%lu",
+                     "| withheld fmt=%lu sec=%lu est=%lu len=%lu ch=%lu rb=%lu bw=%lu src=%lu pace=%lu gate=%lu",
                      secs, (unsigned long)d[0], d[0] / secs,
                      (unsigned long)d[4 + 0], (unsigned long)d[4 + 1], (unsigned long)d[4 + 2],
                      (unsigned long)d[4 + 3], (unsigned long)d[4 + 4], (unsigned long)d[4 + 5],
@@ -354,7 +374,7 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
                      (unsigned long)d[20 + C5L8_REJECT_BB_FORMAT], (unsigned long)d[20 + C5L8_REJECT_SECONDARY],
                      (unsigned long)d[20 + C5L8_REJECT_ESTIMATE_INVALID], (unsigned long)d[20 + C5L8_REJECT_LENGTH],
                      (unsigned long)d[20 + C5L8_REJECT_CHANNEL], (unsigned long)d[20 + C5L8_REJECT_NO_READBACK],
-                     (unsigned long)d[20 + C5L8_REJECT_STA_BANDWIDTH],
+                     (unsigned long)d[20 + C5L8_REJECT_STA_BANDWIDTH], (unsigned long)d[3],
                      (unsigned long)d[1], (unsigned long)d[2]);
             memcpy(s_c5l8_stats_prev, cur, sizeof(cur));
             s_c5l8_stats_t0_us = t;
@@ -380,6 +400,23 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
             return;  /* Source MAC doesn't match filter — skip frame. */
         }
     }
+#if defined(CONFIG_CSI_AP_ONLY_SOURCE)
+    else if (s_hop_count <= 1) {
+        bool known, from_ap;
+        portENTER_CRITICAL_ISR(&s_ap_src_mux);
+        known = s_ap_src_set;
+        from_ap = known && memcmp(info->mac, s_ap_src_bssid, 6) == 0;
+        portEXIT_CRITICAL_ISR(&s_ap_src_mux);
+#if defined(CONFIG_CSI_C5_LLTF8_V1)
+        if (!from_ap) {                 /* C5L8/v1: AP frames only, AP must be known */
+#else
+        if (known && !from_ap) {        /* other builds: no AP known -> unfiltered */
+#endif
+            s_ap_src_drop++;
+            return;
+        }
+    }
+#endif
 
     /* ADR-423 D1: decide on HE estimate validity BEFORE the rate gate, so an
      * invalid frame cannot claim the 20 ms slot that a valid one would fill
@@ -749,6 +786,42 @@ static void csi_start_self_ping(void)
     }
 }
 
+void csi_collector_set_ap_source(const uint8_t *bssid, const char *via)
+{
+#if defined(CONFIG_CSI_AP_ONLY_SOURCE)
+    if (bssid == NULL) {
+        portENTER_CRITICAL(&s_ap_src_mux);
+        s_ap_src_set = false;
+        portEXIT_CRITICAL(&s_ap_src_mux);
+        ESP_LOGI(TAG, "AP-only source filter cleared (%s)", via ? via : "?");
+        return;
+    }
+    bool changed;
+    portENTER_CRITICAL(&s_ap_src_mux);
+    changed = !s_ap_src_set || memcmp(s_ap_src_bssid, bssid, 6) != 0;
+    memcpy(s_ap_src_bssid, bssid, 6);
+    s_ap_src_set = true;
+    portEXIT_CRITICAL(&s_ap_src_mux);
+    if (changed) {
+        /* Masked: never log a full MAC at info level. */
+        ESP_LOGI(TAG, "AP-only source filter: AP **:**:**:**:**:%02x via %s%s",
+                 bssid[5], via ? via : "?",
+                 s_filter_mac_set ? " (NVS filter_mac is set and takes precedence)" : "");
+    }
+#else
+    (void)bssid; (void)via;
+#endif
+}
+
+uint32_t csi_collector_get_ap_source_drops(void)
+{
+#if defined(CONFIG_CSI_AP_ONLY_SOURCE)
+    return s_ap_src_drop;
+#else
+    return 0;
+#endif
+}
+
 void csi_collector_set_node_id(uint8_t node_id)
 {
     s_node_id = node_id;
@@ -975,6 +1048,14 @@ void csi_collector_init(void)
     /* RuView#521/#954: start the connected-STA traffic source so the CSI engine
      * receives a guaranteed OFDM unicast floor even when promiscuous capture is
      * starved (display builds / quiet networks). Additive to #396/#893. */
+#if defined(CONFIG_CSI_AP_ONLY_SOURCE)
+    {
+        wifi_ap_record_t ap_rec;     /* usually associated before CSI init */
+        if (esp_wifi_sta_get_ap_info(&ap_rec) == ESP_OK) {
+            csi_collector_set_ap_source(ap_rec.bssid, "ap_info");
+        }
+    }
+#endif
     csi_start_self_ping();
 }
 

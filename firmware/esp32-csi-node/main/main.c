@@ -154,8 +154,13 @@ static void event_handler(void *arg, esp_event_base_t event_base,
 #endif
 #endif
         esp_wifi_connect();
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_CONNECTED) {
+        /* AP-only source filter: learn the BSSID, or refresh it after a roam. */
+        const wifi_event_sta_connected_t *conn = (const wifi_event_sta_connected_t *)event_data;
+        csi_collector_set_ap_source(conn->bssid, "sta_connected");
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         wifi_event_sta_disconnected_t *disc = (wifi_event_sta_disconnected_t *)event_data;
+        csi_collector_set_ap_source(NULL, "sta_disconnected");
         ESP_LOGW(TAG, "WiFi disconnected, reason=%d rssi=%d", disc->reason, disc->rssi);
         /* The 7.5 h outage was root-caused to the MAX_RETRY latch only because
          * someone was watching the console at the time. Persist it. */
