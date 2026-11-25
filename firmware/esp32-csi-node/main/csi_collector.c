@@ -611,7 +611,16 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
          * In promiscuous mode, CSI callbacks can fire 100-500+ times/sec.
          * We only need 20-50 Hz for the sensing pipeline. */
         int64_t now = esp_timer_get_time();
+#if defined(CONFIG_CSI_C5_LLTF8_V1) && CONFIG_C5_LLTF8_PACE_HZ > 0
+        /* C5L8/v1 with the pacer on: the pacer already bounds the rate (<= PACE_HZ,
+         * min spacing a quarter interval). MEASURED 2026-11-25 on one C5: this 20 ms
+         * limiter then discarded ~1% of paced catch-up frames after their sequence
+         * number was used (seq_lost 41-77 per 300 s, each a ~90-105 ms gap);
+         * without it seq_lost was 0 at a flat 20.00 Hz. */
+        if (true) {
+#else
         if ((now - s_last_send_us) >= CSI_MIN_SEND_INTERVAL_US) {
+#endif
             int ret = stream_sender_send(frame_buf, frame_len);
             if (ret > 0) {
                 s_send_ok++;
