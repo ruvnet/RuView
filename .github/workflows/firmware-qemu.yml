@@ -30,17 +30,18 @@ env:
 jobs:
   build-qemu:
     name: Build Espressif QEMU
-    runs-on: ubuntu-latest
+    # QEMU's bundled dtc fails with GCC 15 on Ubuntu 26.04. Keep the
+    # Ubuntu 24.04 / GCC 13 build environment until that dependency is updated.
+    runs-on: ubuntu-24.04
     steps:
       - name: Cache QEMU build
         id: cache-qemu
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: /opt/qemu-esp32
-          # Include date component so cache refreshes monthly when branch updates
-          key: qemu-esp32s3-${{ env.QEMU_BRANCH }}-v5
-          restore-keys: |
-            qemu-esp32s3-${{ env.QEMU_BRANCH }}-
+          # Scope native binaries to the build image; bump v1 when refreshing
+          # the floating upstream branch. Do not restore an unqualified cache.
+          key: qemu-esp32s3-ubuntu-24.04-${{ env.QEMU_BRANCH }}-v1
 
       - name: Install QEMU build dependencies
         if: steps.cache-qemu.outputs.cache-hit != 'true'
