@@ -30,7 +30,7 @@ env:
 jobs:
   build-qemu:
     name: Build Espressif QEMU
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Cache QEMU build
         id: cache-qemu
