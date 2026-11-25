@@ -26,6 +26,11 @@ following:
   estimate, or a length other than 106 bytes. `c5l8_build()` re-checks every field.
 - **Output:** a frame is emitted only as the exact 142-byte datagram, `c5l8_build()` in
   `main/c5_lltf8.c`. Refused callbacks are logged with a reason and no samples.
+- **Cadence (added 2026-11-25):** the STA associates 802.11a-only
+  (`CONFIG_C5_LLTF8_STA_11A_ONLY`, on in the C5L8 overlay) so the AP's self-ping replies are
+  non-HT OFDM, self-ping runs at 25 Hz, and a 20 Hz deadline pacer
+  (`CONFIG_C5_LLTF8_PACE_HZ`) on qualifying frames replaces the 20 ms early callback gate.
+  A `C5L8 cadence` line is logged every 10 s. See "Cadence for the room learner".
 - **First-word sanitising:** when the SDK marks the first word invalid, the first 4 I/Q bytes
   are zeroed, never removed, and ADR-018 flag bit 5 and suffix byte 13 are set.
 
@@ -160,6 +165,54 @@ repository.
 | Serial across the OTA and the image under test | `439f6a32618508921254a1c67c8eec097866d53d99c129cf923c16dfaa4cb6a0` |
 | UDP, 763 accepted frames | `dcc2ca5a48b7ba61dc47fa87ff92acd9eb1018cfdd2424cdc260a59afa337a5f` |
 
+## Cadence for the room learner (2026-11-25)
+
+Guided training on two C5s stopped with `acquisition_observed_cadence` at about 9 frames/s.
+The room learner's variable-source profile, `ReceiverCadenceBand::Arrival18To22Burst200MsV1`
+in `room_learner/temporal_acquisition.rs`, is **two-sided**: each source must deliver
+18–22 packets/s over the window and the whole period, with gaps of at most 200 ms. A source
+that is too fast fails as well as one that is too slow, so the producer has to be paced, not
+just made faster. A lower band would need a new versioned profile. One missed 102.4 ms
+beacon is already a 204.8 ms gap.
+
+Bench: one ESP32-C5 board, one AP on channel 48 at 20 MHz, about 190 s of USB serial per
+build, read from the `C5L8 cadence` line (emitted Hz, callbacks by PPDU format, withheld
+reasons, frames held back by the pacer). All figures are MEASURED on that board except where
+marked.
+
+| Build | STA mode | Qualifying callbacks/s | Emitted C5L8/v1 Hz (10 s periods) |
+|---|---|---|---|
+| C5L8/v1 as first proposed (self-ping 50 Hz, 20 ms gate) | 11ax | beacons only | 4.6 (180 s average) |
+| HE client, CSI selector widened to HE (diagnostic only, not in this branch) | 11ax | 35/s HE-SU from the AP plus legacy beacons | n/a, the frames are not non-HT |
+| 11a-only, 25 Hz self-ping, 50 ms bucket pacer (superseded) | 11a | 41/s non-HT from the AP | 18.3 (17.1–20.0) |
+| **This branch:** 11a-only, 25 Hz self-ping, 20 Hz deadline pacer | 11a | 49/s non-HT (median, min 45.5) | **20.0 (19.92–20.10)** |
+
+What this shows:
+
+- **Root cause:** with the v1 selector (legacy plus forced L-LTF, HE/VHT/HT acquisition off),
+  HE/VHT frames produce no CSI callback at all. The pre-gate's format counter stayed at 0. On
+  an HE AP the only qualifying frames were beacons. On top of that, legacy frames arrive in
+  bursts, and the 20 ms early gate dropped about 70% of them before they could be sent.
+- **11a-only fixes the source:** the AP's unicast replies become non-HT OFDM, are 106 bytes
+  and valid, and arrive well above 20/s. The pacer then holds the emitted rate at 20 Hz.
+- **CSI from ACKs** (`dump_ack_en`) added no measurable qualifying frames on this AP. It is not
+  in this branch.
+- **The protocol setting persists:** `esp_wifi_set_protocols()` is stored in the Wi-Fi NVS
+  config. An image that does not set protocols keeps associating as 11a after an 11a-only
+  build. With `CONFIG_C5_LLTF8_STA_11A_ONLY=n`, this branch re-asserts the a/n/ac/ax default at
+  boot.
+- **Costs at a customer site:** the node is a legacy client. Some APs refuse legacy-only
+  clients, or enable HT protection while one is associated.
+- **Not shown:** learner acceptance end to end (to be rerun on channel 157), other APs and
+  channels, more than one board at a time, and cross-node pacer alignment. The pacer runs on
+  local time.
+
+Sample stats line from the run above (10 s window):
+
+```
+C5L8 cadence 10.0s: emitted=200 (20.00 Hz) bb 11b=0 legacy=573 ht=0 vht=0 hesu=0 hemu=0 other=0 | withheld fmt=0 sec=0 est=0 len=0 ch=0 rb=0 bw=0 pace=373 gate=0
+```
+
 ## OTA
 
 The board was running the first C5L8/v1 build from `ota_0` (state `valid`). The image under
@@ -180,7 +233,8 @@ on stdin and was not written to disk or logged.
 ## Limits
 
 - **One board, one network:** one ESP32-C5 (4 MB flash), one AP on channel 48, about 100 s
-  of live capture. No other channel was exercised on hardware.
+  of live capture (and about 190 s per build for the 2026-11-25 cadence runs). No other channel
+  was exercised on hardware.
 - **Flag coverage:** live frames all had flags `0x10`. The sanitised (`0x30`) and no-sync
   paths are covered only by synthetic frames.
 - **Version string:** the image under test reports the same `version`, `date` and `time` in

@@ -126,6 +126,29 @@ static void event_handler(void *arg, esp_event_base_t event_base,
         ESP_ERROR_CHECK(esp_wifi_set_band_mode(WIFI_BAND_MODE_5G_ONLY));
         wifi_bandwidths_t c5l8_bw = { .ghz_2g = WIFI_BW20, .ghz_5g = WIFI_BW20 };
         ESP_ERROR_CHECK(esp_wifi_set_bandwidths(WIFI_IF_STA, &c5l8_bw));
+#if defined(CONFIG_C5_LLTF8_STA_11A_ONLY)
+        /* C5L8/v1: associate as an 802.11a-only (non-HT) station so every
+         * unicast frame the AP sends this node, including self-ping replies,
+         * is non-HT OFDM and therefore C5L8/v1-qualifying. */
+        wifi_protocols_t c5l8_proto = { .ghz_2g = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G,
+                                        .ghz_5g = WIFI_PROTOCOL_11A };
+        esp_err_t c5l8_perr = esp_wifi_set_protocols(WIFI_IF_STA, &c5l8_proto);
+        wifi_protocols_t c5l8_rb = {0};
+        esp_err_t c5l8_rerr = esp_wifi_get_protocols(WIFI_IF_STA, &c5l8_rb);
+        ESP_LOGI(TAG, "C5L8 11a-only STA: set=%s readback=%s 5g=0x%02x",
+                 esp_err_to_name(c5l8_perr), esp_err_to_name(c5l8_rerr), (unsigned)c5l8_rb.ghz_5g);
+#else
+        /* MEASURED 2026-11-25: esp_wifi_set_protocols() persists in the Wi-Fi NVS
+         * config, so an 11a-only build leaves the next image associating as 11a.
+         * Every other C5L8 build re-asserts the 5 GHz default (a/n/ac/ax). */
+        wifi_protocols_t c5l8_proto = { .ghz_2g = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_11AX,
+                                        .ghz_5g = WIFI_PROTOCOL_11A | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_11AC | WIFI_PROTOCOL_11AX };
+        esp_err_t c5l8_perr = esp_wifi_set_protocols(WIFI_IF_STA, &c5l8_proto);
+        wifi_protocols_t c5l8_rb = {0};
+        esp_err_t c5l8_rerr = esp_wifi_get_protocols(WIFI_IF_STA, &c5l8_rb);
+        ESP_LOGI(TAG, "C5L8 STA protocols restored to default: set=%s readback=%s 5g=0x%02x",
+                 esp_err_to_name(c5l8_perr), esp_err_to_name(c5l8_rerr), (unsigned)c5l8_rb.ghz_5g);
+#endif
 #else
         ESP_ERROR_CHECK(esp_wifi_set_band_mode(WIFI_BAND_MODE_2G_ONLY));
 #endif

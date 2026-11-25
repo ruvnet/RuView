@@ -15,3 +15,11 @@ CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 # CONFIG_ESP_CONSOLE_UART_DEFAULT is not set
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 # CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG is not set
+# Cadence for the room learner's two-sided 18-22 Hz variable-source band (MEASURED
+# 2026-11-25, docs/validation/2026-11-23-c5-c5l8v1-firmware-validation.md): associate
+# as 11a-only so the AP's self-ping replies are non-HT and qualify, ping at 25 Hz,
+# and pace emitted C5L8/v1 frames to 20 Hz. Stats line "C5L8 cadence" every 10 s.
+CONFIG_C5_LLTF8_STA_11A_ONLY=y
+CONFIG_CSI_SELF_PING_HZ=25
+CONFIG_C5_LLTF8_PACE_HZ=20
+CONFIG_C5_LLTF8_STATS_PERIOD_S=10

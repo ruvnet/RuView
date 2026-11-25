@@ -123,7 +123,7 @@ static int64_t s_last_send_us = 0;
 static int64_t s_last_process_us = 0;
 /* Mesh-epoch window index of the last accepted frame. UINT64_MAX means "none
  * yet", which no real bucket can collide with. */
-static uint64_t s_last_gate_bucket = UINT64_MAX;
+static uint64_t s_last_gate_bucket __attribute__((unused)) = UINT64_MAX;
 static uint32_t s_early_drop = 0;
 
 /* ADR-423 D1: HE-LTF validity gate. Counted for every HE PPDU the driver
@@ -162,6 +162,19 @@ static bool     s_c5l8_readback_ok = false;
 static uint8_t  s_c5l8_sta_bw_mhz  = 0;
 static uint32_t s_c5l8_emitted = 0;
 static uint32_t s_c5l8_reject[C5L8_REJECT_COUNT] = {0};
+/* C5L8/v1 cadence diagnostics: every callback by cur_bb_format, and the
+ * qualifying frames the pacer withheld. */
+static uint32_t s_c5l8_bb_seen[16] = {0};
+static uint32_t s_c5l8_pace_drop = 0;
+#if CONFIG_C5_LLTF8_PACE_HZ > 0
+#define C5L8_PACE_INTERVAL_US (1000000U / CONFIG_C5_LLTF8_PACE_HZ)
+static int64_t  s_c5l8_pace_deadline_us = 0;
+static uint64_t s_c5l8_pace_last_accept_us = UINT64_MAX;  /* local us of last accept */
+#endif
+#if CONFIG_C5_LLTF8_STATS_PERIOD_S > 0
+static int64_t  s_c5l8_stats_t0_us = 0;
+static uint32_t s_c5l8_stats_prev[4 + 16 + C5L8_REJECT_COUNT] = {0};
+#endif
 #endif
 
 /**
@@ -311,9 +324,44 @@ size_t csi_serialize_frame(const wifi_csi_info_t *info, uint8_t *buf, size_t buf
 /**
  * WiFi CSI callback — invoked by ESP-IDF when CSI data is available.
  */
+
 static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
 {
     (void)ctx;
+#ifdef CONFIG_CSI_C5_LLTF8_V1
+    s_c5l8_bb_seen[info->rx_ctrl.cur_bb_format & 0xFu]++;
+#if CONFIG_C5_LLTF8_STATS_PERIOD_S > 0
+    {
+        /* One line per period: callbacks by PPDU format, emitted frames and
+         * withheld reasons as deltas, so cadence is readable from serial alone. */
+        const int64_t t = esp_timer_get_time();
+        if (s_c5l8_stats_t0_us == 0) {
+            s_c5l8_stats_t0_us = t;
+        } else if (t - s_c5l8_stats_t0_us >= (int64_t)CONFIG_C5_LLTF8_STATS_PERIOD_S * 1000000LL) {
+            uint32_t cur[4 + 16 + C5L8_REJECT_COUNT];
+            cur[0] = s_c5l8_emitted; cur[1] = s_c5l8_pace_drop; cur[2] = s_early_drop; cur[3] = 0;
+            for (unsigned i = 0; i < 16; i++) cur[4 + i] = s_c5l8_bb_seen[i];
+            for (unsigned i = 0; i < C5L8_REJECT_COUNT; i++) cur[20 + i] = s_c5l8_reject[i];
+            uint32_t d[4 + 16 + C5L8_REJECT_COUNT];
+            for (unsigned i = 0; i < sizeof(cur) / sizeof(cur[0]); i++) d[i] = cur[i] - s_c5l8_stats_prev[i];
+            const double secs = (double)(t - s_c5l8_stats_t0_us) / 1e6;
+            ESP_LOGI(TAG, "C5L8 cadence %.1fs: emitted=%lu (%.2f Hz) bb 11b=%lu legacy=%lu ht=%lu vht=%lu hesu=%lu hemu=%lu other=%lu "
+                     "| withheld fmt=%lu sec=%lu est=%lu len=%lu ch=%lu rb=%lu bw=%lu pace=%lu gate=%lu",
+                     secs, (unsigned long)d[0], d[0] / secs,
+                     (unsigned long)d[4 + 0], (unsigned long)d[4 + 1], (unsigned long)d[4 + 2],
+                     (unsigned long)d[4 + 3], (unsigned long)d[4 + 4], (unsigned long)d[4 + 5],
+                     (unsigned long)(d[4 + 6] + d[4 + 7] + d[4 + 11]),
+                     (unsigned long)d[20 + C5L8_REJECT_BB_FORMAT], (unsigned long)d[20 + C5L8_REJECT_SECONDARY],
+                     (unsigned long)d[20 + C5L8_REJECT_ESTIMATE_INVALID], (unsigned long)d[20 + C5L8_REJECT_LENGTH],
+                     (unsigned long)d[20 + C5L8_REJECT_CHANNEL], (unsigned long)d[20 + C5L8_REJECT_NO_READBACK],
+                     (unsigned long)d[20 + C5L8_REJECT_STA_BANDWIDTH],
+                     (unsigned long)d[1], (unsigned long)d[2]);
+            memcpy(s_c5l8_stats_prev, cur, sizeof(cur));
+            s_c5l8_stats_t0_us = t;
+        }
+    }
+#endif
+#endif
 
     /* ADR-060: MAC address filtering — MOVED ABOVE the rate gate.
      *
@@ -401,7 +449,13 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
      * a crash, not for tidiness. */
     int64_t now_us = esp_timer_get_time();
     bool take;
-#ifdef CONFIG_CSI_GATE_MESH_ALIGNED
+#if defined(CONFIG_CSI_C5_LLTF8_V1) && CONFIG_C5_LLTF8_PACE_HZ > 0
+    /* C5L8/v1 with the pacer on: the pacer (<= PACE_HZ, after the C5L8 checks,
+     * before any send) is the rate limit. MEASURED 2026-11-25 on one C5: legacy
+     * frames arrive in bursts, and this 20 ms gate dropped ~70% of qualifying
+     * frames before they could be sent. */
+    take = true;
+#elif defined(CONFIG_CSI_GATE_MESH_ALIGNED)
     if (c6_sync_espnow_is_valid()) {
         uint64_t bucket = c6_sync_espnow_get_epoch_us()
                         / (uint64_t)CSI_MIN_PROCESS_INTERVAL_US;
@@ -470,10 +524,38 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
             }
             return;
         }
+#if CONFIG_C5_LLTF8_PACE_HZ > 0
+        {
+            /* C5L8/v1 pacer: with a qualifying source faster than PACE_HZ this yields
+             * ~PACE_HZ, which the learner's two-sided Arrival18To22 band needs. Only
+             * frames that passed every C5L8 check can claim a slot. */
+            const int64_t pnow = esp_timer_get_time();
+            /* Deadline pacer. MEASURED: absolute 50 ms buckets with a half-window
+             * floor emitted only 17.1-20.0 Hz from 35-41 qualifying/s.
+             * Accept the first qualifying frame at/after the deadline, then advance the
+             * deadline by exactly one interval, so a late frame is followed by an
+             * earlier one and the average stays at PACE_HZ. Catch-up is capped at one
+             * interval after a source outage; minimum spacing is a quarter interval. */
+            if (s_c5l8_pace_deadline_us == 0) {
+                s_c5l8_pace_deadline_us = pnow;            /* deadline */
+            }
+            if (pnow < s_c5l8_pace_deadline_us
+                || (s_c5l8_pace_last_accept_us != UINT64_MAX
+                    && (uint64_t)pnow - s_c5l8_pace_last_accept_us < (uint64_t)(C5L8_PACE_INTERVAL_US / 4))) {
+                s_c5l8_pace_drop++;
+                return;
+            }
+            s_c5l8_pace_deadline_us += C5L8_PACE_INTERVAL_US;
+            if (s_c5l8_pace_deadline_us < pnow - (int64_t)C5L8_PACE_INTERVAL_US) {
+                s_c5l8_pace_deadline_us = pnow + C5L8_PACE_INTERVAL_US / 2;   /* outage: no burst */
+            }
+            s_c5l8_pace_last_accept_us = (uint64_t)pnow;   /* last accept time */
+        }
+#endif
         s_sequence++;
         s_c5l8_emitted++;
         if (s_c5l8_emitted <= 3 || (s_c5l8_emitted % 1000) == 0) {
-            ESP_LOGI(TAG, "C5L8/v1 emitted #%lu (%u B, flags=0x%02x, %lu MHz)",
+            ESP_LOGI(TAG, "C5L8 emitted #%lu (%u B, flags=0x%02x, %lu MHz)",
                      (unsigned long)s_c5l8_emitted, (unsigned)frame_len, frame_buf[19],
                      (unsigned long)(5000u + 5u * info->rx_ctrl.channel));
         }
