@@ -187,12 +187,65 @@ def parse_packet(data: bytes) -> dict | None:
         return None
     magic = struct.unpack_from("<I", data)[0]
     if magic == MAGIC_FEATURES:
-        return _validate_features(parse_feature_packet(data))
+        parsed, kind = _validate_features(parse_feature_packet(data)), "features"
     elif magic == MAGIC_VITALS:
-        return _validate_features(parse_vitals_packet(data))
+        parsed, kind = _validate_features(parse_vitals_packet(data)), "vitals"
     elif magic == MAGIC_CSI_RAW:
-        return _validate_features(parse_raw_csi_packet(data))
-    return None
+        parsed, kind = _validate_features(parse_raw_csi_packet(data)), "raw"
+    else:
+        return None
+    if parsed is not None:
+        parsed["kind"] = kind
+    return parsed
+
+
+# How long a node counts as "producing real features" after its last
+# features/vitals packet. Used by the "fallback" raw-CSI policy.
+REAL_FEATURE_STALE_S = 5.0
+
+RAW_CSI_POLICIES = ("ingest", "drop", "fallback")
+
+
+def should_ingest(parsed: dict, last_real_seen: dict[int, float],
+                  now: float, raw_policy: str) -> bool:
+    """Decide whether one parsed packet becomes a Seed vector.
+
+    Why this exists: on edge tier 2 a node streams three packet kinds to the
+    same UDP target -- ADR-069 features (~1 Hz), ADR-039 vitals (~1 Hz), and
+    raw ADR-018 CSI (~30-40 pps on a C6). parse_raw_csi_packet() turns raw CSI
+    into a placeholder vector (constants + RSSI), so with "ingest" the
+    placeholders outnumber the real vectors roughly 30:1 and crowd the kNN
+    store. Behind a sensing-server --udp-tee every raw frame reaches us.
+
+    Args:
+        parsed: output of parse_packet(); parsed["kind"] is "features",
+            "vitals" or "raw", and parsed["node_id"] identifies the node.
+        last_real_seen: per-node monotonic time of the last features/vitals
+            packet. This function owns it: update it here.
+        now: time.monotonic() at receipt.
+        raw_policy: one of RAW_CSI_POLICIES.
+            "ingest"   -- keep everything (the bridge's original behaviour).
+            "drop"     -- never ingest raw CSI.
+            "fallback" -- ingest raw CSI only for a node that has sent no
+                          features/vitals for REAL_FEATURE_STALE_S seconds.
+
+    Returns:
+        True to append the vector to the ingest batch, False to skip it.
+    """
+    if raw_policy == "ingest":
+        return True
+    node = parsed["node_id"]
+    if parsed["kind"] != "raw":
+        # Real features/vitals always pass and refresh the node's timestamp.
+        last_real_seen[node] = now
+        return True
+    if raw_policy == "drop":
+        return False
+    # "fallback": a node never heard from counts as stale, so tier-0 nodes
+    # (raw CSI only) still reach the Seed. Raw frames never refresh the
+    # timestamp, or placeholders would keep a node looking "fresh".
+    last = last_real_seen.get(node)
+    return last is None or (now - last) > REAL_FEATURE_STALE_S
 
 
 def _make_vector_id(node_id: int, timestamp_us: int, seq_counter: int) -> int:
@@ -408,7 +461,8 @@ def run_bridge(args):
     )
 
     batch: list[tuple[int, list[float]]] = []
-    stats = {"received": 0, "ingested": 0, "errors": 0, "batches": 0}
+    stats = {"received": 0, "ingested": 0, "errors": 0, "batches": 0, "skipped": 0}
+    last_real_seen: dict[int, float] = {}
     validation_stats = {"queries": 0, "exact_matches": 0, "pir_readings": 0, "pir_agreements": 0}
     last_log = time.time()
     last_flush = time.time()
@@ -430,8 +484,9 @@ def run_bridge(args):
                 # Periodic status log
                 if now - last_log > 30:
                     log.info(
-                        "Stats: received=%d ingested=%d batches=%d errors=%d",
+                        "Stats: received=%d ingested=%d batches=%d errors=%d skipped=%d",
                         stats["received"], stats["ingested"], stats["batches"], stats["errors"],
+                        stats["skipped"],
                     )
                     if args.validate and validation_stats["pir_readings"] > 0:
                         rate = validation_stats["pir_agreements"] / validation_stats["pir_readings"] * 100
@@ -453,6 +508,10 @@ def run_bridge(args):
 
             parsed = parse_packet(data)
             if parsed is None:
+                continue
+
+            if not should_ingest(parsed, last_real_seen, time.monotonic(), args.raw_csi):
+                stats["skipped"] += 1
                 continue
 
             stats["received"] += 1
@@ -649,6 +708,15 @@ def main():
         default=None,
         help="Comma-separated list of allowed source IPs for UDP packets "
              "(e.g. '192.168.1.105,192.168.1.106'). Packets from other IPs are dropped.",
+    )
+    parser.add_argument(
+        "--raw-csi",
+        choices=RAW_CSI_POLICIES,
+        default="ingest",
+        help="What to do with raw ADR-018 CSI frames, which only yield a placeholder "
+             "vector: ingest (default, original behaviour), drop, or fallback "
+             "(only for nodes not sending features/vitals). Use drop or fallback "
+             "behind sensing-server --udp-tee.",
     )
     args = parser.parse_args()
 
