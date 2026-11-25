@@ -480,7 +480,7 @@ class Observatory {
 
     // Updates
     this._nebula.update(dt, elapsed);
-    this._figurePool.update(data, elapsed, sensingService.modality);
+    this._figurePool.update(data, elapsed, sensingService.modality, fromServer);
     this._scenarioProps.update(data, fromServer ? null : this._demoData.currentScenario);
     this._updateDotMatrixMist(data, elapsed);
     this._updateParticleTrail(data, dt, elapsed);
