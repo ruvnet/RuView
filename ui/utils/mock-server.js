@@ -90,7 +90,7 @@ export class MockServer {
       status: 'ready',
       source: 'simulated',
       source_state: 'synthetic',
-      waiting_for_frames: true,
+      waiting_for_frames: false,
       last_frame_age_ms: null,
       trust: { witness: 'none', privacy_level: 'standard', recalibration_flag: false },
       node_positions: {
