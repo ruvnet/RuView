@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RuView Pipeline — perceive → verify → fuse</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: rgba(17,24,39,.92); --panel-border: rgba(56,68,89,.6);
+    --text: #e0e0e0; --dim: #8899aa; --dimmer: #6b7a8d;
+    --green: #51cf66; --amber: #ffd166; --red: #ff6b6b; --blue: #667eea; --purple: #764ba2;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 20px; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 13px;
+  }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .subtitle { color: var(--dim); font-size: 12px; margin: 0 0 16px; }
+  .flow { display: flex; align-items: center; gap: 6px; margin-bottom: 18px; flex-wrap: wrap; font-size: 12px; color: var(--dim); }
+  .flow .stage { padding: 4px 10px; border-radius: 12px; border: 1px solid var(--panel-border); background: var(--panel); }
+  .flow .arrow { color: var(--dimmer); }
+  .config-bar {
+    display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 18px;
+    padding: 10px 12px; background: var(--panel); border: 1px solid var(--panel-border); border-radius: 8px;
+  }
+  .config-bar label { display: flex; align-items: center; gap: 6px; color: var(--dim); font-size: 11px; }
+  .config-bar input {
+    background: rgba(30,40,60,.8); border: 1px solid var(--panel-border); border-radius: 4px;
+    color: var(--text); padding: 4px 8px; font-size: 12px; width: 160px;
+  }
+  .config-bar input[type="password"] { width: 120px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 8px; overflow: hidden; }
+  .panel-header {
+    display: flex; align-items: center; justify-content: space-between; padding: 12px 14px;
+    background: rgba(13,17,23,.95); border-bottom: 1px solid var(--panel-border);
+  }
+  .panel-title { font-weight: 600; font-size: 13px; }
+  .badge { font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 10px; border: 1px solid; }
+  .badge-ok { color: var(--green); border-color: rgba(81,207,102,.4); background: rgba(81,207,102,.12); }
+  .badge-warn { color: var(--amber); border-color: rgba(255,209,102,.4); background: rgba(255,209,102,.12); }
+  .badge-bad { color: var(--red); border-color: rgba(255,107,107,.4); background: rgba(255,107,107,.12); }
+  .badge-off { color: var(--dimmer); border-color: rgba(107,122,141,.4); background: rgba(107,122,141,.12); }
+  .panel-body { padding: 14px; }
+  .metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .metric { background: rgba(13,17,23,.6); border: 1px solid rgba(56,68,89,.3); border-radius: 4px; padding: 8px 10px; }
+  .metric-label { font-size: 9px; color: var(--dimmer); text-transform: uppercase; letter-spacing: .4px; }
+  .metric-value { font-size: 15px; font-weight: 500; margin-top: 3px; }
+  .domain-card {
+    margin-top: 12px; padding: 12px; border-radius: 6px; border: 1px solid;
+  }
+  .domain-known { border-color: rgba(81,207,102,.4); background: rgba(81,207,102,.08); }
+  .domain-degraded { border-color: rgba(255,209,102,.4); background: rgba(255,209,102,.08); }
+  .domain-unknown { border-color: rgba(255,107,107,.4); background: rgba(255,107,107,.08); }
+  .domain-off { border-color: rgba(107,122,141,.4); background: rgba(107,122,141,.06); color: var(--dimmer); }
+  .domain-state-label { font-size: 15px; font-weight: 700; letter-spacing: .3px; }
+  .domain-cause { font-size: 11px; color: var(--dim); margin-top: 2px; }
+  .inference-row {
+    display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid rgba(56,68,89,.2);
+  }
+  .inference-row:last-child { border-bottom: none; }
+  .inference-label { flex: 1; font-size: 12px; }
+  .inference-bar-track { flex: 1; height: 6px; background: rgba(30,40,60,.8); border-radius: 3px; overflow: hidden; }
+  .inference-bar-fill { height: 100%; background: linear-gradient(90deg, var(--blue), var(--purple)); }
+  .inference-conf { font-size: 11px; color: var(--dim); width: 40px; text-align: right; }
+  .empty { color: var(--dimmer); font-size: 12px; padding: 10px 0; text-align: center; }
+  .footer-note { color: var(--dimmer); font-size: 10px; margin-top: 4px; }
+  .stat-strip { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  .stat-chip { background: rgba(13,17,23,.6); border: 1px solid rgba(56,68,89,.3); border-radius: 10px; padding: 3px 8px; font-size: 10px; color: var(--dim); }
+  .stat-chip b { color: var(--text); }
+</style>
+</head>
+<body>
+
+<h1>RuView Pipeline</h1>
+<p class="subtitle">One view across everything built tonight — no single source is fabricated when unreachable; a disconnected panel says so.</p>
+
+<div class="flow">
+  <span class="stage">RuView senses</span><span class="arrow">→</span>
+  <span class="stage">ADR-302 OOD gate verifies domain</span><span class="arrow">→</span>
+  <span class="stage">RuField signs the event</span><span class="arrow">→</span>
+  <span class="stage">RuCelium ingests + verifies</span><span class="arrow">→</span>
+  <span class="stage">RuFieldFusion infers room state</span>
+</div>
+
+<div class="config-bar">
+  <label>RuView URL <input id="cfg-ruview-url" value="http://127.0.0.1:8080"></label>
+  <label>RuView token <input id="cfg-ruview-token" type="password" placeholder="optional"></label>
+  <label>RuCelium URL <input id="cfg-rucelium-url" value="http://127.0.0.1:7465"></label>
+  <label>Poll (ms) <input id="cfg-poll-ms" value="1000" style="width:60px"></label>
+</div>
+
+<div class="grid">
+
+  <!-- ===================== RuView ===================== -->
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">RuView — live sensing</span>
+      <span id="ruview-status" class="badge badge-off">—</span>
+    </div>
+    <div class="panel-body">
+      <div class="metrics">
+        <div class="metric"><div class="metric-label">Presence</div><div id="rv-presence" class="metric-value">—</div></div>
+        <div class="metric"><div class="metric-label">Motion level</div><div id="rv-motion" class="metric-value">—</div></div>
+        <div class="metric"><div class="metric-label">Confidence</div><div id="rv-confidence" class="metric-value">—</div></div>
+        <div class="metric"><div class="metric-label">Mean RSSI</div><div id="rv-rssi" class="metric-value">—</div></div>
+        <div class="metric"><div class="metric-label">Variance</div><div id="rv-variance" class="metric-value">—</div></div>
+        <div class="metric"><div class="metric-label">Est. persons</div><div id="rv-persons" class="metric-value">—</div></div>
+      </div>
+
+      <div id="rv-domain-card" class="domain-card domain-off">
+        <div class="domain-state-label" id="rv-domain-state">OOD gate: not queried</div>
+        <div class="domain-cause" id="rv-domain-cause">Waiting for first poll…</div>
+        <div class="footer-note" id="rv-domain-meta"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== RuCelium ===================== -->
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">RuCelium — RF ingest + fusion</span>
+      <span id="rucelium-status" class="badge badge-off">—</span>
+    </div>
+    <div class="panel-body">
+      <div class="metrics">
+        <div class="metric"><div class="metric-label">Upstream</div><div id="rc-upstream" class="metric-value" style="font-size:11px">—</div></div>
+        <div class="metric"><div class="metric-label">Events verified</div><div id="rc-verified" class="metric-value">—</div></div>
+        <div class="metric"><div class="metric-label">Events unverified</div><div id="rc-unverified" class="metric-value">—</div></div>
+        <div class="metric"><div class="metric-label">Poll failures</div><div id="rc-failures" class="metric-value">—</div></div>
+      </div>
+
+      <div style="margin-top:12px">
+        <div class="metric-label" style="margin-bottom:6px">Fused room-state inferences (RuFieldFusion)</div>
+        <div id="rc-inferences"><div class="empty">No inferences yet</div></div>
+      </div>
+
+      <div class="stat-strip" id="rc-biome-stats"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // This page is normally served BY RuView itself (ui/pipeline.html), so the
+  // primary case is same-origin: default the RuView URL field to the page's
+  // own origin rather than a hardcoded host. Browsers treat `localhost` and
+  // `127.0.0.1` as *different* origins even though they resolve to the same
+  // machine — a hardcoded default would silently force a needless
+  // cross-origin (CORS-blocked) fetch whenever the page happened to be
+  // opened via the other name. Only applied before any saved override exists.
+  try {
+    if (!localStorage.getItem('ruview-pipeline-dashboard:cfg-ruview-url')) {
+      document.getElementById('cfg-ruview-url').value = window.location.origin;
+    }
+  } catch (e) { /* storage unavailable — the hardcoded default still works for the common case */ }
+
+  // ---- persisted config ----
+  const cfgIds = ['cfg-ruview-url', 'cfg-ruview-token', 'cfg-rucelium-url', 'cfg-poll-ms'];
+  const LS_PREFIX = 'ruview-pipeline-dashboard:';
+  cfgIds.forEach(id => {
+    try {
+      const saved = localStorage.getItem(LS_PREFIX + id);
+      if (saved !== null) document.getElementById(id).value = saved;
+    } catch (e) { /* storage unavailable — fine, just don't persist */ }
+    document.getElementById(id).addEventListener('change', (e) => {
+      try { localStorage.setItem(LS_PREFIX + id, e.target.value); } catch (e2) {}
+    });
+  });
+
+  function cfg() {
+    return {
+      ruviewUrl: document.getElementById('cfg-ruview-url').value.replace(/\/$/, ''),
+      ruviewToken: document.getElementById('cfg-ruview-token').value.trim(),
+      ruceliumUrl: document.getElementById('cfg-rucelium-url').value.replace(/\/$/, ''),
+      pollMs: Math.max(300, parseInt(document.getElementById('cfg-poll-ms').value, 10) || 1000),
+    };
+  }
+
+  function setBadge(el, state, text) {
+    el.className = 'badge badge-' + state;
+    el.textContent = text;
+  }
+
+  function fmt(n, digits) {
+    if (n === null || n === undefined || Number.isNaN(n)) return '—';
+    return typeof n === 'number' ? n.toFixed(digits === undefined ? 1 : digits) : String(n);
+  }
+
+  // ---- RuView poll ----
+  async function pollRuView() {
+    const c = cfg();
+    const statusEl = document.getElementById('ruview-status');
+    try {
+      const headers = {};
+      if (c.ruviewToken) headers['Authorization'] = 'Bearer ' + c.ruviewToken;
+      const resp = await fetch(c.ruviewUrl + '/api/v1/sensing/latest', { headers });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const d = await resp.json();
+
+      setBadge(statusEl, 'ok', 'LIVE — ' + (d.source || '?'));
+
+      const cls = d.classification || {};
+      document.getElementById('rv-presence').textContent = cls.presence === true ? 'present' : cls.presence === false ? 'absent' : '—';
+      document.getElementById('rv-motion').textContent = cls.motion_level || '—';
+      document.getElementById('rv-confidence').textContent = cls.confidence != null ? (cls.confidence * 100).toFixed(0) + '%' : '—';
+
+      const f = d.features || {};
+      document.getElementById('rv-rssi').textContent = f.mean_rssi != null ? fmt(f.mean_rssi, 1) + ' dBm' : '—';
+      document.getElementById('rv-variance').textContent = f.variance != null ? fmt(f.variance, 2) : '—';
+      document.getElementById('rv-persons').textContent = d.estimated_persons != null ? d.estimated_persons : '—';
+
+      // ADR-302 domain_state — absent means the OOD gate isn't enabled on
+      // this server (--calibration-certificate not set), not an error.
+      const card = document.getElementById('rv-domain-card');
+      const stateEl = document.getElementById('rv-domain-state');
+      const causeEl = document.getElementById('rv-domain-cause');
+      const metaEl = document.getElementById('rv-domain-meta');
+      const ds = d.domain_state;
+      if (!ds) {
+        card.className = 'domain-card domain-off';
+        stateEl.textContent = 'OOD gate: disabled';
+        causeEl.textContent = 'Server started without --calibration-certificate — this is not a fault, it is opt-in.';
+        metaEl.textContent = '';
+      } else {
+        const state = ds.state;
+        const isKnown = state === 'Known';
+        const isDegraded = typeof state === 'object' && state && state.Degraded;
+        const isUnknown = typeof state === 'object' && state && state.Unknown;
+        card.className = 'domain-card ' + (isKnown ? 'domain-known' : isDegraded ? 'domain-degraded' : 'domain-unknown');
+        stateEl.textContent = isKnown ? 'KNOWN' : isDegraded ? 'DEGRADED — ' + state.Degraded : isUnknown ? 'UNKNOWN — ' + state.Unknown : String(state);
+        causeEl.textContent = ds.recalibration
+          ? 'Recalibration ' + ds.recalibration.urgency + ' (' + ds.recalibration.reason + ')'
+          : 'Within calibrated domain, no recalibration signal.';
+        const bits = [];
+        if (ds.distance) bits.push('distance=' + fmt(ds.distance.total, 3));
+        if (ds.calibration_compat) bits.push('cert=' + ds.calibration_compat);
+        if (ds.uncertainty_available === false) bits.push('uncertainty: unavailable (documented)');
+        if (ds.fingerprint_source) bits.push('fingerprint: ' + ds.fingerprint_source);
+        metaEl.textContent = bits.join('  ·  ');
+      }
+    } catch (e) {
+      setBadge(statusEl, 'bad', 'DISCONNECTED');
+      document.getElementById('rv-domain-card').className = 'domain-card domain-off';
+      document.getElementById('rv-domain-state').textContent = 'OOD gate: unknown (server unreachable)';
+      document.getElementById('rv-domain-cause').textContent = String(e.message || e);
+    }
+  }
+
+  // ---- RuCelium poll ----
+  async function pollRuCelium() {
+    const c = cfg();
+    const statusEl = document.getElementById('rucelium-status');
+    try {
+      const resp = await fetch(c.ruceliumUrl + '/api/rf-context');
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const d = await resp.json();
+
+      const upstream = d.upstream;
+      setBadge(statusEl, upstream ? 'ok' : 'warn', upstream ? 'INGESTING' : 'RF BRIDGE OFF');
+      document.getElementById('rc-upstream').textContent = upstream || 'not configured (--rf-upstream unset)';
+
+      const stats = d.stats || {};
+      document.getElementById('rc-verified').textContent = stats.events_verified != null ? stats.events_verified : '—';
+      document.getElementById('rc-unverified').textContent = stats.events_unverified != null ? stats.events_unverified : '—';
+      document.getElementById('rc-failures').textContent = stats.poll_failures != null ? stats.poll_failures : '—';
+
+      const infBox = document.getElementById('rc-inferences');
+      const inferences = d.room_state_inferences || [];
+      if (inferences.length === 0) {
+        infBox.innerHTML = '<div class="empty">No fused inferences yet</div>';
+      } else {
+        infBox.innerHTML = inferences.map(function (inf) {
+          const pct = Math.round((inf.confidence || 0) * 100);
+          return '<div class="inference-row">' +
+            '<div class="inference-label">' + escapeHtml(inf.label) + '</div>' +
+            '<div class="inference-bar-track"><div class="inference-bar-fill" style="width:' + pct + '%"></div></div>' +
+            '<div class="inference-conf">' + pct + '%</div>' +
+            '</div>';
+        }).join('');
+      }
+
+      // Best-effort biome stats — a separate endpoint, don't fail the whole panel if it 404s.
+      try {
+        const sresp = await fetch(c.ruceliumUrl + '/api/stats');
+        if (sresp.ok) {
+          const s = await sresp.json();
+          const chips = [
+            ['worldgraph nodes', s.worldgraph && s.worldgraph.nodes],
+            ['contradictions', s.worldgraph && s.worldgraph.contradictions],
+            ['alerts', s.alerts],
+            ['uptime (s)', s.uptime_s],
+          ];
+          document.getElementById('rc-biome-stats').innerHTML = chips
+            .filter(function (c) { return c[1] !== undefined; })
+            .map(function (c) { return '<span class="stat-chip">' + c[0] + ': <b>' + c[1] + '</b></span>'; })
+            .join('');
+        }
+      } catch (e2) { /* optional panel, ignore */ }
+    } catch (e) {
+      setBadge(statusEl, 'bad', 'DISCONNECTED');
+      document.getElementById('rc-upstream').textContent = String(e.message || e);
+      document.getElementById('rc-inferences').innerHTML = '<div class="empty">Gateway unreachable</div>';
+    }
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  let timer = null;
+  function tick() {
+    pollRuView();
+    pollRuCelium();
+  }
+  function reschedule() {
+    if (timer) clearInterval(timer);
+    tick();
+    timer = setInterval(tick, cfg().pollMs);
+  }
+  document.getElementById('cfg-poll-ms').addEventListener('change', reschedule);
+  reschedule();
+})();
+</script>
+
+</body>
+</html>
