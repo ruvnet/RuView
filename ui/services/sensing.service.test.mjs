@@ -169,3 +169,31 @@ test('reconnect() leaves auth-required and tries again', async () => {
   assert.equal(svc.state, 'connected');
   assert.equal(svc.authRequired, null);
 });
+
+test('modality derives rssi/csi from the source prefix, never a wire field (#home-wifi)', () => {
+  const service = new SensingService();
+  for (const [source, expected] of [
+    ['wifi', 'rssi'],
+    ['wifi:HomeNetwork', 'rssi'],
+    ['esp32', 'csi'],
+    ['esp32:usb0', 'csi'],
+    ['realtek_csi0', 'csi'],
+    ['mediatek:mt7915', 'csi'],
+    ['qualcomm:qca', 'csi'],
+    ['vendor:acme', 'csi'],
+    ['simulated', 'unknown'],
+    ['live', 'unknown'],
+    ['', 'unknown'],
+    [null, 'unknown'],
+    [undefined, 'unknown'],
+  ]) {
+    service._applyServerSource(source, 'live_unverified');
+    assert.equal(service.modality, expected, String(source));
+  }
+  // modality follows source switches mid-stream
+  service._state = 'connected';
+  service._handleData({ source: 'wifi:unnamed', source_state: 'live_unverified' });
+  assert.equal(service.modality, 'rssi');
+  service._handleData({ source: 'esp32', source_state: 'live_verified' });
+  assert.equal(service.modality, 'csi');
+});

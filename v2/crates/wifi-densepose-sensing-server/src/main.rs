@@ -92,8 +92,10 @@ use rvf_pipeline::ProgressiveLoader;
 use vital_signs::{VitalSignDetector, VitalSigns};
 
 // ADR-022 Phase 3: Multi-BSSID pipeline integration
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
 use wifi_densepose_wifiscan::parse_netsh_output as parse_netsh_bssid_output;
+#[cfg(target_os = "windows")]
+use wifi_densepose_wifiscan::port::WlanScanPort;
 use wifi_densepose_wifiscan::{BssidRegistry, WindowsWifiPipeline};
 
 // Accuracy sprint: Kalman tracker, multistatic fusion, field model
@@ -5114,7 +5116,7 @@ fn trimmed_mean(buf: &VecDeque<f64>) -> f64 {
 // ── Windows WiFi RSSI collector ──────────────────────────────────────────────
 
 /// Parse `netsh wlan show interfaces` output for RSSI and signal quality
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
 fn parse_netsh_interfaces_output(output: &str) -> Option<(f64, f64, String)> {
     let mut rssi = None;
     let mut signal = None;
@@ -5183,24 +5185,31 @@ async fn wifi_task(state: SharedState, tick_ms: u64) {
         })
         .await;
 
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(target_os = "windows")]
         let bssid_scan_result = tokio::task::spawn_blocking(|| {
-            let output = std::process::Command::new("netsh")
-                .args(["wlan", "show", "networks", "mode=bssid"])
-                .output()
-                .map_err(|e| format!("netsh bssid scan failed: {e}"))?;
+            // Windows Tier 2: native WlanApi first, netsh fallback inside
+            // the scanner (no inline netsh repetition here).
+            wifi_densepose_wifiscan::WlanApiScanner::native_first_with_netsh_fallback()
+                .scan()
+                .map_err(|e| e.to_string())
+        })
+        .await;
 
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(format!(
-                    "netsh exited with {}: {}",
-                    output.status,
-                    stderr.trim()
-                ));
+        #[cfg(target_os = "linux")]
+        let bssid_scan_result = tokio::task::spawn_blocking(|| {
+            // Linux: cached `scan dump` first (no root needed), escalate to
+            // an active scan when the process has CAP_NET_ADMIN.
+            let iface =
+                wifi_densepose_wifiscan::detect_interface().unwrap_or_else(|| "wlan0".to_owned());
+            let cached = wifi_densepose_wifiscan::LinuxIwScanner::with_interface(iface.clone())
+                .use_cached()
+                .scan_sync();
+            match cached {
+                Ok(obs) if !obs.is_empty() => Ok(obs),
+                _ => wifi_densepose_wifiscan::LinuxIwScanner::with_interface(iface)
+                    .scan_sync()
+                    .map_err(|e| e.to_string()),
             }
-
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            parse_netsh_bssid_output(&stdout).map_err(|e| format!("parse error: {e}"))
         })
         .await;
 
@@ -5209,7 +5218,7 @@ async fn wifi_task(state: SharedState, tick_ms: u64) {
             Ok(Ok(obs)) if !obs.is_empty() => obs,
             Ok(Ok(_empty)) => {
                 debug!("WiFi scan returned 0 observations");
-                #[cfg(not(target_os = "macos"))]
+                #[cfg(target_os = "windows")]
                 windows_wifi_fallback_tick(&state, seq).await;
                 continue;
             }
@@ -5225,7 +5234,7 @@ async fn wifi_task(state: SharedState, tick_ms: u64) {
                 } else {
                     warn!("WiFi scan error: {e}");
                 }
-                #[cfg(not(target_os = "macos"))]
+                #[cfg(target_os = "windows")]
                 windows_wifi_fallback_tick(&state, seq).await;
                 continue;
             }
@@ -5428,7 +5437,7 @@ async fn wifi_task(state: SharedState, tick_ms: u64) {
 /// Fallback: single-RSSI collection via `netsh wlan show interfaces`.
 ///
 /// Used when the multi-BSSID scan fails or returns 0 observations.
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
 async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
     let output = match tokio::process::Command::new("netsh")
         .args(["wlan", "show", "interfaces"])
@@ -5598,7 +5607,7 @@ async fn probe_wifi() -> bool {
 }
 
 /// Probe if Windows WiFi is connected.
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
 async fn probe_wifi() -> bool {
     match tokio::process::Command::new("netsh")
         .args(["wlan", "show", "interfaces"])
@@ -5608,6 +5617,36 @@ async fn probe_wifi() -> bool {
         Ok(o) => {
             let out = String::from_utf8_lossy(&o.stdout);
             parse_netsh_interfaces_output(&out).is_some()
+        }
+        Err(_) => false,
+    }
+}
+
+/// Probe host WiFi on Linux: a non-empty cached `iw <iface> scan dump`
+/// wins; otherwise fall back to `nmcli -t -f BSSID,SIGNAL dev wifi`.
+/// Mirrors the capture path (`LinuxIwScanner::use_cached` first).
+#[cfg(target_os = "linux")]
+async fn probe_wifi() -> bool {
+    let cached = tokio::task::spawn_blocking(|| {
+        wifi_densepose_wifiscan::LinuxIwScanner::new()
+            .use_cached()
+            .scan_sync()
+            .map(|obs| !obs.is_empty())
+            .unwrap_or(false)
+    })
+    .await
+    .unwrap_or(false);
+    if cached {
+        return true;
+    }
+    match tokio::process::Command::new("nmcli")
+        .args(["-t", "-f", "BSSID,SIGNAL", "dev", "wifi"])
+        .output()
+        .await
+    {
+        Ok(o) => {
+            let out = String::from_utf8_lossy(&o.stdout);
+            out.lines().any(|l| l.contains(':'))
         }
         Err(_) => false,
     }

@@ -8,7 +8,7 @@
  * - Dot-matrix mist body mass, particle trails, WiFi waves, signal field
  * - Reflective floor, settings dialog, and practical data HUD
  */
-import { withWsTicket } from '../../services/ws-ticket.js';
+import { sensingService } from '../../services/sensing.service.js';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
@@ -128,15 +128,22 @@ class Observatory {
     this._showFps = false;
     this._qualityLevel = 2;
 
-    // WebSocket for live data — always try auto-detect on startup
-    this._ws = null;
+    // Server frames come from sensing.service (Task 5) — the single source
+    // of truth for dataSource + modality. This page owns no WebSocket and
+    // performs no binary ws/demo detection of its own.
     this._liveData = null;
-    // Deferred to after the first rendered frames. Scene construction and
-    // shader compilation block the main thread for seconds under software
-    // WebGL (a VM with no GPU), and the probe's abort timeout below is
-    // wall-clock: issued from here it expires mid-response and the server
-    // is misreported as absent, dropping the UI into demo mode.
-    requestAnimationFrame(() => requestAnimationFrame(() => this._autoDetectLive()));
+    this._hasLiveData = false;
+    try {
+      sensingService.onData((frame) => {
+        if (frame && typeof frame === 'object') {
+          this._liveData = frame;
+          this._hasLiveData = true;
+        }
+      });
+      sensingService.onStateChange(() => this._hud.updateSourceBadge());
+      sensingService.start();
+    } catch {}
+    this._hud.updateSourceBadge();
 
     // Input
     this._initKeyboard();
@@ -439,71 +446,11 @@ class Observatory {
     this._mistPoints.material.uniforms.uColor.value.copy(wc);
   }
 
-  // ---- WebSocket live data ----
-
-  _autoDetectLive() {
-    // Probe sensing server health on same origin, then common ports
-    const host = window.location.hostname || 'localhost';
-    const candidates = [
-      window.location.origin,                   // same origin (e.g. :3000)
-      `http://${host}:8765`,                     // default WS port
-      `http://${host}:3000`,                     // default HTTP port
-    ];
-    // Deduplicate
-    const unique = [...new Set(candidates)];
-
-    const tryNext = (i) => {
-      if (i >= unique.length) {
-        console.log('[Observatory] No sensing server detected, using demo mode');
-        return;
-      }
-      const base = unique[i];
-      fetch(`${base}/health`, { signal: AbortSignal.timeout(10000) })
-        .then(r => r.ok ? r.json() : Promise.reject())
-        .then(data => {
-          if (data && data.status === 'ok') {
-            const wsProto = base.startsWith('https') ? 'wss:' : 'ws:';
-            const urlObj = new URL(base);
-            const wsUrl = `${wsProto}//${urlObj.host}/ws/sensing`;
-            console.log('[Observatory] Sensing server detected at', base, '→', wsUrl);
-            this.settings.dataSource = 'ws';
-            this.settings.wsUrl = wsUrl;
-            void this._connectWS(wsUrl);
-          } else {
-            tryNext(i + 1);
-          }
-        })
-        .catch(() => tryNext(i + 1));
-    };
-    tryNext(0);
-  }
-
-  // async: `/ws/sensing` is gated (ADR-272); mint a single-use ticket first.
-  async _connectWS(url) {
-    this._disconnectWS();
-    let wsUrl = url;
-    try { wsUrl = await withWsTicket(url); } catch { /* auth off or pre-ADR-272 server */ }
-    try {
-      this._ws = new WebSocket(wsUrl);
-      this._ws.onopen = () => {
-        console.log('[Observatory] WebSocket connected');
-        this._hud.updateSourceBadge('ws', this._ws);
-      };
-      this._ws.onmessage = (evt) => { try { this._liveData = JSON.parse(evt.data); } catch {} };
-      this._ws.onclose = () => {
-        console.log('[Observatory] WebSocket closed, falling back to demo');
-        this._ws = null;
-        this.settings.dataSource = 'demo';
-        this._hud.updateSourceBadge('demo', null);
-      };
-      this._ws.onerror = () => {};
-    } catch {}
-  }
-
-  _disconnectWS() {
-    if (this._ws) { this._ws.close(); this._ws = null; }
-    this._liveData = null;
-  }
+  // ---- Server frames (owned by sensing.service; Task 5) ----
+  //
+  // This page keeps no WebSocket of its own. Frames arrive via the
+  // `sensingService.onData` subscription set up in the constructor; the badge
+  // refreshes on every service state change.
 
   // ========================================
   // ANIMATION LOOP
@@ -514,8 +461,17 @@ class Observatory {
     const dt = Math.min(this._clock.getDelta(), 0.1);
     const elapsed = this._clock.getElapsedTime();
 
-    // Data source
-    if (this.settings.dataSource === 'ws' && this._liveData) {
+    // Data source (Task 5): the service owns the connection. Live frames
+    // render when the service is live; a dropped connection freezes the last
+    // frame (badge falls back to DEMO, never silently back to skeletons);
+    // anything else renders the illustrative demo generator.
+    const forcedDemo = this.settings.dataSource === 'demo';
+    const serviceLive = !forcedDemo && sensingService.dataSource === 'live';
+    const frozen = !forcedDemo && !serviceLive && this._hasLiveData && this._liveData != null
+      && (sensingService.dataSource === 'reconnecting'
+        || sensingService.dataSource === 'unreachable');
+    const fromServer = serviceLive || frozen;
+    if (fromServer) {
       this._currentData = this._liveData;
     } else {
       this._currentData = this._demoData.update(dt);
@@ -524,13 +480,13 @@ class Observatory {
 
     // Updates
     this._nebula.update(dt, elapsed);
-    this._figurePool.update(data, elapsed);
-    this._scenarioProps.update(data, this.settings.dataSource === 'ws' ? null : this._demoData.currentScenario);
+    this._figurePool.update(data, elapsed, sensingService.modality, fromServer);
+    this._scenarioProps.update(data, fromServer ? null : this._demoData.currentScenario);
     this._updateDotMatrixMist(data, elapsed);
     this._updateParticleTrail(data, dt, elapsed);
     this._updateWifiWaves(elapsed);
     this._updateSignalField(data);
-    this._hud.updateHUD(data, this._demoData);
+    this._hud.updateHUD(data, this._demoData, fromServer);
     this._hud.updateSparkline(data);
 
     // Router LED

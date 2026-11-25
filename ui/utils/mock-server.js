@@ -84,18 +84,34 @@ export class MockServer {
       }
     }));
 
+    // Home-MVP frozen contract (docs/api-contract-freeze-home-mvp.md §2):
+    // `/api/v1/status` is the single source-of-truth for source_state.
     this.addEndpoint('GET', '/api/v1/status', () => ({
-      services: {
-        api: 'running',
-        hardware: 'connected',
-        inference: 'ready',
-        streaming: Math.random() > 0.5 ? 'active' : 'idle'
+      status: 'ready',
+      source: 'simulated',
+      source_state: 'synthetic',
+      waiting_for_frames: false,
+      last_frame_age_ms: null,
+      trust: { witness: 'none', privacy_level: 'standard', recalibration_flag: false },
+      node_positions: {
+        configured_node_ids: [0],
+        default_position: [0.0, 0.0, 0.0],
+        default_position_node_ids: [0],
       },
-      streaming: {
-        active_connections: Math.floor(Math.random() * 5),
-        total_messages: Math.floor(Math.random() * 1000),
-        uptime: Math.floor(Date.now() / 1000) - 1800
-      }
+    }));
+
+    // Frozen contract §1: liveness probe.
+    this.addEndpoint('GET', '/health', () => ({
+      status: 'ok',
+      source: 'simulated',
+      tick: 0,
+      clients: 0,
+      processing: { healthy: true },
+    }));
+
+    // Frozen contract §3: one-shot snapshot. No frames yet in the mock.
+    this.addEndpoint('GET', '/api/v1/sensing/latest', () => ({
+      status: 'no data yet',
     }));
 
     // Pose endpoints
@@ -320,6 +336,9 @@ export class MockServer {
       
       close(code = 1000, reason = '') {
         this.readyState = WebSocket.CLOSING;
+        for (const key of ['poseInterval', 'eventInterval', 'sensingInterval']) {
+          if (this[key]) { clearInterval(this[key]); this[key] = null; }
+        }
         setTimeout(() => {
           this.readyState = WebSocket.CLOSED;
           this.dispatchEvent(new CloseEvent('close', { code, reason, wasClean: true }));
@@ -337,6 +356,42 @@ export class MockServer {
           }));
         }, 50);
         
+        // Frozen contract §5: `/ws/sensing` frames carry every required field.
+        // source_state stays synthetic so the UI renders DEMO, never LIVE.
+        if (this.url.includes('/ws/sensing')) {
+          let tick = 0;
+          this.sensingInterval = setInterval(() => {
+            if (this.readyState === WebSocket.OPEN) {
+              tick += 1;
+              const now = Date.now() / 1000;
+              this.dispatchEvent(new MessageEvent('message', {
+                data: JSON.stringify({
+                  type: 'sensing_update',
+                  timestamp: now,
+                  source: 'simulated',
+                  source_state: 'synthetic',
+                  tick,
+                  features: {
+                    mean_rssi: -65 + Math.random() * 6,
+                    variance: 0.4 + Math.random() * 0.8,
+                    motion_band_power: Math.random() * 0.2,
+                    breathing_band_power: 0.05 + Math.random() * 0.1,
+                    dominant_freq_hz: 0.25 + Math.random() * 0.1,
+                    change_points: 0,
+                    spectral_power: 0.5 + Math.random() * 0.5,
+                  },
+                  classification: {
+                    motion_level: 'absent',
+                    presence: false,
+                    confidence: 0.9,
+                  },
+                  signal_field: { grid: [], width: 0, height: 0 },
+                })
+              }));
+            }
+          }, 1000);
+        }
+
         // Send periodic pose data if this is a pose stream
         if (this.url.includes('/stream/pose')) {
           this.poseInterval = setInterval(() => {

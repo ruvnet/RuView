@@ -22,14 +22,12 @@ pub use adapter::parse_netsh_output;
 pub use adapter::NetshBssidScanner;
 pub use adapter::WlanApiScanner;
 
-#[cfg(target_os = "macos")]
 pub use adapter::parse_macos_scan_output;
-#[cfg(target_os = "macos")]
 pub use adapter::MacosCoreWlanScanner;
 
-#[cfg(target_os = "linux")]
+pub use adapter::detect_interface;
+pub use adapter::parse_iw_dev_interfaces;
 pub use adapter::parse_iw_scan_output;
-#[cfg(target_os = "linux")]
 pub use adapter::LinuxIwScanner;
 pub use domain::bssid::{BandType, BssidId, BssidObservation, RadioType};
 pub use domain::frame::MultiApFrame;

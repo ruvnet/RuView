@@ -310,13 +310,9 @@
         <label class="setting-row">
           <span>Data Source</span>
           <select id="opt-data-source">
-            <option value="demo" selected>Demo Generator</option>
-            <option value="ws">Live WebSocket</option>
+            <option value="auto" selected>Auto (server)</option>
+            <option value="demo">Demo Generator</option>
           </select>
-        </label>
-        <label class="setting-row" id="ws-url-row" style="display:none">
-          <span>WS URL</span>
-          <input type="text" id="opt-ws-url" value="" placeholder="ws://localhost:3000/ws/sensing">
         </label>
         <button id="btn-reset-camera" class="settings-btn">Reset Camera</button>
         <button id="btn-reset-settings" class="settings-btn">Reset to Defaults</button>

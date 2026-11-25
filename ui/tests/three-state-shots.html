@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Home-WiFi tri-state shots (test harness, not shipped UI)</title>
+<link rel="stylesheet" href="../style.css">
+<style>
+  body { background: #0b0e14; color: #e8e8e8; font-family: monospace; padding: 24px; }
+  #shots { display: grid; gap: 18px; max-width: 760px; }
+  .shot-label { font-size: 12px; letter-spacing: .1em; color: #9aa3b2; }
+  #data-source-badge { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+  #data-source-badge .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  #data-source-badge .dot--demo { background: #8a8f98; }
+  #data-source-badge .dot--rssi { background: #ffb400; }
+  #data-source-badge .dot--live { background: #00cc88; }
+</style>
+</head>
+<body>
+<div id="shots">
+  <div class="shot-label" id="shotName">—</div>
+  <div id="sensing"></div>
+  <div id="data-source-badge"><span class="dot dot--demo"></span><span id="data-source-label">DEMO</span></div>
+</div>
+<script type="module">
+import { sensingService } from '../services/sensing.service.js';
+import { SensingTab } from '../components/SensingTab.js';
+import { HudController } from '../observatory/js/hud-controller.js';
+import { dataSourceBanner } from '../utils/data-source-banner.js';
+
+const sensing = new SensingTab(document.getElementById('sensing'));
+sensing._buildDOM();
+const hud = new HudController({ settings: { dataSource: 'auto' } });
+dataSourceBanner.init();
+
+const STATES = {
+  simulated: ['simulated', 'synthetic'],
+  'rssi-only': ['wifi:HomeNetwork', 'live_unverified'],
+  live: ['esp32', 'live_verified'],
+};
+
+// Drive the REAL banner/badge code paths, then report what they rendered.
+window.setShotState = (name) => {
+  const [source, state] = STATES[name];
+  document.getElementById('shotName').textContent = name;
+  sensingService._applyServerSource(source, state);
+  sensing._onStateChange('connected');
+  hud.updateSourceBadge();
+  const banner = document.getElementById('sensingSourceBanner');
+  return {
+    bannerText: banner.textContent,
+    bannerClass: banner.className,
+    badgeText: document.getElementById('data-source-label').textContent,
+    badgeClass: document.querySelector('#data-source-badge .dot').className,
+    modality: sensingService.modality,
+    dataSource: sensingService.dataSource,
+  };
+};
+window.__ready = true;
+</script>
+</body>
+</html>

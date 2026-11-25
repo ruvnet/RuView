@@ -13,22 +13,22 @@ pub(crate) mod netsh_scanner;
 pub(crate) mod wlanapi_native;
 pub mod wlanapi_scanner;
 
-#[cfg(target_os = "macos")]
+/// All platform adapters compile on every target; the actual system call
+/// fails at runtime with a typed [`WifiScanError`](crate::error::WifiScanError)
+/// where the backend does not exist. This keeps `wifi_task`'s platform
+/// branches type-checkable in CI on any OS.
 pub mod macos_scanner;
 
-#[cfg(target_os = "linux")]
 pub mod linux_scanner;
 
 pub use netsh_scanner::parse_netsh_output;
 pub use netsh_scanner::NetshBssidScanner;
 pub use wlanapi_scanner::WlanApiScanner;
 
-#[cfg(target_os = "macos")]
 pub use macos_scanner::parse_macos_scan_output;
-#[cfg(target_os = "macos")]
 pub use macos_scanner::MacosCoreWlanScanner;
 
-#[cfg(target_os = "linux")]
+pub use linux_scanner::detect_interface;
+pub use linux_scanner::parse_iw_dev_interfaces;
 pub use linux_scanner::parse_iw_scan_output;
-#[cfg(target_os = "linux")]
 pub use linux_scanner::LinuxIwScanner;

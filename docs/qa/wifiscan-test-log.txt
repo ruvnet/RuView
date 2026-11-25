@@ -1,0 +1,309 @@
+================================================================
+wifi-densepose-wifiscan 完整測試紀錄（QA 覆核用）
+================================================================
+執行時間（UTC）：2026-11-25T09:13:46Z（cargo test 實際執行時間）
+分支：feat/home-wifi-rssi-mvp
+倉庫 HEAD：b53ae3060767317bfa339d8ebbbfbcd16eeab6a1
+執行指令：cargo test -p wifi-densepose-wifiscan -- --nocapture
+執行結果：EXIT 0；單元測試 167 通過、整合測試 4 通過、文件測試 1 通過，0 失敗
+工具鏈：cargo 1.100.0（3acc79c0c 2026-11-05）／ rustc 1.100.0（0ef1bc386 2026-11-09）
+----------------------------------------------------------------
+執行方式與原因：
+未能直接於倉庫內執行。原因：v2/Cargo.toml workspace 成員
+v2/crates/ruview-swarm 為尚未初始化之 git submodule（空目錄，
+僅有 gitlink 紀錄 -5cc4b86），cargo 解析 workspace 即失敗：
+「failed to load manifest for workspace member
+`v2/crates/ruview-swarm` … No such file or directory」。
+為避免更動倉庫內 Cargo.toml 或初始化無關 submodule 而污染工作區，
+採倉庫外 scratch 副本執行：將 v2/crates/wifi-densepose-wifiscan
+原樣複製至 /opt/data/profiles/dev/cache/scratch/wifiscan-qa-20261125/
+（經 diff -r 比對與源碼一致，未修改任何原始碼），輔以最小 wrapper
+workspace（[workspace.package]／[workspace.dependencies] 之
+serde／tokio／tracing 版本取值與 v2/Cargo.toml 一致），
+於該隔離目錄執行上述指令。本檔後半為該次執行的完整終端輸出原文。
+================================================================
+
+----- 以下為完整終端輸出原文 -----
+
+warning: unused field `version` in `workspace.package`
+ --> Cargo.toml:6:1
+  |
+6 | version = "0.3.1"
+  | ^^^^^^^
+  |
+  = note: `cargo::unused_workspace_package_fields` is set to `warn` by default
+help: consider removing the field `workspace.package.version`
+warning: unused field `authors` in `workspace.package`
+ --> Cargo.toml:8:1
+  |
+8 | authors = ["rUv <ruv@ruv.net>", "WiFi-DensePose Contributors"]
+  | ^^^^^^^
+  |
+help: consider removing the field `workspace.package.authors`
+warning: unused field `documentation` in `workspace.package`
+  --> Cargo.toml:11:1
+   |
+11 | documentation = "https://docs.rs/wifi-densepose"
+   | ^^^^^^^^^^^^^
+   |
+help: consider removing the field `workspace.package.documentation`
+warning: unused field `keywords` in `workspace.package`
+  --> Cargo.toml:12:1
+   |
+12 | keywords = ["wifi", "densepose", "csi", "pose-estimation", "rust"]
+   | ^^^^^^^^
+   |
+help: consider removing the field `workspace.package.keywords`
+warning: unused field `categories` in `workspace.package`
+  --> Cargo.toml:13:1
+   |
+13 | categories = ["science", "computer-vision", "wasm"]
+   | ^^^^^^^^^^
+   |
+help: consider removing the field `workspace.package.categories`
+warning: workspace (manifest) generated 5 warnings
+    Updating crates.io index
+     Locking 42 packages to highest compatible versions
+      Adding windows-sys v0.59.0 (available: v0.61.2)
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.27
+   Compiling serde_core v1.0.229
+   Compiling once_cell v1.21.4
+   Compiling serde v1.0.229
+   Compiling tracing-core v0.1.36
+   Compiling syn v3.0.10
+   Compiling syn v2.0.119
+   Compiling serde_derive v1.0.229
+   Compiling tracing-attributes v0.1.31
+   Compiling pin-project-lite v0.2.18
+   Compiling tracing v0.1.44
+   Compiling wifi-densepose-wifiscan v0.3.2 (/opt/data/profiles/dev/cache/scratch/wifiscan-qa-20261125/wifi-densepose-wifiscan)
+warning: unused import: `std::time::Instant`
+  --> wifi-densepose-wifiscan/src/adapter/wlanapi_native.rs:35:5
+   |
+35 | use std::time::Instant;
+   |     ^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `BssidId`
+  --> wifi-densepose-wifiscan/src/adapter/wlanapi_native.rs:37:38
+   |
+37 | use crate::domain::bssid::{BandType, BssidId, BssidObservation, RadioType};
+   |                                      ^^^^^^^
+
+warning: function `freq_khz_to_channel` is never used
+  --> wifi-densepose-wifiscan/src/adapter/wlanapi_native.rs:46:15
+   |
+46 | pub(crate) fn freq_khz_to_channel(frequency_khz: u32) -> u8 {
+   |               ^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `freq_khz_to_band` is never used
+  --> wifi-densepose-wifiscan/src/adapter/wlanapi_native.rs:58:15
+   |
+58 | pub(crate) fn freq_khz_to_band(frequency_khz: u32) -> BandType {
+   |               ^^^^^^^^^^^^^^^^
+
+warning: function `phy_type_to_radio` is never used
+  --> wifi-densepose-wifiscan/src/adapter/wlanapi_native.rs:74:15
+   |
+74 | pub(crate) fn phy_type_to_radio(phy: i32) -> RadioType {
+   |               ^^^^^^^^^^^^^^^^^
+
+warning: `wifi-densepose-wifiscan` (lib) generated 5 warnings (run `cargo fix --lib -p wifi-densepose-wifiscan` to apply 2 suggestions)
+warning: `wifi-densepose-wifiscan` (lib test) generated 2 warnings (2 duplicates)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.85s
+     Running unittests src/lib.rs (target/debug/build/wifi-densepose-wifiscan/dcc20069a926baa1/out/wifi_densepose_wifiscan-dcc20069a926baa1)
+
+running 167 tests
+test adapter::linux_scanner::tests::channel_from_freq_when_ds_param_missing ... ok
+test adapter::linux_scanner::tests::empty_output ... ok
+test adapter::linux_scanner::tests::freq_to_channel_conversion ... ok
+test adapter::linux_scanner::tests::detect_interface_never_panics ... ok
+test adapter::linux_scanner::tests::parse_iw_dev_empty_yields_none ... ok
+test adapter::linux_scanner::tests::parse_iw_dev_finds_first_interface ... ok
+test adapter::linux_scanner::tests::parse_signal_dbm_values ... ok
+test adapter::linux_scanner::tests::parse_three_bss_stanzas ... ok
+test adapter::linux_scanner::tests::missing_ssid_defaults_to_empty ... ok
+test adapter::macos_scanner::tests::extract_bool_field_basic ... ok
+test adapter::macos_scanner::tests::extract_string_field_basic ... ok
+test adapter::macos_scanner::tests::extract_number_field_basic ... ok
+test adapter::macos_scanner::tests::helper_process_errors_are_reported ... ok
+test adapter::macos_scanner::tests::parse_empty_and_junk_lines ... ok
+test adapter::macos_scanner::tests::parse_valid_output ... ok
+test adapter::macos_scanner::tests::real_bssid_without_ssid_is_preserved ... ok
+test adapter::macos_scanner::tests::redacted_connected_link_is_kept ... ok
+test adapter::macos_scanner::tests::redacted_line_not_marked_connected_still_abstains ... ok
+test adapter::macos_scanner::tests::signal_pct_clamping ... ok
+test adapter::macos_scanner::tests::synthetic_bssid_is_deterministic ... ok
+test adapter::macos_scanner::tests::unavailable_bssid_without_ssid_abstains ... ok
+test adapter::netsh_scanner::tests::adapter_disconnected_message ... ok
+test adapter::netsh_scanner::tests::all_observations_share_same_timestamp ... ok
+test adapter::netsh_scanner::tests::bssid_before_any_ssid_uses_empty_ssid ... ok
+test adapter::netsh_scanner::tests::bssid_with_extra_trailing_whitespace ... ok
+test adapter::netsh_scanner::tests::default_creates_scanner ... ok
+test adapter::netsh_scanner::tests::empty_output_returns_empty_vec ... ok
+test adapter::netsh_scanner::tests::first_bssid_fields ... ok
+test adapter::netsh_scanner::tests::handles_windows_crlf_line_endings ... ok
+test adapter::netsh_scanner::tests::hidden_ssid_empty_name ... ok
+test adapter::netsh_scanner::tests::malformed_bssid_mac_is_skipped ... ok
+test adapter::netsh_scanner::tests::malformed_lines_are_skipped ... ok
+test adapter::netsh_scanner::tests::missing_band_inferred_from_channel_2_4ghz ... ok
+test adapter::netsh_scanner::tests::missing_band_inferred_from_channel_5ghz ... ok
+test adapter::netsh_scanner::tests::missing_channel_defaults_to_zero ... ok
+test adapter::netsh_scanner::tests::missing_radio_type_defaults_to_n ... ok
+test adapter::netsh_scanner::tests::missing_signal_defaults_to_zero ... ok
+test adapter::netsh_scanner::tests::multiple_ssids_multiple_bssids ... ok
+test adapter::netsh_scanner::tests::multiple_ssids_single_bssid_each ... ok
+test adapter::netsh_scanner::tests::new_creates_scanner ... ok
+test adapter::netsh_scanner::tests::no_networks_message ... ok
+test adapter::netsh_scanner::tests::output_with_interface_header_prefix ... ok
+test adapter::netsh_scanner::tests::parse_sample_output_yields_three_observations ... ok
+test adapter::netsh_scanner::tests::rssi_dbm_uses_pct_to_dbm ... ok
+test adapter::netsh_scanner::tests::second_bssid_inherits_same_ssid ... ok
+test adapter::netsh_scanner::tests::signal_one_hundred_percent ... ok
+test adapter::netsh_scanner::tests::signal_one_percent ... ok
+test adapter::netsh_scanner::tests::signal_without_percent_sign ... ok
+test adapter::netsh_scanner::tests::signal_zero_percent ... ok
+test adapter::netsh_scanner::tests::six_ghz_band_parsed ... ok
+test adapter::netsh_scanner::tests::split_kv_basic ... ok
+test adapter::netsh_scanner::tests::split_kv_colon_without_spaces_returns_none ... ok
+test adapter::netsh_scanner::tests::split_kv_mac_address_value ... ok
+test adapter::netsh_scanner::tests::split_kv_no_separator_returns_none ... ok
+test adapter::netsh_scanner::tests::ssid_with_colons ... ok
+test adapter::netsh_scanner::tests::third_bssid_different_ssid ... ok
+test adapter::netsh_scanner::tests::tri_band_output ... ok
+test adapter::netsh_scanner::tests::try_parse_band_line_2_4ghz ... ok
+test adapter::netsh_scanner::tests::try_parse_band_line_5ghz ... ok
+test adapter::netsh_scanner::tests::try_parse_band_line_6ghz ... ok
+test adapter::netsh_scanner::tests::try_parse_bssid_line_invalid_mac ... ok
+test adapter::netsh_scanner::tests::try_parse_bssid_line_valid ... ok
+test adapter::netsh_scanner::tests::try_parse_channel_line_invalid_returns_none ... ok
+test adapter::netsh_scanner::tests::try_parse_channel_line_valid ... ok
+test adapter::netsh_scanner::tests::try_parse_radio_type_line_ac ... ok
+test adapter::netsh_scanner::tests::try_parse_radio_type_line_ax ... ok
+test adapter::netsh_scanner::tests::try_parse_radio_type_line_be ... ok
+test adapter::netsh_scanner::tests::try_parse_radio_type_line_n ... ok
+test adapter::netsh_scanner::tests::try_parse_signal_line_with_percent ... ok
+test adapter::netsh_scanner::tests::try_parse_signal_line_without_percent ... ok
+test adapter::netsh_scanner::tests::try_parse_signal_line_zero ... ok
+test adapter::netsh_scanner::tests::try_parse_ssid_line_does_not_match_bssid ... ok
+test adapter::netsh_scanner::tests::try_parse_ssid_line_does_not_match_random ... ok
+test adapter::netsh_scanner::tests::try_parse_ssid_line_hidden ... ok
+test adapter::netsh_scanner::tests::try_parse_ssid_line_valid ... ok
+test adapter::netsh_scanner::tests::unicode_ssid ... ok
+test adapter::netsh_scanner::tests::whitespace_only_output ... ok
+test adapter::wlanapi_native::tests::csi_capable_for_all_modeled_radios ... ok
+test adapter::wlanapi_native::tests::freq_to_band_classification ... ok
+test adapter::wlanapi_native::tests::freq_to_channel_2_4ghz ... ok
+test adapter::wlanapi_native::tests::freq_to_channel_5ghz ... ok
+test adapter::wlanapi_native::tests::freq_to_channel_6ghz ... ok
+test adapter::wlanapi_native::tests::freq_to_channel_unknown_is_zero ... ok
+test adapter::wlanapi_native::tests::native_scan_unsupported_off_windows ... ok
+test adapter::wlanapi_native::tests::phy_type_maps_to_radio ... ok
+test adapter::wlanapi_scanner::tests::benchmark_rejects_zero_iterations ... ok
+test adapter::wlanapi_scanner::tests::benchmark_result_clone_and_fields ... ok
+test adapter::wlanapi_scanner::tests::default_creates_scanner ... ok
+test adapter::wlanapi_scanner::tests::estimated_rate_from_known_duration ... ok
+test adapter::wlanapi_scanner::tests::estimated_rate_none_before_first_scan ... ok
+test adapter::wlanapi_scanner::tests::implements_send_and_sync ... ok
+test adapter::wlanapi_scanner::tests::implements_wlan_scan_port ... ok
+test adapter::wlanapi_scanner::tests::native_available_matches_platform ... ok
+test adapter::wlanapi_scanner::tests::native_scan_unsupported_off_windows ... ok
+test adapter::wlanapi_scanner::tests::new_creates_scanner_with_zero_metrics ... ok
+test adapter::wlanapi_scanner::tests::scan_metrics_clone ... ok
+test adapter::wlanapi_scanner::tests::scan_metrics_debug_display ... ok
+test domain::bssid::tests::band_type_from_channel ... ok
+test domain::bssid::tests::bssid_id_from_bytes ... ok
+test domain::bssid::tests::bssid_id_parse_errors ... ok
+test domain::bssid::tests::bssid_id_roundtrip ... ok
+test domain::bssid::tests::pct_to_dbm_conversion ... ok
+test domain::bssid::tests::radio_type_from_netsh ... ok
+test domain::bssid::tests::rssi_to_amplitude_baseline ... ok
+test domain::frame::tests::empty_frame_handles_gracefully ... ok
+test domain::frame::tests::is_sufficient_checks_threshold ... ok
+test domain::frame::tests::mean_rssi_calculation ... ok
+test domain::frame::tests::total_variance_sums_per_bssid ... ok
+test domain::registry::tests::registry_respects_capacity ... ok
+test domain::registry::tests::registry_tracks_new_bssids ... ok
+test domain::registry::tests::registry_updates_existing_bssid ... ok
+test domain::registry::tests::to_multi_ap_frame_builds_correct_frame ... ok
+test domain::registry::tests::welford_stats_accuracy ... ok
+test domain::result::tests::enhanced_result_construction ... ok
+test domain::result::tests::motion_level_thresholds ... ok
+test pipeline::attention_weighter::tests::empty_input_returns_zero ... ok
+test pipeline::attention_weighter::tests::higher_residual_gets_more_weight ... ok
+test pipeline::attention_weighter::tests::scores_sum_to_one ... ok
+test pipeline::attention_weighter::tests::single_bssid_gets_full_weight ... ok
+test pipeline::breathing_extractor::tests::insufficient_history_returns_none ... ok
+test pipeline::breathing_extractor::tests::no_data_returns_none ... ok
+test pipeline::breathing_extractor::tests::reset_clears_state ... ok
+test pipeline::breathing_extractor::tests::sinusoidal_breathing_detected ... ok
+test pipeline::breathing_extractor::tests::zero_crossings_constant ... ok
+test pipeline::breathing_extractor::tests::zero_crossings_count ... ok
+test pipeline::correlator::tests::correlator_basic_update ... ok
+test pipeline::correlator::tests::correlator_detects_covarying_bssids ... ok
+test pipeline::correlator::tests::mean_correlation_zero_for_one_bssid ... ok
+test pipeline::correlator::tests::pearson_negative_correlation ... ok
+test pipeline::correlator::tests::pearson_no_correlation ... ok
+test pipeline::correlator::tests::pearson_perfect_correlation ... ok
+test pipeline::fingerprint_matcher::tests::clear_removes_all ... ok
+test pipeline::fingerprint_matcher::tests::cosine_similarity_identical ... ok
+test pipeline::fingerprint_matcher::tests::cosine_similarity_orthogonal ... ok
+test pipeline::fingerprint_matcher::tests::empty_matcher_returns_none ... ok
+test pipeline::fingerprint_matcher::tests::generate_defaults_creates_templates ... ok
+test pipeline::fingerprint_matcher::tests::match_posture_result ... ok
+test pipeline::fingerprint_matcher::tests::store_and_recall ... ok
+test pipeline::fingerprint_matcher::tests::wrong_dim_store_rejected ... ok
+test pipeline::fingerprint_matcher::tests::wrong_dimension_returns_none ... ok
+test pipeline::motion_estimator::tests::default_creates_estimator ... ok
+test pipeline::motion_estimator::tests::ema_smooths_transients ... ok
+test pipeline::motion_estimator::tests::large_residuals_yield_high_motion ... ok
+test pipeline::motion_estimator::tests::n_contributing_counts_nonzero ... ok
+test pipeline::motion_estimator::tests::no_residuals_yields_no_motion ... ok
+test pipeline::motion_estimator::tests::zero_residuals_yield_no_motion ... ok
+test pipeline::orchestrator::tests::changing_signal_increments_count ... ok
+test pipeline::orchestrator::tests::default_creates_pipeline ... ok
+test pipeline::orchestrator::tests::first_frame_increments_count ... ok
+test pipeline::orchestrator::tests::pipeline_creates_ok ... ok
+Pipeline throughput: 1929217 frames/sec (5.183451ms for 10000 frames)
+test pipeline::orchestrator::tests::pipeline_throughput_benchmark ... ok
+test pipeline::orchestrator::tests::reset_clears_state ... ok
+test pipeline::orchestrator::tests::static_signal_returns_deny_after_learning ... ok
+test pipeline::orchestrator::tests::too_few_bssids_returns_deny ... ok
+test pipeline::predictive_gate::tests::changing_signal_transmits ... ok
+test pipeline::predictive_gate::tests::residuals_are_stored ... ok
+test pipeline::predictive_gate::tests::static_signal_is_gated ... ok
+test pipeline::predictive_gate::tests::threshold_can_be_updated ... ok
+test pipeline::quality_gate::tests::default_creates_gate ... ok
+test pipeline::quality_gate::tests::drift_reduces_quality ... ok
+test pipeline::quality_gate::tests::evaluate_with_good_signal ... ok
+test pipeline::quality_gate::tests::new_gate_creates_ok ... ok
+test pipeline::quality_gate::tests::quality_increases_with_more_bssids ... ok
+test pipeline::quality_gate::tests::reset_clears_state ... ok
+test pipeline::quality_gate::tests::too_few_bssids_denied ... ok
+test pipeline::quality_gate::tests::verdict_is_permit_check ... ok
+test adapter::macos_scanner::tests::legacy_helper_is_timed_out ... ok
+
+test result: ok. 167 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.02s
+
+     Running tests/linux_scan_test.rs (target/debug/build/wifi-densepose-wifiscan/ff34a0f7eec7498f/out/linux_scan_test-ff34a0f7eec7498f)
+
+running 4 tests
+test linux_detect_interface_parses_iw_dev ... ok
+test linux_probe_empty_dump_means_absent ... ok
+test linux_probe_finds_cached_scan ... ok
+test linux_scanner_defaults_to_detected_or_wlan0 ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests wifi_densepose_wifiscan
+
+running 1 test
+test wifi-densepose-wifiscan/src/adapter/wlanapi_scanner.rs - adapter::wlanapi_scanner::WlanApiScanner (line 95) - compile ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
