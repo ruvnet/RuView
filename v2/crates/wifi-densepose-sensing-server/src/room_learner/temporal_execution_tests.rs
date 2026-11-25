@@ -2,6 +2,7 @@
 use super::super::tests::{context, packet};
 use super::*;
 use crate::room_learner::managed_schedule_contract::LeadInPolicy;
+use crate::room_learner::temporal_acquisition::ReceiverCadenceBand;
 pub(super) fn setup() -> (tempfile::TempDir, RecoveryStore, TemporalWorkflow) {
     let dir = tempfile::tempdir().unwrap();
     let c = context();
@@ -435,6 +436,129 @@ fn receiver_tick_withdraws_stale_segment_without_advancing_observed_time() {
     assert!(w.custody.failed);
     assert_eq!(w.live_observed_ns, raw);
     assert_eq!(w.accepted(), 0);
+}
+
+/// SYNTHETIC receiver clocks for the arrival profile: three sources started
+/// together, all with first arrivals at `base + source * 1us`.
+fn arrival_profile_started(base: u64) -> (tempfile::TempDir, RecoveryStore, TemporalWorkflow) {
+    let dir = tempfile::tempdir().unwrap();
+    let c = context();
+    let data = dir.path().join(&c.owner_scope).join("SensingServer");
+    let store =
+        RecoveryStore::new(&data, &c.owner_scope, &c.installation_id, Some(&[7; 32])).unwrap();
+    let plan = ManagedScheduleContract::build(c, LeadInPolicy::OperatorVariableSourcesV2).unwrap();
+    let mut w = TemporalWorkflow::prepare(
+        plan,
+        "synthetic-arrival-custody".into(),
+        FitConfig {
+            epochs: 2,
+            ..FitConfig::for_source_count(3)
+        },
+        1_000_000_000,
+    )
+    .unwrap();
+    w.persist_initial(&store).unwrap();
+    start(&mut w, &store, base, "arrival-custody");
+    let policy = &w
+        .session
+        .managed
+        .as_ref()
+        .unwrap()
+        .binding
+        .native
+        .source_policies()[0];
+    assert_eq!(
+        (policy.receiver_cadence, policy.max_gap_ns),
+        (ReceiverCadenceBand::Arrival18To22Burst200MsV1, 200_000_000)
+    );
+    for source in 1..=3u8 {
+        let at = base + u64::from(source) * 1000;
+        w.observe(&packet(source, 1, at, RoomLabel::Empty, 0), at)
+            .unwrap();
+    }
+    (dir, store, w)
+}
+
+#[test]
+fn arrival_profile_custody_judges_packets_by_arrival_not_processing_delay() {
+    // Field case: 187 ms receiver arrival gap, processed at +205 ms after a
+    // tick at +201 ms. The 200 ms arrival bound holds, so custody must too.
+    let base = 2_000_000_000;
+    let (_dir, _store, mut w) = arrival_profile_started(base);
+    w.observe_tick(base + 201_000_000).unwrap();
+    for source in 1..=3u8 {
+        let arrived = base + 187_000_000 + u64::from(source) * 1000;
+        let processed = base + 205_000_000 + u64::from(source) * 1000;
+        w.observe(&packet(source, 2, arrived, RoomLabel::Empty, 0), processed)
+            .unwrap();
+    }
+    assert!(!w.custody.failed);
+}
+
+#[test]
+fn arrival_profile_custody_still_rejects_real_arrival_gap_over_200ms() {
+    let base = 2_000_000_000;
+    let (_dir, _store, mut w) = arrival_profile_started(base);
+    let before = (w.live_observed_ns, w.source_high.clone(), w.accepted());
+    // Exactly the frozen bound is admitted; one nanosecond more is not, even
+    // though processing is within the grace.
+    let arrived = base + 1000 + 200_000_000 + 1;
+    let err = w
+        .observe(
+            &packet(1, 2, arrived, RoomLabel::Empty, 0),
+            arrived + 1_000_000,
+        )
+        .unwrap_err();
+    assert_eq!(err, "temporal_missing_segment_source");
+    assert!(w.custody.failed);
+    assert_eq!(
+        (w.live_observed_ns, w.source_high.clone(), w.accepted()),
+        before
+    );
+
+    let (_dir, _store, mut w) = arrival_profile_started(base);
+    let arrived = base + 1000 + 230_000_000;
+    let err = w
+        .observe(&packet(1, 2, arrived, RoomLabel::Empty, 0), arrived)
+        .unwrap_err();
+    assert_eq!(err, "temporal_missing_segment_source");
+    assert!(w.custody.failed);
+}
+
+#[test]
+fn arrival_profile_tick_grace_is_bounded_and_older_profiles_keep_exact_gap() {
+    let base = 2_000_000_000;
+    let limit = 200_000_000 + ARRIVAL_PROFILE_PROCESSING_GRACE_NS;
+    let (_dir, _store, mut w) = arrival_profile_started(base);
+    // Source 1 is the oldest arrival; a tick exactly at the bound still holds.
+    w.observe_tick(base + 1000 + limit).unwrap();
+    assert_eq!(
+        w.observe_tick(base + 1000 + limit + 1).unwrap_err(),
+        "temporal_missing_segment_source"
+    );
+    assert!(w.custody.failed);
+
+    // Interval-strict profiles get no grace: max_gap + 1 on a tick fails.
+    let (_dir, store, mut w) = setup();
+    w.persist_initial(&store).unwrap();
+    start(&mut w, &store, base, "strict-tick");
+    for source in 1..=3u8 {
+        let at = base + u64::from(source) * 1000;
+        w.observe(&packet(source, 1, at, RoomLabel::Empty, 0), at)
+            .unwrap();
+    }
+    let policy = &w
+        .session
+        .managed
+        .as_ref()
+        .unwrap()
+        .binding
+        .native
+        .source_policies()[0];
+    assert_eq!(policy.receiver_cadence, ReceiverCadenceBand::Hz30To36);
+    let gap = policy.max_gap_ns;
+    assert!(w.observe_tick(base + 1000 + gap + 1).is_err());
+    assert!(w.custody.failed);
 }
 
 #[test]

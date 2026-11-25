@@ -7,7 +7,7 @@ use crate::room_learner::recovery_store::temporal_commitment::{
 use crate::room_learner::{
     managed_schedule_contract::BoundEpisode,
     recovery_store::{RecoveryDescriptor, RecoveryStore, RECOVERY_TTL_MS},
-    temporal_acquisition::{AssemblerCheckpoint, ManagedWindowTarget},
+    temporal_acquisition::{AssemblerCheckpoint, ManagedWindowTarget, ReceiverCadenceBand},
 };
 use serde::{Deserialize, Serialize};
 #[path = "temporal_durability.rs"]
@@ -29,6 +29,20 @@ mod held_out;
 #[path="temporal_prefix_digests.rs"]
 mod prefix_digests;
 
+/// Bounded allowance for this receiver's own processing latency (progress-loop
+/// tick period, status-poll ticks and selected-driver lock waits) between a
+/// packet's arrival stamp and the time custody is checked. Only the
+/// `Arrival18To22Burst200MsV1` profile gets it; older interval-strict profiles
+/// keep their exact original rules. Arrival-to-arrival gaps are never widened:
+/// every processed packet is still held to the frozen `max_gap_ns`.
+pub(crate) const ARRIVAL_PROFILE_PROCESSING_GRACE_NS: u64 = 50_000_000;
+fn processing_grace_ns(band: ReceiverCadenceBand) -> u64 {
+    if band == ReceiverCadenceBand::Arrival18To22Burst200MsV1 {
+        ARRIVAL_PROFILE_PROCESSING_GRACE_NS
+    } else {
+        0
+    }
+}
 pub(crate) const EXECUTION_POLICY:&str="observed-complete-reservation-prefix-v1;paused-time;immutable-spans;partial-tail-drop;max128segments;persegment-native-firstarrival-skew-gaps;explicit-genesis-gap-anchor;quality-unimplemented;independence-false";
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -406,7 +420,15 @@ impl TemporalWorkflow {
     }
     /// Busy packets and trusted receiver ticks both withdraw custody when a
     /// required source is absent/stale; neither can backfill missing intervals.
-    fn custody_at(&mut self, now: u64) -> Result<(), String> {
+    ///
+    /// `now` is receiver processing time. `arrival` is the receiver arrival
+    /// stamp of the packet being processed, if any. Per source, the arrival
+    /// interval (`arrival - last arrival`) is held to the exact frozen
+    /// `max_gap_ns`. The processing interval (`now - last arrival`) is held to
+    /// `max_gap_ns` plus `ARRIVAL_PROFILE_PROCESSING_GRACE_NS` for that
+    /// profile, which only absorbs this server's own tick/lock latency, never
+    /// source latency.
+    fn custody_at(&mut self, now: u64, arrival: Option<u64>) -> Result<(), String> {
         if self.stage != Stage::Observing || self.custody.failed {
             return Err("temporal_segment_custody_unavailable".into());
         }
@@ -425,15 +447,29 @@ impl TemporalWorkflow {
         if now < mapping.receiver_start_ns {
             return Err("temporal_segment_clock".into());
         }
+        // A future stamp is rejected by the packet fence after custody.
+        let arrival = arrival.map(|t| t.min(now));
         for source in native.source_policies() {
+            let grace = processing_grace_ns(source.receiver_cadence);
             let invalid = match self
                 .custody
                 .first_last
                 .iter()
                 .find(|(id, _, _)| *id == source.source_id)
             {
-                None => now - mapping.receiver_start_ns > first_limit,
-                Some((_, _, last)) => now < *last || now - *last > source.max_gap_ns,
+                None => {
+                    now - mapping.receiver_start_ns > first_limit + grace
+                        || arrival.is_some_and(|t| {
+                            t.saturating_sub(mapping.receiver_start_ns) > first_limit
+                        })
+                }
+                // Another source may have a later arrival stamp than this
+                // packet (cross-source processing order); that is not a gap.
+                Some((_, _, last)) => {
+                    now < *last
+                        || now - *last > source.max_gap_ns + grace
+                        || arrival.is_some_and(|t| t.saturating_sub(*last) > source.max_gap_ns)
+                }
             };
             if invalid {
                 self.custody.failed = true;
@@ -444,14 +480,14 @@ impl TemporalWorkflow {
     }
     fn observe_tick(&mut self, now: u64) -> Result<(), String> {
         self.check_clock(now)?;
-        self.custody_at(now)
+        self.custody_at(now, None)
     }
     fn observe(&mut self, p: &CanonicalPacket, now: u64) -> Result<(), String> {
         if self.stage != Stage::Observing {
             return Err("temporal_not_observing".into());
         }
         self.check_clock(now)?;
-        self.custody_at(now)?;
+        self.custody_at(now, Some(p.native_frame.timestamp_ns))?;
         let source_count = self.context().sources.len();
         let c = self.context();
         let spec = c
@@ -634,7 +670,7 @@ impl TemporalWorkflow {
             return Err("temporal_storage_busy_pause".into());
         }
         if slot {
-            self.custody_at(self.last_now_ns)?;
+            self.custody_at(self.last_now_ns, None)?;
             let t = self
                 .pending_window
                 .as_ref()

@@ -472,6 +472,18 @@ phase / accuracy claim. Excess density, long gaps, missing sources, duplicates
 and changed input/context still reject. Older interval-strict profiles keep
 their exact original rules.
 
+Segment custody under `Arrival18To22Burst200MsV1` separates receiver arrival
+from receiver processing. A processed packet is held to the 200 ms bound by its
+own arrival stamp against each source's last arrival stamp, not by the time the
+server gets to it. Receiver ticks with no new packet (progress loop, status
+polls) and slot commits are held to 200 ms plus a fixed 50 ms
+`ARRIVAL_PROFILE_PROCESSING_GRACE_NS`, which covers only this server's own tick,
+poll and lock latency, never source or network latency. A gap of more than
+200 ms between arrivals still rejects when the next packet is processed. With no
+next packet it rejects on the first tick past 250 ms. Cross-source processing
+order is not counted as a gap. Older interval-strict profiles get no grace. This
+is an interim receiver-clock correction, not source-clock alignment.
+
 Synthetic checks exercise source-count bounds, bursty four-C5 native input,
 rejected gaps/floods, whole four-source training with reserved checks excluded,
 model export/import identity, durable genesis and recovery isolation. Physical
