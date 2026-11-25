@@ -224,9 +224,14 @@ export class SensingTab {
 
     if (banner) {
       // Map the service's dataSource to banner text and CSS modifier class.
+      // LIVE is modality-qualified: RSSI mode renders an amber RSSI-ONLY
+      // state (presence + heat only, never skeletons), never the green LIVE.
       const dataSource = sensingService.dataSource;
+      const liveCfg = sensingService.modality === 'rssi'
+        ? { text: `RSSI-ONLY \u2014 ${sensingService.liveSourceLabel}`, cls: 'sensing-source-rssi' }
+        : { text: `LIVE \u2014 ${sensingService.liveSourceLabel}`, cls: 'sensing-source-live' };
       const bannerConfig = {
-        'live':              { text: `LIVE \u2014 ${sensingService.liveSourceLabel}`, cls: 'sensing-source-live' },
+        'live':              liveCfg,
         'server-simulated':  { text: 'SIMULATED \u2014 NO HARDWARE',        cls: 'sensing-source-server-sim' },
         'reconnecting':      { text: 'RECONNECTING...',                    cls: 'sensing-source-reconnecting' },
         'unreachable':       { text: 'NO DATA \u2014 SERVER UNREACHABLE',   cls: 'sensing-source-simulated' },

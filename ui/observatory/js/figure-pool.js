@@ -265,9 +265,10 @@ export class FigurePool {
    * Update all figures based on current data frame.
    * @param {object} data - Current sensing data with persons[], vital_signs, classification
    * @param {number} elapsed - Elapsed time in seconds
+   * @param {string} [modality] - 'rssi' suppresses all skeletons (presence + heat only)
    */
-  update(data, elapsed) {
-    const persons = visiblePersons(data, this._settings.dataSource === 'ws');
+  update(data, elapsed, modality) {
+    const persons = visiblePersons(data, this._settings.dataSource === 'ws', modality);
     const vs = data?.vital_signs || {};
     const isPresent = data?.classification?.presence || false;
     const breathBpm = vs.breathing_rate_bpm || 0;

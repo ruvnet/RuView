@@ -139,6 +139,16 @@ impl WlanApiScanner {
         }
     }
 
+    /// Create a Tier 2 scanner that prefers the native `wlanapi.dll` BSS
+    /// list and transparently falls back to `netsh` when native is
+    /// unavailable (non-Windows or WLAN-service error).
+    ///
+    /// This is the constructor `wifi_task` uses on Windows: one call site,
+    /// native-first, no inline `netsh` repetition.
+    pub fn native_first_with_netsh_fallback() -> Self {
+        Self::new()
+    }
+
     /// Return accumulated scan metrics.
     pub fn metrics(&self) -> ScanMetrics {
         let scan_count = self.scan_count.load(Ordering::Relaxed);

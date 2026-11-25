@@ -454,6 +454,49 @@ testRunner.test('Configuration is consistent across services', 'integration', ()
   testRunner.assert(API_CONFIG.WS_CONFIG, 'WebSocket config should be available');
 });
 
+// Home-WiFi MVP three-state assertions (Task 4): modality derives from the
+// source prefix; RSSI suppresses skeletons; badges are SIMULATED/RSSI-ONLY/LIVE.
+testRunner.test('Modality derives from source prefix (no wire field)', 'integration', async () => {
+  const { sensingService } = await import('../services/sensing.service.js');
+  const cases = [
+    ['wifi:HomeNetwork', 'rssi'],
+    ['wifi', 'rssi'],
+    ['esp32', 'csi'],
+    ['mediatek:mt7915', 'csi'],
+    ['simulated', 'unknown'],
+  ];
+  for (const [source, expected] of cases) {
+    sensingService._applyServerSource(source, 'live_unverified');
+    testRunner.assertEqual(sensingService.modality, expected, `modality of ${source}`);
+  }
+});
+
+testRunner.test('RSSI modality suppresses skeletons, CSI keeps confidence gate', 'integration', async () => {
+  const { visiblePersons } = await import('../observatory/js/live-data.js');
+  const measured = { id: 1, keypoints: [{ confidence: 0.8 }] };
+  const data = { persons: [measured] };
+  testRunner.assertEqual(visiblePersons(data, true, 'rssi').length, 0, 'no skeletons on RSSI');
+  testRunner.assertEqual(visiblePersons(data, true, 'csi').length, 1, 'CSI keeps measured figures');
+});
+
+testRunner.test('Badge mapping is three-state, never LIVE for synthetic', 'integration', async () => {
+  const { sensingService } = await import('../services/sensing.service.js');
+  const badgeFor = () => {
+    if (sensingService.dataSource !== 'live') return 'SIMULATED';
+    return sensingService.modality === 'rssi' ? 'RSSI-ONLY' : 'LIVE';
+  };
+  sensingService._applyServerSource('esp32', 'live_verified');
+  testRunner.assertEqual(badgeFor(), 'LIVE', 'CSI live shows LIVE');
+  sensingService._applyServerSource('wifi:HomeNetwork', 'live_unverified');
+  testRunner.assertEqual(badgeFor(), 'RSSI-ONLY', 'host wifi shows RSSI-ONLY, not LIVE');
+  for (const state of ['synthetic', 'stale', 'disconnected']) {
+    sensingService._applyServerSource('wifi:HomeNetwork', state);
+    testRunner.assertEqual(badgeFor(), 'SIMULATED', `state ${state} must not be live`);
+  }
+  // Restore a neutral state for other tests.
+  sensingService._applyServerSource('simulated', 'synthetic');
+});
+
 // Event listeners for UI
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('runAllTests').addEventListener('click', () => {

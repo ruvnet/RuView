@@ -543,6 +543,21 @@ export class SensingService {
     return 'SOURCE UNSPECIFIED';
   }
 
+  /**
+   * Signal modality derived from the `source` prefix (fde contract §4).
+   * The wire carries no independent `modality` field, so the UI derives it:
+   * `wifi*` → rssi-only, ESP32 / vendor CSI sources → csi, else unknown.
+   * RSSI mode must not render skeletons — presence + heat only.
+   * @return {'rssi'|'csi'|'unknown'}
+   */
+  get modality() {
+    const source = typeof this._serverSource === 'string' ? this._serverSource : '';
+    if (source === 'wifi' || source.startsWith('wifi:')) return 'rssi';
+    if (source === 'esp32' || source.startsWith('esp32:')) return 'csi';
+    if (/^(realtek_csi|mediatek|qualcomm|vendor:)/.test(source)) return 'csi';
+    return 'unknown';
+  }
+
   // ---- Data handling -----------------------------------------------------
 
   _handleData(data) {

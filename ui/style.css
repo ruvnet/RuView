@@ -1911,6 +1911,13 @@ canvas {
   color: #00cc88;
 }
 
+/* RSSI-ONLY degraded state: live presence + heat, no skeletons (Task 4). */
+.sensing-source-rssi {
+  background: rgba(255, 180, 0, 0.14);
+  border: 1px solid #ffb400;
+  color: #ffb400;
+}
+
 .sensing-source-reconnecting {
   background: rgba(255, 180, 0, 0.12);
   border: 1px solid var(--color-warning);

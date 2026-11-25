@@ -10,6 +10,11 @@
  * - Quick-select scenario dropdown
  */
 
+// Observatory renders the sensing server's data source (Task 5): badge,
+// skeleton gating, and scenario captions all follow `sensingService`, never
+// a second binary ws/demo WebSocket owned by this page.
+import { sensingService } from '../../services/sensing.service.js';
+
 // ---- Constants ----
 
 export const SCENARIO_NAMES = [
@@ -25,10 +30,10 @@ export const DEFAULTS = {
   wireColor: '#00d878', jointColor: '#ff4060', aura: 0.02,
   field: 0.45, waves: 0.4, ambient: 0.7, reflect: 0.2,
   fov: 50, orbitSpeed: 0.15, grid: true, room: true,
-  scenario: 'auto', cycle: 30, dataSource: 'demo', wsUrl: '',
+  scenario: 'auto', cycle: 30, dataSource: 'auto', wsUrl: '',
 };
 
-export const SETTINGS_VERSION = '6';
+export const SETTINGS_VERSION = '7';
 
 export const PRESETS = {
   foundation: {},
@@ -237,26 +242,19 @@ export class HudController {
       this.saveSettings();
     });
 
-    // Data source
+    // Data source: follow the sensing server (auto) or force illustrative demo.
+    // The server connection itself is owned by sensing.service (Task 5) —
+    // this page keeps no second WebSocket and no manual URL field.
     const dsSel = document.getElementById('opt-data-source');
-    dsSel.value = s.dataSource;
-    dsSel.addEventListener('change', (e) => {
-      s.dataSource = e.target.value;
-      document.getElementById('ws-url-row').style.display = e.target.value === 'ws' ? 'flex' : 'none';
-      if (e.target.value === 'ws' && s.wsUrl) obs._connectWS(s.wsUrl);
-      else obs._disconnectWS();
-      this.updateSourceBadge(s.dataSource, obs._ws);
-      this.saveSettings();
-    });
-    document.getElementById('ws-url-row').style.display = s.dataSource === 'ws' ? 'flex' : 'none';
-
-    const wsInput = document.getElementById('opt-ws-url');
-    wsInput.value = s.wsUrl;
-    wsInput.addEventListener('change', (e) => {
-      s.wsUrl = e.target.value;
-      if (s.dataSource === 'ws') obs._connectWS(e.target.value);
-      this.saveSettings();
-    });
+    if (dsSel) {
+      if (s.dataSource !== 'auto' && s.dataSource !== 'demo') s.dataSource = 'auto';
+      dsSel.value = s.dataSource;
+      dsSel.addEventListener('change', (e) => {
+        s.dataSource = e.target.value;
+        this.updateSourceBadge();
+        this.saveSettings();
+      });
+    }
 
     // Buttons
     document.getElementById('btn-reset-camera').addEventListener('click', () => {
@@ -356,14 +354,31 @@ export class HudController {
   }
 
   // ============================================================
-  // Source badge
+  // Source badge: three states driven by sensing.service (Task 4/5).
+  // LIVE green = fresh CSI frames; RSSI-ONLY amber = fresh host-WiFi frames
+  // (presence + heat, no skeletons); everything else = gray DEMO, including
+  // a frozen last frame after disconnect (never silently back to tracking).
   // ============================================================
 
-  updateSourceBadge(dataSource, ws) {
+  /**
+   * True when the page should render server frames: the user has not forced
+   * illustrative demo and sensing.service reports a live source.
+   */
+  _isServiceLive() {
+    return this._obs.settings.dataSource !== 'demo'
+      && sensingService.dataSource === 'live';
+  }
+
+  updateSourceBadge() {
     const dot = document.querySelector('#data-source-badge .dot');
     const label = document.getElementById('data-source-label');
-    if (dataSource === 'ws' && ws?.readyState === WebSocket.OPEN) {
-      dot.className = 'dot dot--live'; label.textContent = 'LIVE';
+    if (!dot || !label) return;
+    if (this._isServiceLive()) {
+      if (sensingService.modality === 'rssi') {
+        dot.className = 'dot dot--rssi'; label.textContent = 'RSSI-ONLY';
+      } else {
+        dot.className = 'dot dot--live'; label.textContent = 'LIVE';
+      }
     } else {
       dot.className = 'dot dot--demo'; label.textContent = 'DEMO';
     }
@@ -373,7 +388,7 @@ export class HudController {
   // HUD update (called every frame)
   // ============================================================
 
-  updateHUD(data, demoData) {
+  updateHUD(data, demoData, fromServer) {
     if (!data) return;
     const vs = data.vital_signs || {};
     const feat = data.features || {};
@@ -381,7 +396,7 @@ export class HudController {
 
     // Sync scenario dropdown
     const quickSel = document.getElementById('scenario-quick-select');
-    const live = this._obs.settings.dataSource === 'ws';
+    const live = this._isServiceLive() && fromServer === true;
     const cur = demoData._autoMode ? 'auto' : demoData.currentScenario;
     if (quickSel && quickSel.value !== cur) quickSel.value = cur;
     if (quickSel) quickSel.disabled = live;

@@ -105,7 +105,8 @@ body {
   border-radius: 50%;
   display: inline-block;
 }
-.dot--demo { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+.dot--demo { background: #8a8f98; box-shadow: 0 0 6px #8a8f98; }
+.dot--rssi { background: var(--amber); box-shadow: 0 0 6px var(--amber); animation: pulse-dot 2s infinite; }
 .dot--live { background: var(--green-glow); box-shadow: 0 0 6px var(--green-glow); animation: pulse-dot 2s infinite; }
 
 @keyframes pulse-dot {

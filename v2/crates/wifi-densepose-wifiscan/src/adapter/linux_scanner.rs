@@ -43,10 +43,13 @@ pub struct LinuxIwScanner {
 }
 
 impl LinuxIwScanner {
-    /// Create a scanner for the default interface `wlan0`.
+    /// Create a scanner for the auto-detected wireless interface.
+    ///
+    /// Falls back to `"wlan0"` when no wireless interface is found (e.g. in
+    /// CI containers without WiFi hardware). Detection never panics.
     pub fn new() -> Self {
         Self {
-            interface: "wlan0".to_owned(),
+            interface: detect_interface().unwrap_or_else(|| "wlan0".to_owned()),
             use_dump: false,
         }
     }
@@ -148,6 +151,63 @@ impl BssStanza {
             timestamp,
         })
     }
+}
+
+/// Auto-detect the first wireless interface on Linux.
+///
+/// Strategy (first hit wins, never panics):
+/// 1. Parse `iw dev` output for `Interface <name>` lines.
+/// 2. Fall back to `/sys/class/net/*/wireless` — any NIC with a `wireless`
+///    sysfs entry is a WiFi interface; the directory name is the ifname.
+///
+/// Returns `None` when neither source yields an interface (no `iw` binary,
+/// no WiFi hardware, e.g. CI containers). Off-Linux this always returns
+/// `None`; callers fall back to `"wlan0"` and the subsequent `iw` spawn
+/// fails with a typed process error at runtime.
+pub fn detect_interface() -> Option<String> {
+    if let Ok(output) = Command::new("iw").arg("dev").output() {
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if let Some(name) = parse_iw_dev_interfaces(&stdout) {
+                return Some(name);
+            }
+        }
+    }
+    // Sysfs fallback: /sys/class/net/<ifname>/wireless exists ⇔ WiFi NIC.
+    if let Ok(entries) = std::fs::read_dir("/sys/class/net") {
+        let mut names: Vec<String> = entries
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| {
+                std::fs::metadata(format!("/sys/class/net/{n}/wireless")).is_ok()
+            })
+            .collect();
+        names.sort();
+        if let Some(first) = names.into_iter().next() {
+            return Some(first);
+        }
+    }
+    None
+}
+
+/// Parse `iw dev` output for the first `Interface <name>` line.
+///
+/// ```text
+/// phy#0
+/// 	Interface wlp2s0
+/// 		ifindex 3
+/// ```
+pub fn parse_iw_dev_interfaces(output: &str) -> Option<String> {
+    for line in output.lines() {
+        let trimmed = line.trim();
+        if let Some(name) = trimmed.strip_prefix("Interface ") {
+            let name = name.trim();
+            if !name.is_empty() {
+                return Some(name.to_owned());
+            }
+        }
+    }
+    None
 }
 
 /// Parse the text output of `iw dev <iface> scan [dump]`.
@@ -323,6 +383,28 @@ BSS de:ad:be:ef:ca:fe(on wlan0) -- associated
     fn empty_output() {
         let obs = parse_iw_scan_output("").unwrap();
         assert!(obs.is_empty());
+    }
+
+    #[test]
+    fn parse_iw_dev_finds_first_interface() {
+        let out = "phy#0\n\tInterface wlp2s0\n\t\tifindex 3\n\t\twdev 0x1\nphy#1\n\tInterface wlan1\n";
+        assert_eq!(
+            parse_iw_dev_interfaces(out).as_deref(),
+            Some("wlp2s0")
+        );
+    }
+
+    #[test]
+    fn parse_iw_dev_empty_yields_none() {
+        assert_eq!(parse_iw_dev_interfaces(""), None);
+        assert_eq!(parse_iw_dev_interfaces("phy#0\n"), None);
+    }
+
+    #[test]
+    fn detect_interface_never_panics() {
+        // On boxes without WiFi hardware this is None; on a laptop it is
+        // Some(ifname). Either outcome is acceptable — it must not panic.
+        let _ = detect_interface();
     }
 
     #[test]

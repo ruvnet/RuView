@@ -113,6 +113,19 @@ export class DataSourceBanner {
 
   render() {
     if (!this._bar) return;
+    // RSSI-ONLY live: presence is measured, but there is no pose. Unlike
+    // full live (no banner by design), an RSSI-only stream keeps a
+    // persistent amber notice so figures are never mistaken for tracking.
+    if (sensingService.dataSource === 'live' && sensingService.modality === 'rssi') {
+      this._bar.textContent = 'RSSI ONLY — presence and signal heat only; figures are illustrative, not measured movement';
+      this._bar.style.cursor = '';
+      this._bar.style.background = '#4a3200';
+      this._bar.style.color = '#ffd27a';
+      this._bar.classList.add('is-visible');
+      this._bar.classList.remove('is-simulated');
+      document.body.classList.add('ruview-has-data-source-banner');
+      return;
+    }
     const cfg = CONFIG[sensingService.dataSource];
 
     if (!cfg) {
