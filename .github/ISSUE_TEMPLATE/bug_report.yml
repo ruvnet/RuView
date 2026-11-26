@@ -1,0 +1,85 @@
+name: Bug report
+description: Something isn't working as expected
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. **Security vulnerabilities must not be reported here.** See [SECURITY.md](https://github.com/ruvnet/RuView/blob/main/SECURITY.md).
+
+        Please don't paste WiFi credentials, API tokens, or real CSI or personal data. Redact them or use synthetic data.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Where does the problem show up?
+      options:
+        - Sensing server (Rust, v2/)
+        - Other Rust crate (v2/)
+        - ESP32 firmware / provisioning
+        - Python package (wifi-densepose on PyPI)
+        - Web UI / dashboard
+        - Mobile app
+        - Desktop app
+        - Harness / MCP / Claude Code or Codex plugin
+        - Home Assistant / Matter / Apple Home integration
+        - Docker / deployment
+        - Documentation
+        - Other / not sure
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the bug and what you expected to happen instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Minimal, exact steps. Include commands and flags.
+      placeholder: |
+        1. Run `...`
+        2. ...
+        3. See error
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Release version, package version, or `git rev-parse --short HEAD`.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Rust/Python/Node versions, and Docker image tag if relevant.
+      placeholder: |
+        OS: Ubuntu 24.04
+        Rust: from v2/rust-toolchain.toml
+        Python: 3.11
+  - type: textarea
+    id: hardware
+    attributes:
+      label: Hardware (if applicable)
+      description: Board(s) such as ESP32-S3 or ESP32-C6, flash size, firmware version, number of nodes, and router/AP model.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant logs or device boot/runtime output. This is formatted as code automatically.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues and this isn't a duplicate.
+          required: true
+        - label: I removed credentials, tokens, and personal or CSI data from this report.
+          required: true
