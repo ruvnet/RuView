@@ -59,12 +59,15 @@ static bool    s_filter_mac_set = false;
  * "source" silently mixed transmitters. The BSSID is learned at association
  * (WIFI_EVENT_STA_CONNECTED, or the AP record at CSI init), refreshed on
  * reconnect/roam and cleared on disconnect. An explicit NVS filter_mac wins.
- * Bypassed while channel hopping. With no AP known, C5L8/v1 withholds every
+ * Bypassed while channel hopping, and outside C5L8/v1 when NVS sets up an
+ * ADR-029 multistatic schedule (tdm_node_count > 1), whose node-to-node links
+ * need the other stations' frames. With no AP known, C5L8/v1 withholds every
  * frame (its claim needs the AP); other builds pass frames through. */
 static portMUX_TYPE s_ap_src_mux = portMUX_INITIALIZER_UNLOCKED;
 static uint8_t  s_ap_src_bssid[6] = {0};
 static bool     s_ap_src_set = false;
 static uint32_t s_ap_src_drop = 0;
+static bool     s_ap_src_multistatic = false;   /* captured early, like filter_mac */
 #endif
 
 /* ADR-057: Build-time guard — fail early if CSI is not enabled in sdkconfig.
@@ -412,7 +415,7 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
         }
     }
 #if defined(CONFIG_CSI_AP_ONLY_SOURCE)
-    else if (s_hop_count <= 1) {
+    else if (s_hop_count <= 1 && !s_ap_src_multistatic) {
         bool known, from_ap;
         portENTER_CRITICAL_ISR(&s_ap_src_mux);
         known = s_ap_src_set;
@@ -760,8 +763,9 @@ static void wifi_promiscuous_cb(void *buf, wifi_promiscuous_pkt_type_t type)
  * Ping the STA's gateway to request unicast traffic. Some APs send ICMP replies
  * at 802.11b rates, which produce no CSI (#2287); this is not a guaranteed
  * OFDM floor. Such APs need a LAN host sending unicast UDP to the node.
- * It is ADDITIVE — promiscuous capture (#396/#893) is left fully intact so
- * multistatic/multi-node sensing still hears other stations' frames. Mirrors
+ * It is ADDITIVE — promiscuous capture (#396/#893) is left fully intact. With
+ * CONFIG_CSI_AP_ONLY_SOURCE (default) only the AP's frames reach the stream;
+ * multistatic/peer sensing needs it off, or NVS tdm_node_count > 1. Mirrors
  * Espressif's esp-csi csi_recv_router reference.
  */
 static esp_ping_handle_t s_self_ping = NULL;
@@ -848,6 +852,18 @@ uint32_t csi_collector_get_ap_source_drops(void)
 #endif
 }
 
+/* Captured with the other NVS fields before Wi-Fi init (#232/#390). */
+static void csi_ap_src_capture_mode(void)
+{
+#if defined(CONFIG_CSI_AP_ONLY_SOURCE) && !defined(CONFIG_CSI_C5_LLTF8_V1)
+    s_ap_src_multistatic = (g_nvs_config.tdm_node_count > 1);
+    if (s_ap_src_multistatic) {
+        ESP_LOGI(TAG, "AP-only source filter bypassed: tdm_node_count=%u (ADR-029 multistatic)",
+                 (unsigned)g_nvs_config.tdm_node_count);
+    }
+#endif
+}
+
 void csi_collector_set_node_id(uint8_t node_id)
 {
     s_node_id = node_id;
@@ -864,6 +880,7 @@ void csi_collector_set_node_id(uint8_t node_id)
         /* Masked: never log a full MAC at info level. */
         ESP_LOGI(TAG, "Early capture filter_mac=**:**:**:**:**:%02x", s_filter_mac[5]);
     }
+    csi_ap_src_capture_mode();
 }
 
 void csi_collector_init(void)
@@ -900,6 +917,7 @@ void csi_collector_init(void)
         if (s_filter_mac_set) {
             memcpy(s_filter_mac, g_nvs_config.filter_mac, 6);
         }
+        csi_ap_src_capture_mode();
     }
 
     /* ADR-060: Determine the CSI channel.

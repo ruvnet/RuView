@@ -68,9 +68,13 @@ menu "CSI Node Configuration"
             takes precedence, and the filter is bypassed while channel hopping.
             With no AP known, C5L8/v1 builds withhold every frame (their claim
             needs the AP); other builds pass frames through unfiltered.
-            Turn this off for multistatic/peer sensing that relies on hearing
-            other stations' frames. Off by default with the C6 HE SoftAP, where
-            the sources of interest are the SoftAP's own clients.
+
+            Multistatic/peer sensing (ADR-029/030, node-to-node links) needs
+            other stations' frames. Outside C5L8/v1 the filter is bypassed at
+            runtime when NVS sets tdm_node_count > 1 (provision.py or
+            config_push.py); for any other peer-sensing setup, set this to n.
+            Off by default with the C6 HE SoftAP, where the sources of
+            interest are the SoftAP's own clients.
             MEASURED 2026-11-25 with two C5s on one AP: without it, 53-65% of
             emitted C5L8/v1 frames came from the peer C5 and other stations.
             C5L8/v1 cadence stats report the drops as withheld src=N.
