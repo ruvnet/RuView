@@ -1,0 +1,12 @@
+{
+  "name": "ruview-live",
+  "description": "RuView live sensing in Claude Code: /ruview opens a pane beside the transcript with three views: an overview of your CSI nodes (ESP32, Realtek) and 60 GHz radar (rates, loss, RSSI, presence, device-reported vitals, alerts), a live CSI amplitude waterfall, and a radar range fan with vitals charts, all drawn in terminal cells. Reads only; runs the @ruvnet/ruview CLI it ships beside.",
+  "version": "0.1.0",
+  "author": {
+    "name": "ruvnet",
+    "url": "https://github.com/ruvnet/RuView"
+  },
+  "homepage": "https://github.com/ruvnet/RuView",
+  "license": "MIT",
+  "hooks": "./hooks/codex-hooks.json"
+}
