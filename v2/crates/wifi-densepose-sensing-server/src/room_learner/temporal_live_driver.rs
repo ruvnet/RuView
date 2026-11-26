@@ -5,7 +5,9 @@ use super::{
     native::CanonicalPacket,
     observation::MAX_AGE_NS,
     temporal_acquisition::{WindowInputPolicy, WindowAdmission},
-    temporal_model_input::{TemporalLiveInput, TemporalModel},
+    temporal_model_input::{
+        managed::execution::processing_grace_ns, TemporalLiveInput, TemporalModel,
+    },
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -173,6 +175,16 @@ impl ContinuousTemporalInput {
         self.withdraw("inactive");
         self.status.buffer_state = LiveState::Inactive;
     }
+    /// Window-level processing grace. The arrival profile is uniform across
+    /// sources, so this is the arrival-profile grace or zero.
+    fn window_processing_grace_ns(&self) -> u64 {
+        self.policy
+            .source_policies()
+            .iter()
+            .map(|p| processing_grace_ns(p.receiver_cadence))
+            .max()
+            .unwrap_or(0)
+    }
     fn withdraw(&mut self, reason: &'static str) {
         self.input = None;
         self.target_ns = None;
@@ -204,10 +216,13 @@ impl ContinuousTemporalInput {
             return;
         }
         // Required sources, not just whichever source most recently delivered.
+        // `now_ns` is processing time: the arrival profile gets the same bounded
+        // server-latency grace as segment custody; strict profiles get none.
         if self.policy.source_policies().iter().any(|p| {
-            self.continuity
-                .get(&p.source_id)
-                .is_none_or(|last| now_ns < *last || now_ns - *last > p.max_gap_ns)
+            self.continuity.get(&p.source_id).is_none_or(|last| {
+                now_ns < *last
+                    || now_ns - *last > p.max_gap_ns + processing_grace_ns(p.receiver_cadence)
+            })
         }) {
             self.withdraw("source_gap");
             return;
@@ -257,13 +272,19 @@ impl ContinuousTemporalInput {
                 .source_policies()
                 .iter()
                 .find(|p| p.source_id == *id)
-                .is_none_or(|p| now_ns.saturating_sub(*last) > p.max_gap_ns)
+                .is_none_or(|p| {
+                    now_ns.saturating_sub(*last)
+                        > p.max_gap_ns + processing_grace_ns(p.receiver_cadence)
+                })
         }) {
             self.withdraw("source_gap");
         } else if self.target_ns.is_some_and(|target| {
+            // Late first arrivals are refused by arrival stamp in the window
+            // input; this processing-time check only gets the bounded grace.
             self.counts.len() < self.policy.context().sources.len()
                 && now_ns.saturating_sub(target)
                     > self.policy.max_first_packet_delay_ms() * 1_000_000
+                        + self.window_processing_grace_ns()
         }) {
             self.withdraw("missing_source_warmup");
         } else if self.end_ns.is_some_and(|end| now_ns >= end) {
@@ -311,13 +332,20 @@ impl ContinuousTemporalInput {
             return self.status.clone();
         }
         // Also check every OTHER source against the receiver tick. A busy source
-        // cannot hide a dropout while continuing to fill its own window.
+        // cannot hide a dropout while continuing to fill its own window. Each
+        // source is held to the exact max gap by this packet's arrival stamp,
+        // and to max gap plus the arrival-profile processing grace by `now_ns`.
+        // A later arrival stamp on another source is processing order, not a gap.
         if self.continuity.iter().any(|(id, last)| {
             self.policy
                 .source_policies()
                 .iter()
                 .find(|s| s.source_id == *id)
-                .is_none_or(|s| now_ns.saturating_sub(*last) > s.max_gap_ns)
+                .is_none_or(|s| {
+                    now_ns.saturating_sub(*last)
+                        > s.max_gap_ns + processing_grace_ns(s.receiver_cadence)
+                        || time.saturating_sub(*last) > s.max_gap_ns
+                })
         }) {
             self.withdraw("source_gap");
             return self.status.clone();
