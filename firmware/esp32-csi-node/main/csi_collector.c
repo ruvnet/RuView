@@ -530,9 +530,14 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
     s_cb_count++;
 
     if (s_cb_count <= 3 || (s_cb_count % 100) == 0) {
-        ESP_LOGI(TAG, "CSI cb #%lu: len=%d rssi=%d ch=%d",
+        /* Cumulative counters for bench runs on every target: sent, send-limiter
+         * skips, rate-gate drops, and frames withheld by the AP-only filter. */
+        ESP_LOGI(TAG, "CSI cb #%lu: len=%d rssi=%d ch=%d | sent=%lu fail=%lu skip=%lu gate=%lu src=%lu",
                  (unsigned long)s_cb_count, info->len,
-                 info->rx_ctrl.rssi, info->rx_ctrl.channel);
+                 info->rx_ctrl.rssi, info->rx_ctrl.channel,
+                 (unsigned long)s_send_ok, (unsigned long)s_send_fail,
+                 (unsigned long)s_rate_skip, (unsigned long)s_early_drop,
+                 (unsigned long)csi_collector_get_ap_source_drops());
     }
 #if CONFIG_SOC_WIFI_HE_SUPPORT
     if ((s_cb_count % 1000) == 0) {
