@@ -10,6 +10,7 @@
 #include <stddef.h>
 #include "esp_err.h"
 #include "esp_wifi_types.h"
+#include "sdkconfig.h"
 
 /** ADR-018 magic number. */
 #define CSI_MAGIC 0xC5110001
@@ -53,6 +54,24 @@ void csi_collector_set_node_id(uint8_t node_id);
  * @return Node ID (0-255) as loaded from NVS at boot.
  */
 uint8_t csi_collector_get_node_id(void);
+
+/**
+ * AP-only source filter (CONFIG_CSI_AP_ONLY_SOURCE): set the associated AP's
+ * BSSID, or NULL to clear. Called from the Wi-Fi event handler on connect and
+ * disconnect; a no-op when the option is off. @param via short log label.
+ */
+void csi_collector_set_ap_source(const uint8_t *bssid, const char *via);
+
+/** Frames withheld by the AP-only source filter since boot. */
+uint32_t csi_collector_get_ap_source_drops(void);
+
+#ifdef CONFIG_CSI_C5_LLTF8_V1
+/** C5L8/v1: print SYNTHETIC C5L8/v1 self-test frames as hex lines on the console. */
+void csi_collector_c5l8_serial_selftest(void);
+
+/** C5L8/v1 emitted and withheld callback counts since boot. */
+void csi_collector_get_c5l8_counts(uint32_t *emitted, uint32_t *rejected_total);
+#endif
 
 /**
  * Serialize CSI data into ADR-018 binary frame format.

@@ -120,11 +120,47 @@ static void event_handler(void *arg, esp_event_base_t event_base,
 #if defined(CONFIG_IDF_TARGET_ESP32C5)
         /* The band API requires started WiFi. Set it before association,
          * using the same 2.4 GHz radio domain as existing CSI nodes. */
+#if defined(CONFIG_CSI_C5_LLTF8_V1)
+        /* C5L8/v1: 5 GHz only, STA explicitly 20 MHz. The
+         * collector reads the bandwidth back before claiming the format. */
+        ESP_ERROR_CHECK(esp_wifi_set_band_mode(WIFI_BAND_MODE_5G_ONLY));
+        wifi_bandwidths_t c5l8_bw = { .ghz_2g = WIFI_BW20, .ghz_5g = WIFI_BW20 };
+        ESP_ERROR_CHECK(esp_wifi_set_bandwidths(WIFI_IF_STA, &c5l8_bw));
+#if defined(CONFIG_C5_LLTF8_STA_11A_ONLY)
+        /* C5L8/v1: associate as an 802.11a-only (non-HT) station so every
+         * unicast frame the AP sends this node, including self-ping replies,
+         * is non-HT OFDM and therefore C5L8/v1-qualifying. */
+        wifi_protocols_t c5l8_proto = { .ghz_2g = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G,
+                                        .ghz_5g = WIFI_PROTOCOL_11A };
+        esp_err_t c5l8_perr = esp_wifi_set_protocols(WIFI_IF_STA, &c5l8_proto);
+        wifi_protocols_t c5l8_rb = {0};
+        esp_err_t c5l8_rerr = esp_wifi_get_protocols(WIFI_IF_STA, &c5l8_rb);
+        ESP_LOGI(TAG, "C5L8 11a-only STA: set=%s readback=%s 5g=0x%02x",
+                 esp_err_to_name(c5l8_perr), esp_err_to_name(c5l8_rerr), (unsigned)c5l8_rb.ghz_5g);
+#else
+        /* MEASURED 2026-11-25: esp_wifi_set_protocols() persists in the Wi-Fi NVS
+         * config, so an 11a-only build leaves the next image associating as 11a.
+         * Every other C5L8 build re-asserts the 5 GHz default (a/n/ac/ax). */
+        wifi_protocols_t c5l8_proto = { .ghz_2g = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_11AX,
+                                        .ghz_5g = WIFI_PROTOCOL_11A | WIFI_PROTOCOL_11N | WIFI_PROTOCOL_11AC | WIFI_PROTOCOL_11AX };
+        esp_err_t c5l8_perr = esp_wifi_set_protocols(WIFI_IF_STA, &c5l8_proto);
+        wifi_protocols_t c5l8_rb = {0};
+        esp_err_t c5l8_rerr = esp_wifi_get_protocols(WIFI_IF_STA, &c5l8_rb);
+        ESP_LOGI(TAG, "C5L8 STA protocols restored to default: set=%s readback=%s 5g=0x%02x",
+                 esp_err_to_name(c5l8_perr), esp_err_to_name(c5l8_rerr), (unsigned)c5l8_rb.ghz_5g);
+#endif
+#else
         ESP_ERROR_CHECK(esp_wifi_set_band_mode(WIFI_BAND_MODE_2G_ONLY));
 #endif
+#endif
         esp_wifi_connect();
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_CONNECTED) {
+        /* AP-only source filter: learn the BSSID, or refresh it after a roam. */
+        const wifi_event_sta_connected_t *conn = (const wifi_event_sta_connected_t *)event_data;
+        csi_collector_set_ap_source(conn->bssid, "sta_connected");
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         wifi_event_sta_disconnected_t *disc = (wifi_event_sta_disconnected_t *)event_data;
+        csi_collector_set_ap_source(NULL, "sta_disconnected");
         ESP_LOGW(TAG, "WiFi disconnected, reason=%d rssi=%d", disc->reason, disc->rssi);
         /* The 7.5 h outage was root-caused to the MAX_RETRY latch only because
          * someone was watching the console at the time. Persist it. */
@@ -230,6 +266,10 @@ static void wifi_init_sta(void)
         wifi_config.sta.threshold.authmode = WIFI_AUTH_OPEN;
     }
 
+#if defined(CONFIG_CSI_C5_LLTF8_V1)
+    /* Scan hint only; the AP decides the operating channel. */
+    wifi_config.sta.channel = (uint8_t)CONFIG_C5_LLTF8_CHANNEL;
+#endif
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
 
@@ -385,6 +425,11 @@ void app_main(void)
      * reset unless it confirms itself. Start the clock before anything that
      * can block (WiFi waits up to ~2 min for an AP), so the deadline is real. */
     ota_health_start();
+
+#if defined(CONFIG_C5_LLTF8_SERIAL_SELFTEST)
+    /* C5L8/v1: frame-format check over USB serial, before Wi-Fi. */
+    csi_collector_c5l8_serial_selftest();
+#endif
 
     /* Apply the opt-in XIAO RF path before WiFi starts. Generic C6 boards keep
      * ownership of GPIO3 and GPIO14 because the default implementation is a

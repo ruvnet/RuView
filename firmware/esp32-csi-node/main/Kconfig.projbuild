@@ -1,5 +1,108 @@
 menu "CSI Node Configuration"
 
+    config CSI_C5_LLTF8_V1
+        bool "ESP32-C5: emit only the native C5L8/v1 8-bit L-LTF format"
+        depends on IDF_TARGET_ESP32C5
+        default n
+        help
+            5 GHz only, STA 20 MHz, legacy + forced L-LTF CSI with 8-bit components
+            (lltf_bit_mode=1, zero scaling). Each CSI frame is sent as the exact 142-byte
+            C5L8/v1 datagram (ADR-018 header + 106 IQ bytes + 16-byte suffix) only when the
+            SDK readback, non-HT OFDM, no secondary, valid estimate, 106 bytes and a supported
+            5 GHz primary all hold; other callbacks are counted and withheld. Needs an ESP-IDF
+            with wifi_csi_acquire_config_t.lltf_bit_mode (6.x).
+
+    config C5_LLTF8_CHANNEL
+        int "C5L8/v1 default 5 GHz primary channel (48 = 5240 MHz)"
+        depends on CSI_C5_LLTF8_V1
+        default 48
+        range 36 177
+        help
+            Channel hint for association and the fallback CSI channel when the AP channel
+            cannot be read. The emitted frequency always comes from the received frame.
+
+    config C5_LLTF8_SERIAL_SELFTEST
+        bool "C5L8/v1: print synthetic self-test frames on the console at boot"
+        depends on CSI_C5_LLTF8_V1
+        default y
+        help
+            Prints two SYNTHETIC C5L8/v1 datagrams as hex lines (C5L8-SELFTEST-SYNTHETIC ...)
+            before Wi-Fi starts, so the frame format can be checked over USB serial with no
+            Wi-Fi. Format evidence only.
+
+    config C5_LLTF8_STA_11A_ONLY
+        bool "C5L8/v1: associate as an 802.11a-only station"
+        depends on CSI_C5_LLTF8_V1
+        default y
+        help
+            Restricts the STA's 5 GHz protocols to 802.11a so the AP must send this
+            node non-HT OFDM. On an HE/VHT AP the C5L8/v1 legacy-only CSI selector
+            otherwise sees only beacons (measured ~4 Hz), because HE/VHT replies
+            produce no CSI callback at all. With this on, self-ping replies qualify.
+            Cost: the node is a legacy client in the BSS (some APs refuse legacy-only
+            clients or enable HT protection while one is associated).
+            esp_wifi_set_protocols() persists in the Wi-Fi NVS config, so when this
+            is off the firmware re-asserts the a/n/ac/ax default at boot.
+
+    config C5_LLTF8_PACE_HZ
+        int "C5L8/v1: emission pacer (Hz, 0 = off)"
+        depends on CSI_C5_LLTF8_V1
+        default 20
+        range 0 25
+        help
+            Deadline pacer on qualifying C5L8/v1 frames: the first qualifying frame
+            at or after each deadline is sent and the deadline advances by exactly
+            1/N s, so a source faster than N Hz yields N Hz on average. When on it
+            replaces the 20 ms early callback gate. The room learner's variable-source
+            profile (Arrival18To22Burst200MsV1) is two-sided: 18-22 packets/s per
+            source, so a faster unpaced source fails as well as a slower one.
+
+    config CSI_PACER_HZ
+        int "CSI emission pacer for the S3 / C6 / C5 HE builds (Hz, 0 = off)"
+        depends on !CSI_C5_LLTF8_V1
+        default 0
+        range 0 25
+        help
+            Off by default (0): the existing 20 ms rate gate and send limiter run
+            unchanged and this option adds no code. When set to N, the same
+            deadline pacer the C5L8/v1 build uses (C5_LLTF8_PACE_HZ) replaces the
+            early rate gate and the send limiter: the first frame at or after each
+            deadline is sent and the deadline advances by exactly 1/N s, so a
+            source faster than N Hz yields N Hz on average (minimum spacing a
+            quarter interval). Without it these builds send up to 50 Hz in bursts,
+            which fails the room learner's two-sided 18-22 packets/s band
+            (Arrival18To22Burst200MsV1). Use 20. It replaces the mesh-aligned gate
+            while on, so cross-node frame pairing is not preserved. The C5L8/v1
+            build keeps its own C5_LLTF8_PACE_HZ and ignores this option.
+
+    config CSI_AP_ONLY_SOURCE
+        bool "Use CSI only from frames transmitted by the associated AP"
+        default n if C6_SOFTAP_HE_ENABLE
+        default y
+        help
+            Learns the associated AP's BSSID at connect (refreshed after a
+            reconnect or roam, cleared on disconnect) and drops CSI from every
+            other transmitter early in the callback. An explicit NVS filter_mac
+            takes precedence, and the filter is bypassed while channel hopping.
+            With no AP known, C5L8/v1 builds withhold every frame (their claim
+            needs the AP); other builds pass frames through unfiltered.
+
+            Multistatic/peer sensing (ADR-029/030, node-to-node links) needs
+            other stations' frames. Outside C5L8/v1 the filter is bypassed at
+            runtime when NVS sets tdm_node_count > 1 (provision.py or
+            config_push.py); for any other peer-sensing setup, set this to n.
+            Off by default with the C6 HE SoftAP, where the sources of
+            interest are the SoftAP's own clients.
+            MEASURED 2026-11-25 with two C5s on one AP: without it, 53-65% of
+            emitted C5L8/v1 frames came from the peer C5 and other stations.
+            C5L8/v1 cadence stats report the drops as withheld src=N.
+
+    config C5_LLTF8_STATS_PERIOD_S
+        int "C5L8/v1: cadence stats log period (s, 0 = off)"
+        depends on CSI_C5_LLTF8_V1
+        default 10
+        range 0 600
+
     config C5_STATUS_LED_GPIO
         int "ESP32-C5 addressable status LED GPIO (-1 disables)"
         depends on IDF_TARGET_ESP32C5

@@ -304,9 +304,8 @@ void nvs_config_load(nvs_config_t *cfg)
     size_t mac_len = 6;
     if (nvs_get_blob(handle, "filter_mac", cfg->filter_mac, &mac_len) == ESP_OK && mac_len == 6) {
         cfg->filter_mac_set = 1;
-        ESP_LOGI(TAG, "NVS override: filter_mac=%02x:%02x:%02x:%02x:%02x:%02x",
-                 cfg->filter_mac[0], cfg->filter_mac[1], cfg->filter_mac[2],
-                 cfg->filter_mac[3], cfg->filter_mac[4], cfg->filter_mac[5]);
+        /* Masked: never log a full MAC at info level. */
+        ESP_LOGI(TAG, "NVS override: filter_mac=**:**:**:**:**:%02x", cfg->filter_mac[5]);
     }
 
     /* ADR-066: Swarm bridge */
