@@ -1,6 +1,7 @@
 //! SYNTHETIC native sources; actual fitter/store/cold loader/opaque infer path.
 use crate::room_learner::temporal_acquisition::AcquisitionPlan;
 use super::*;
+use crate::room_learner::temporal_model_input::managed::execution::ARRIVAL_PROFILE_PROCESSING_GRACE_NS;
 use crate::room_learner::{
     artifact::ArtifactStore,
     native::{canonicalize_esp32, NativePacketInput},
@@ -643,4 +644,200 @@ fn repeated_available_reads_age_the_same_observation_without_changing_identity_o
     assert!(replacement.observation.is_none());
     assert!(replacement.status.current_prediction.is_none());
     assert_eq!(replacement.status.buffer_state, LiveState::Inactive);
+}
+
+/// SYNTHETIC 20 Hz receiver arrivals for the `Arrival18To22Burst200MsV1`
+/// profile (frozen 200 ms max gap), fitted through the same session path.
+const ARRIVAL_PERIOD: u64 = 50_000_000;
+const ARRIVAL_GAP: u64 = 200_000_000;
+fn fitted_arrival() -> TemporalModel {
+    static BYTES: OnceLock<Vec<u8>> = OnceLock::new();
+    let id = ExperimentalPlanId::Native2000msSlots2;
+    let cadences = [
+        (1, ReceiverCadenceBand::Arrival18To22Burst200MsV1),
+        (2, ReceiverCadenceBand::Arrival18To22Burst200MsV1),
+    ];
+    TemporalModel::import(BYTES.get_or_init(|| {
+        let mut s = TemporalTrainingSession::new(
+            context(),
+            id,
+            &cadences,
+            "synthetic-arrival-live-fit".into(),
+            FitConfig {
+                epochs: 2,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let plan = AcquisitionPlan::build(context(), id, &cadences).unwrap();
+        let mut sequence = 0;
+        for index in 0..16 {
+            let at = 10_000_000_000 + index * 5_000_000_000;
+            let label = plan.schedule()[index as usize / 2].label;
+            s.begin_window(at, at + 5_000_000_000).unwrap();
+            'window: for row in 0..256 {
+                sequence += 1;
+                for source in 1..=2 {
+                    let now = at + row as u64 * ARRIVAL_PERIOD + u64::from(source) * 1000;
+                    if s.ingest(&packet(source, sequence, now, label, row))
+                        .unwrap()
+                        == WindowAdmission::Ready
+                    {
+                        s.finish_window(now).unwrap();
+                        break 'window;
+                    }
+                }
+            }
+        }
+        model_bytes(s)
+    }))
+    .unwrap()
+}
+fn model_bytes(mut s: TemporalTrainingSession) -> Vec<u8> {
+    let (model, report) = s.fit().unwrap();
+    assert_eq!(report.training_cohorts, 16);
+    model.export().unwrap()
+}
+/// Active arrival-profile driver with `rows` paired arrivals processed on
+/// arrival; returns the arrival stamp of source 1's last packet.
+fn arrival_driver(rows: usize) -> (ContinuousTemporalInput, u64) {
+    let mut d = ContinuousTemporalInput::new(fitted_arrival()).unwrap();
+    assert!(d.policy.source_policies().iter().all(|p| (p.receiver_cadence, p.max_gap_ns)
+        == (ReceiverCadenceBand::Arrival18To22Burst200MsV1, ARRIVAL_GAP)));
+    d.activate();
+    for row in 0..rows {
+        for source in 1..=2u8 {
+            let at = FRESH + row as u64 * ARRIVAL_PERIOD + u64::from(source) * 1000;
+            let s = d.ingest(&packet(source, 100_000 + row as u32, at, RoomLabel::Unknown, row), at);
+            assert_eq!(s.buffer_state, LiveState::Warming, "{:?}", s.reason);
+        }
+    }
+    (d, FRESH + (rows as u64 - 1) * ARRIVAL_PERIOD + 1000)
+}
+#[test]
+fn arrival_profile_live_driver_judges_packets_by_arrival_not_processing_delay() {
+    // Field case: 187 ms receiver arrival gap, processed at +205 ms after a
+    // poll tick at +201 ms. The 200 ms arrival bound holds, so the live input
+    // must not withdraw with source_gap, and the window still completes.
+    let (mut d, last) = arrival_driver(10);
+    let s = d.poll(last + 201_000_000);
+    assert_eq!((s.buffer_state, s.reason), (LiveState::Warming, Some("collecting_full_horizon")));
+    for source in 1..=2u8 {
+        let arrived = last + 187_000_000 + u64::from(source - 1) * 1000;
+        let processed = last + 205_000_000 + u64::from(source - 1) * 1000;
+        let s = d.ingest(&packet(source, 100_010, arrived, RoomLabel::Unknown, 10), processed);
+        assert_eq!(s.buffer_state, LiveState::Warming, "{:?}", s.reason);
+    }
+    let resume = last + 187_000_000;
+    let mut completed = false;
+    for row in 1..60u64 {
+        for source in 1..=2u8 {
+            let at = resume + row * ARRIVAL_PERIOD + u64::from(source - 1) * 1000;
+            let s = d.ingest(
+                &packet(source, 100_010 + row as u32, at, RoomLabel::Unknown, row as usize),
+                at,
+            );
+            assert_ne!(s.buffer_state, LiveState::Withdrawn, "{:?}", s.reason);
+            completed |= s.buffer_state == LiveState::WindowComplete;
+        }
+        if completed {
+            break;
+        }
+    }
+    assert!(completed);
+}
+#[test]
+fn arrival_profile_live_driver_still_rejects_real_arrival_gap_over_200ms() {
+    // Own source: exactly the frozen bound is admitted; one nanosecond more is
+    // not, even though processing is well within the grace.
+    let (mut d, last) = arrival_driver(10);
+    let s = d.ingest(
+        &packet(1, 100_010, last + ARRIVAL_GAP, RoomLabel::Unknown, 10),
+        last + ARRIVAL_GAP + 1_000_000,
+    );
+    assert_eq!(s.buffer_state, LiveState::Warming, "{:?}", s.reason);
+    let (mut d, last) = arrival_driver(10);
+    let s = d.ingest(
+        &packet(1, 100_010, last + ARRIVAL_GAP + 1, RoomLabel::Unknown, 10),
+        last + ARRIVAL_GAP + 1_000_000,
+    );
+    assert_eq!((s.buffer_state, s.reason), (LiveState::Withdrawn, Some("source_gap")));
+    assert!(s.current_prediction.is_none());
+
+    // Other source: a busy source 2 packet whose arrival is more than 200 ms
+    // past source 1's last arrival withdraws, though processing is in grace.
+    let (mut d, last) = arrival_driver(10);
+    let mut seq = 100_010;
+    let mut at = last + 1000;
+    while at + ARRIVAL_PERIOD <= last + ARRIVAL_GAP {
+        at += ARRIVAL_PERIOD;
+        let s = d.ingest(&packet(2, seq, at, RoomLabel::Unknown, 10), at);
+        assert_eq!(s.buffer_state, LiveState::Warming, "{:?}", s.reason);
+        seq += 1;
+    }
+    let arrived = last + ARRIVAL_GAP + 1;
+    let s = d.ingest(&packet(2, seq, arrived, RoomLabel::Unknown, 10), arrived + 1_000_000);
+    assert_eq!((s.buffer_state, s.reason), (LiveState::Withdrawn, Some("source_gap")));
+}
+#[test]
+fn arrival_profile_live_poll_grace_is_bounded_and_older_profiles_keep_exact_gap() {
+    let limit = ARRIVAL_GAP + ARRIVAL_PROFILE_PROCESSING_GRACE_NS;
+    let (mut d, last) = arrival_driver(10);
+    // Source 1 is the oldest arrival; a tick exactly at the bound still holds.
+    assert_eq!(d.poll(last + limit).buffer_state, LiveState::Warming);
+    let s = d.poll(last + limit + 1);
+    assert_eq!((s.buffer_state, s.reason), (LiveState::Withdrawn, Some("source_gap")));
+
+    // Interval-strict profiles get no grace: max_gap + 1 on a tick fails.
+    let mut d = driver();
+    let gap = d.policy.source_policies()[0].max_gap_ns;
+    assert_eq!(d.policy.source_policies()[0].receiver_cadence, ReceiverCadenceBand::Hz30To36);
+    d.activate();
+    feed(&mut d, FRESH, 10, 100_000);
+    let last = FRESH + 9 * PERIOD + 1000;
+    assert_eq!(d.poll(last + gap).buffer_state, LiveState::Warming);
+    let s = d.poll(last + gap + 1);
+    assert_eq!((s.buffer_state, s.reason), (LiveState::Withdrawn, Some("source_gap")));
+}
+#[test]
+fn arrival_profile_live_warmup_grace_is_bounded_and_older_profiles_keep_exact_delay() {
+    // Source 2 has not been processed yet. The 200 ms first-packet bound is
+    // enforced by arrival stamp in the window input; the processing-time poll
+    // only gets the bounded grace.
+    let mut d = ContinuousTemporalInput::new(fitted_arrival()).unwrap();
+    d.activate();
+    let delay = d.policy.max_first_packet_delay_ms() * 1_000_000;
+    assert_eq!(delay, 200_000_000);
+    for row in 0..3u64 {
+        let at = FRESH + row * ARRIVAL_PERIOD;
+        d.ingest(&packet(1, 100_000 + row as u32, at, RoomLabel::Unknown, 0), at);
+    }
+    let s = d.poll(FRESH + delay + 1);
+    assert_eq!(s.buffer_state, LiveState::Warming, "{:?}", s.reason);
+    let s = d.poll(FRESH + delay + ARRIVAL_PROFILE_PROCESSING_GRACE_NS);
+    assert_eq!(s.buffer_state, LiveState::Warming, "{:?}", s.reason);
+    let s = d.poll(FRESH + delay + ARRIVAL_PROFILE_PROCESSING_GRACE_NS + 1);
+    assert_eq!((s.buffer_state, s.reason), (LiveState::Withdrawn, Some("missing_source_warmup")));
+
+    // A late first arrival is still refused by its own stamp.
+    let mut d = ContinuousTemporalInput::new(fitted_arrival()).unwrap();
+    d.activate();
+    d.ingest(&packet(1, 100_000, FRESH, RoomLabel::Unknown, 0), FRESH);
+    d.ingest(&packet(1, 100_001, FRESH + 150_000_000, RoomLabel::Unknown, 1), FRESH + 150_000_000);
+    let late = FRESH + delay + 1;
+    let s = d.ingest(&packet(2, 100_000, late, RoomLabel::Unknown, 0), late + 1_000_000);
+    assert_eq!(s.buffer_state, LiveState::Withdrawn);
+    assert_ne!(s.reason, Some("collecting_full_horizon"));
+
+    // Interval-strict profile: no grace on the first-packet delay.
+    let mut d = driver();
+    d.activate();
+    let delay = d.policy.max_first_packet_delay_ms() * 1_000_000;
+    d.ingest(&packet(1, 100_000, FRESH, RoomLabel::Unknown, 0), FRESH);
+    d.ingest(&packet(1, 100_001, FRESH + PERIOD, RoomLabel::Unknown, 1), FRESH + PERIOD);
+    d.ingest(&packet(1, 100_002, FRESH + 2 * PERIOD, RoomLabel::Unknown, 2), FRESH + 2 * PERIOD);
+    d.ingest(&packet(1, 100_003, FRESH + 3 * PERIOD, RoomLabel::Unknown, 3), FRESH + 3 * PERIOD);
+    assert_eq!(d.poll(FRESH + delay).buffer_state, LiveState::Warming);
+    let s = d.poll(FRESH + delay + 1);
+    assert_eq!((s.buffer_state, s.reason), (LiveState::Withdrawn, Some("missing_source_warmup")));
 }

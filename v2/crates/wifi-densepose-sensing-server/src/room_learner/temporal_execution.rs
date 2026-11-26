@@ -36,7 +36,7 @@ mod prefix_digests;
 /// keep their exact original rules. Arrival-to-arrival gaps are never widened:
 /// every processed packet is still held to the frozen `max_gap_ns`.
 pub(crate) const ARRIVAL_PROFILE_PROCESSING_GRACE_NS: u64 = 50_000_000;
-fn processing_grace_ns(band: ReceiverCadenceBand) -> u64 {
+pub(crate) fn processing_grace_ns(band: ReceiverCadenceBand) -> u64 {
     if band == ReceiverCadenceBand::Arrival18To22Burst200MsV1 {
         ARRIVAL_PROFILE_PROCESSING_GRACE_NS
     } else {

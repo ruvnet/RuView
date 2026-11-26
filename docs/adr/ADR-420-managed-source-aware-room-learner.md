@@ -484,6 +484,12 @@ next packet it rejects on the first tick past 250 ms. Cross-source processing
 order is not counted as a gap. Older interval-strict profiles get no grace. This
 is an interim receiver-clock correction, not source-clock alignment.
 
+The continuous live input after training applies the same rule. Its
+`source_gap` withdrawal holds each packet to 200 ms by arrival stamp against
+every source's last arrival, and its processing-time checks (packets, polls and
+the missing-source warm-up bound) get the same 50 ms grace for this profile
+only. The window input still refuses a late first arrival by its own stamp.
+
 Synthetic checks exercise source-count bounds, bursty four-C5 native input,
 rejected gaps/floods, whole four-source training with reserved checks excluded,
 model export/import identity, durable genesis and recovery isolation. Physical
