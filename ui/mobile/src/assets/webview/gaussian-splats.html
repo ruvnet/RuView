@@ -8,7 +8,7 @@
     />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'"
     />
     <title>WiFi DensePose Splat Viewer</title>
     <style>
@@ -31,8 +31,23 @@
   <body>
     <div id="gaussian-splat-root"></div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r165/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.165.0/examples/js/controls/OrbitControls.js"></script>
+    <!-- three stopped shipping three.min.js and examples/js, so load the ES modules
+         (same version as the app's `three` dependency) and expose them as window.THREE.
+         Module scripts run before DOMContentLoaded, which is when the renderer is built. -->
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.183.2/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.183.2/examples/jsm/"
+        }
+      }
+    </script>
+    <script type="module">
+      import * as THREE from 'three';
+      import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+      window.THREE = { ...THREE, OrbitControls };
+    </script>
 
     <script>
       (function () {
@@ -57,7 +72,7 @@
           });
         };
 
-        // Use global THREE from CDN
+        // Use global THREE set by the module script above
         const getThree = () => window.THREE;
 
         // ---- Custom Splat Shaders --------------------------------------------
