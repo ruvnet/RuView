@@ -154,6 +154,32 @@ static int64_t s_last_process_us = 0;
  * yet", which no real bucket can collide with. */
 static uint64_t s_last_gate_bucket __attribute__((unused)) = UINT64_MAX;
 static uint32_t s_early_drop = 0;
+#if defined(CONFIG_CSI_PACER_HZ) && CONFIG_CSI_PACER_HZ > 0
+/* Optional deadline pacer for the S3/C6/C5 HE builds (off by default; absent
+ * from the image when CONFIG_CSI_PACER_HZ is 0). Same algorithm as the C5L8/v1
+ * pacer. Drops are counted in s_early_drop (the "gate" counter). */
+#define CSI_PACER_ON 1
+#define CSI_PACER_INTERVAL_US (1000000U / CONFIG_CSI_PACER_HZ)
+static int64_t  s_pacer_deadline_us = 0;
+static int64_t  s_pacer_last_accept_us = INT64_MIN;
+static bool csi_pacer_accept(int64_t now_us)
+{
+    if (s_pacer_deadline_us == 0) {
+        s_pacer_deadline_us = now_us;
+    }
+    if (now_us < s_pacer_deadline_us
+        || (s_pacer_last_accept_us != INT64_MIN
+            && now_us - s_pacer_last_accept_us < (int64_t)(CSI_PACER_INTERVAL_US / 4))) {
+        return false;
+    }
+    s_pacer_deadline_us += CSI_PACER_INTERVAL_US;
+    if (s_pacer_deadline_us < now_us - (int64_t)CSI_PACER_INTERVAL_US) {
+        s_pacer_deadline_us = now_us + CSI_PACER_INTERVAL_US / 2;   /* outage: no burst */
+    }
+    s_pacer_last_accept_us = now_us;
+    return true;
+}
+#endif
 
 /* ADR-423 D1: HE-LTF validity gate. Counted for every HE PPDU the driver
  * delivers (before the rate gate), so the reported ratio is the radio's, not
@@ -506,6 +532,9 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
      * frames arrive in bursts, and this 20 ms gate dropped ~70% of qualifying
      * frames before they could be sent. */
     take = true;
+#elif defined(CSI_PACER_ON)
+    /* Optional pacer (CONFIG_CSI_PACER_HZ > 0) replaces the gate for this build. */
+    take = csi_pacer_accept(now_us);
 #elif defined(CONFIG_CSI_GATE_MESH_ALIGNED)
     if (c6_sync_espnow_is_valid()) {
         uint64_t bucket = c6_sync_espnow_get_epoch_us()
@@ -629,7 +658,11 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
         /* Rate-limit UDP sends to avoid ENOMEM from lwIP pbuf exhaustion.
          * In promiscuous mode, CSI callbacks can fire 100-500+ times/sec.
          * We only need 20-50 Hz for the sensing pipeline. */
-#if defined(CONFIG_CSI_C5_LLTF8_V1) && CONFIG_C5_LLTF8_PACE_HZ > 0
+#if defined(CSI_PACER_ON)
+        /* Optional pacer on: it already bounds the rate (<= CSI_PACER_HZ, min spacing
+         * a quarter interval), so the send limiter would only drop paced frames. */
+        if (true) {
+#elif defined(CONFIG_CSI_C5_LLTF8_V1) && CONFIG_C5_LLTF8_PACE_HZ > 0
         /* C5L8/v1 with the pacer on: the pacer already bounds the rate (<= PACE_HZ,
          * min spacing a quarter interval). MEASURED 2026-11-25 on one C5: this 20 ms
          * limiter then discarded ~1% of paced catch-up frames after their sequence

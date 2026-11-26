@@ -57,6 +57,24 @@ menu "CSI Node Configuration"
             profile (Arrival18To22Burst200MsV1) is two-sided: 18-22 packets/s per
             source, so a faster unpaced source fails as well as a slower one.
 
+    config CSI_PACER_HZ
+        int "CSI emission pacer for the S3 / C6 / C5 HE builds (Hz, 0 = off)"
+        depends on !CSI_C5_LLTF8_V1
+        default 0
+        range 0 25
+        help
+            Off by default (0): the existing 20 ms rate gate and send limiter run
+            unchanged and this option adds no code. When set to N, the same
+            deadline pacer the C5L8/v1 build uses (C5_LLTF8_PACE_HZ) replaces the
+            early rate gate and the send limiter: the first frame at or after each
+            deadline is sent and the deadline advances by exactly 1/N s, so a
+            source faster than N Hz yields N Hz on average (minimum spacing a
+            quarter interval). Without it these builds send up to 50 Hz in bursts,
+            which fails the room learner's two-sided 18-22 packets/s band
+            (Arrival18To22Burst200MsV1). Use 20. It replaces the mesh-aligned gate
+            while on, so cross-node frame pairing is not preserved. The C5L8/v1
+            build keeps its own C5_LLTF8_PACE_HZ and ignores this option.
+
     config CSI_AP_ONLY_SOURCE
         bool "Use CSI only from frames transmitted by the associated AP"
         default n if C6_SOFTAP_HE_ENABLE
