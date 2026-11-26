@@ -135,6 +135,17 @@ static int64_t s_last_send_us = 0;
  * in callback context per second, giving the WiFi ISR more headroom.
  */
 #define CSI_MIN_PROCESS_INTERVAL_US  (20 * 1000)  /* 50 Hz */
+
+/* The send limiter below measures from the rate gate's own timestamp with the
+ * gate's own floor, so it is a backstop that cannot drop a frame the gate took
+ * (that frame's sequence number is already used, so each drop is a host-visible
+ * gap). The mesh-aligned gate may take two frames half an interval apart while
+ * keeping the 50 Hz average. */
+#if defined(CONFIG_CSI_GATE_MESH_ALIGNED)
+#define CSI_SEND_FLOOR_US  (CSI_MIN_PROCESS_INTERVAL_US / 2)
+#else
+#define CSI_SEND_FLOOR_US  CSI_MIN_SEND_INTERVAL_US
+#endif
 static int64_t s_last_process_us = 0;
 /* Mesh-epoch window index of the last accepted frame. UINT64_MAX means "none
  * yet", which no real bucket can collide with. */
@@ -610,7 +621,6 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
         /* Rate-limit UDP sends to avoid ENOMEM from lwIP pbuf exhaustion.
          * In promiscuous mode, CSI callbacks can fire 100-500+ times/sec.
          * We only need 20-50 Hz for the sensing pipeline. */
-        int64_t now = esp_timer_get_time();
 #if defined(CONFIG_CSI_C5_LLTF8_V1) && CONFIG_C5_LLTF8_PACE_HZ > 0
         /* C5L8/v1 with the pacer on: the pacer already bounds the rate (<= PACE_HZ,
          * min spacing a quarter interval). MEASURED 2026-11-25 on one C5: this 20 ms
@@ -619,12 +629,19 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
          * without it seq_lost was 0 at a flat 20.00 Hz. */
         if (true) {
 #else
-        if ((now - s_last_send_us) >= CSI_MIN_SEND_INTERVAL_US) {
+        /* Same clock and floor as the rate gate (see CSI_SEND_FLOOR_US). This
+         * limiter used a second, later clock read against a flat 20 ms, so it
+         * dropped gate-accepted frames after their sequence number was used:
+         * any accept closer than 20 ms under the mesh-aligned gate (10 ms
+         * floor, on by default), and an elapsed-gate accept at just over 20 ms
+         * whose predecessor was stamped later in its callback. Same failure as
+         * the C5L8/v1 case above (MEASURED there: ~1% of frames, ~100 ms gaps). */
+        if ((now_us - s_last_send_us) >= CSI_SEND_FLOOR_US) {
 #endif
             int ret = stream_sender_send(frame_buf, frame_len);
             if (ret > 0) {
                 s_send_ok++;
-                s_last_send_us = now;
+                s_last_send_us = now_us;
             } else {
                 s_send_fail++;
                 if (s_send_fail <= 5) {
