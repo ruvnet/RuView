@@ -268,7 +268,7 @@ struct Args {
     #[arg(long)]
     train: bool,
 
-    /// Path to dataset directory (MM-Fi or Wi-Pose)
+    /// Prepared dataset path (MM-Fi directory or Wi-Pose .mat file)
     #[arg(long, value_name = "PATH")]
     dataset: Option<PathBuf>,
 
@@ -284,21 +284,25 @@ struct Args {
     #[arg(long, value_name = "DIR")]
     checkpoint_dir: Option<PathBuf>,
 
-    /// Run self-supervised contrastive pretraining (ADR-024)
-    #[arg(long)]
+    /// Run dataset contrastive pretraining; requires --dataset (no synthetic fallback)
+    #[arg(long, conflicts_with_all = ["embed", "build_index", "train"])]
     pretrain: bool,
 
     /// Number of pretraining epochs (default 50)
     #[arg(long, default_value = "50")]
     pretrain_epochs: usize,
 
-    /// Extract embeddings mode: load model and extract CSI embeddings
-    #[arg(long)]
+    /// Extract dataset CSI embeddings with --model; write JSON vectors to stdout
+    #[arg(long, conflicts_with_all = ["train", "build_index"])]
     embed: bool,
 
-    /// Build fingerprint index from embeddings (env|activity|temporal|person)
+    /// Build a dataset fingerprint index with --model and --index-output (env|activity|temporal|person)
     #[arg(long, value_name = "TYPE")]
     build_index: Option<String>,
+
+    /// New JSON index file to create for --build-index (must not already exist)
+    #[arg(long, value_name = "PATH", requires = "build_index")]
+    index_output: Option<PathBuf>,
 
     /// Node positions for multistatic fusion (format: "x,y,z;x,y,z;...")
     #[arg(long, env = "SENSING_NODE_POSITIONS")]
@@ -14107,7 +14111,9 @@ async fn main() {
     let _telemetry = telemetry::init();
 
     let mut args = Args::parse();
-    args.ui_path = coalesce_ui_path(args.ui_path);
+    if !args.embed && args.build_index.is_none() {
+        args.ui_path = coalesce_ui_path(args.ui_path);
+    }
 
     if let Err(error) = validate_startup_calibration_request(args.calibrate) {
         eprintln!("Error: {error}");
@@ -14213,50 +14219,23 @@ async fn main() {
     if args.pretrain {
         eprintln!("=== WiFi-DensePose Contrastive Pretraining (ADR-024) ===");
 
-        let ds_path = args
-            .dataset
-            .clone()
-            .unwrap_or_else(|| PathBuf::from("data"));
-        let source = match args.dataset_type.as_str() {
-            "wipose" => dataset::DataSource::WiPose(ds_path.clone()),
-            _ => dataset::DataSource::MmFi(ds_path.clone()),
-        };
-        let pipeline = dataset::DataPipeline::new(dataset::DataConfig {
-            source,
-            ..Default::default()
+        if args.pretrain_epochs == 0 {
+            eprintln!("Error: --pretrain-epochs must be greater than zero");
+            std::process::exit(1);
+        }
+        let csi_windows = wifi_densepose_sensing_server::embedding_workflow::load_windows(
+            args.dataset.as_deref(),
+            &args.dataset_type,
+        )
+        .unwrap_or_else(|e| {
+            eprintln!("Error: {e}");
+            std::process::exit(1)
         });
-
-        // Generate synthetic or load real CSI windows
-        let generate_synthetic_windows = || -> Vec<Vec<Vec<f32>>> {
-            (0..50)
-                .map(|i| {
-                    (0..4)
-                        .map(|a| {
-                            (0..56)
-                                .map(|s| ((i * 7 + a * 13 + s) as f32 * 0.31).sin() * 0.5)
-                                .collect()
-                        })
-                        .collect()
-                })
-                .collect()
-        };
-
-        let csi_windows: Vec<Vec<Vec<f32>>> = match pipeline.load() {
-            Ok(s) if !s.is_empty() => {
-                eprintln!("Loaded {} samples from {}", s.len(), ds_path.display());
-                s.into_iter().map(|s| s.csi_window).collect()
-            }
-            _ => {
-                eprintln!("Using synthetic data for pretraining.");
-                generate_synthetic_windows()
-            }
-        };
-
-        let n_subcarriers = csi_windows
-            .first()
-            .and_then(|w| w.first())
-            .map(|f| f.len())
-            .unwrap_or(56);
+        let n_subcarriers = csi_windows[0][0].len();
+        eprintln!(
+            "Loaded {} dataset CSI windows ({n_subcarriers} subcarriers)",
+            csi_windows.len()
+        );
 
         let tf_config = graph_transformer::TransformerConfig {
             n_subcarriers,
@@ -14325,6 +14304,9 @@ async fn main() {
                     "temperature": e_config.temperature,
                     "normalize": e_config.normalize,
                     "pretrain_epochs": args.pretrain_epochs,
+                    "n_subcarriers": n_subcarriers,
+                    "n_heads": 4,
+                    "n_gnn_layers": 2,
                 }),
                 &proj_weights,
             );
@@ -14334,160 +14316,61 @@ async fn main() {
                     weights.len(),
                     proj_weights.len()
                 ),
-                Err(e) => eprintln!("Failed to save RVF: {e}"),
+                Err(e) => {
+                    eprintln!("Failed to save RVF: {e}");
+                    std::process::exit(1);
+                }
             }
         }
 
         return;
     }
 
-    // Handle --embed mode: extract embeddings from CSI data
-    if args.embed {
-        eprintln!("=== WiFi-DensePose Embedding Extraction (ADR-024) ===");
-
-        let model_path = match &args.model {
-            Some(p) => p.clone(),
-            None => {
-                eprintln!("Error: --embed requires --model <path> to a pretrained .rvf file");
-                std::process::exit(1);
+    // Both offline inference modes use the same dataset and trained RVF weights.
+    if args.embed || args.build_index.is_some() {
+        use wifi_densepose_sensing_server::embedding_workflow as workflow;
+        let result = (|| -> Result<(), String> {
+            if args.embed && args.build_index.is_some() {
+                return Err("choose either --embed or --build-index".into());
             }
-        };
-
-        let reader = match RvfReader::from_file(&model_path) {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("Failed to load model: {e}");
-                std::process::exit(1);
+            if let Some(name) = &args.build_index {
+                workflow::index_type(name)?;
+                if args.index_output.is_none() {
+                    return Err("--build-index requires --index-output <path>".into());
+                }
             }
-        };
-
-        let weights = reader.weights().unwrap_or_default();
-        let (embed_config_json, proj_weights) = reader.embedding().unwrap_or_else(|| {
-            eprintln!("Warning: no embedding segment in RVF, using defaults");
-            (
-                serde_json::json!({"d_model":64,"d_proj":128,"temperature":0.07,"normalize":true}),
-                Vec::new(),
-            )
-        });
-
-        let d_model = embed_config_json["d_model"].as_u64().unwrap_or(64) as usize;
-        let d_proj = embed_config_json["d_proj"].as_u64().unwrap_or(128) as usize;
-
-        let tf_config = graph_transformer::TransformerConfig {
-            n_subcarriers: 56,
-            n_keypoints: 17,
-            d_model,
-            n_heads: 4,
-            n_gnn_layers: 2,
-        };
-        let e_config = embedding::EmbeddingConfig {
-            d_model,
-            d_proj,
-            temperature: 0.07,
-            normalize: true,
-        };
-        let mut extractor = embedding::EmbeddingExtractor::new(tf_config, e_config.clone());
-
-        // Load transformer weights
-        if !weights.is_empty() {
-            if let Err(e) = extractor.transformer.unflatten_weights(&weights) {
-                eprintln!("Warning: failed to load transformer weights: {e}");
+            let windows = workflow::load_windows(args.dataset.as_deref(), &args.dataset_type)?;
+            let width = workflow::window_width(&windows)?;
+            let mut extractor = workflow::load_extractor(args.model.as_deref(), width)?;
+            let embeddings = extractor.extract_batch(&windows);
+            if embeddings.iter().flatten().any(|x| !x.is_finite()) {
+                return Err("model produced non-finite embeddings".into());
             }
-        }
-        // Load projection weights
-        if !proj_weights.is_empty() {
-            let (proj, _) = embedding::ProjectionHead::unflatten_from(&proj_weights, &e_config);
-            extractor.projection = proj;
-        }
-
-        // Load dataset and extract embeddings
-        let _ds_path = args
-            .dataset
-            .clone()
-            .unwrap_or_else(|| PathBuf::from("data"));
-        let csi_windows: Vec<Vec<Vec<f32>>> = (0..10)
-            .map(|i| {
-                (0..4)
-                    .map(|a| {
-                        (0..56)
-                            .map(|s| ((i * 7 + a * 13 + s) as f32 * 0.31).sin() * 0.5)
-                            .collect()
-                    })
-                    .collect()
-            })
-            .collect();
-
-        eprintln!(
-            "Extracting embeddings from {} CSI windows...",
-            csi_windows.len()
-        );
-        let embeddings = extractor.extract_batch(&csi_windows);
-        for (i, emb) in embeddings.iter().enumerate() {
-            let norm: f32 = emb.iter().map(|x| x * x).sum::<f32>().sqrt();
-            eprintln!("  Window {i}: {d_proj}-dim embedding, ||e|| = {norm:.4}");
-        }
-        eprintln!(
-            "Extracted {} embeddings of dimension {d_proj}",
-            embeddings.len()
-        );
-
-        return;
-    }
-
-    // Handle --build-index mode: build a fingerprint index from embeddings
-    if let Some(ref index_type_str) = args.build_index {
-        eprintln!("=== WiFi-DensePose Fingerprint Index Builder (ADR-024) ===");
-
-        let index_type = match index_type_str.as_str() {
-            "env" | "environment" => embedding::IndexType::EnvironmentFingerprint,
-            "activity" => embedding::IndexType::ActivityPattern,
-            "temporal" => embedding::IndexType::TemporalBaseline,
-            "person" => embedding::IndexType::PersonTrack,
-            _ => {
+            eprintln!("Extracted {} dataset embeddings", embeddings.len());
+            if let Some(name) = &args.build_index {
+                let index = workflow::FingerprintFile::new(name, embeddings)?;
+                let path = args.index_output.as_deref().unwrap();
+                index.save(path)?;
                 eprintln!(
-                    "Unknown index type '{}'. Use: env, activity, temporal, person",
-                    index_type_str
+                    "Saved {} fingerprint entries to {}",
+                    index.embeddings.len(),
+                    path.display()
                 );
-                std::process::exit(1);
+            } else {
+                use std::io::Write;
+                let stdout = std::io::stdout();
+                let mut out = stdout.lock();
+                for emb in embeddings {
+                    serde_json::to_writer(&mut out, &emb).map_err(|e| e.to_string())?;
+                    writeln!(out).map_err(|e| e.to_string())?;
+                }
             }
-        };
-
-        let tf_config = graph_transformer::TransformerConfig::default();
-        let e_config = embedding::EmbeddingConfig::default();
-        let mut extractor = embedding::EmbeddingExtractor::new(tf_config, e_config);
-
-        // Generate synthetic CSI windows for demo
-        let csi_windows: Vec<Vec<Vec<f32>>> = (0..20)
-            .map(|i| {
-                (0..4)
-                    .map(|a| {
-                        (0..56)
-                            .map(|s| ((i * 7 + a * 13 + s) as f32 * 0.31).sin() * 0.5)
-                            .collect()
-                    })
-                    .collect()
-            })
-            .collect();
-
-        let mut index = embedding::FingerprintIndex::new(index_type);
-        for (i, window) in csi_windows.iter().enumerate() {
-            let emb = extractor.extract(window);
-            index.insert(emb, format!("window_{i}"), i as u64 * 100);
+            Ok(())
+        })();
+        if let Err(e) = result {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
         }
-
-        eprintln!("Built {:?} index with {} entries", index_type, index.len());
-
-        // Test a query
-        let query_emb = extractor.extract(&csi_windows[0]);
-        let results = index.search(&query_emb, 5);
-        eprintln!("Top-5 nearest to window_0:");
-        for r in &results {
-            eprintln!(
-                "  entry={}, distance={:.4}, metadata={}",
-                r.entry, r.distance, r.metadata
-            );
-        }
-
         return;
     }
 

@@ -14,6 +14,7 @@ pub mod browser_session;
 pub mod ws_ticket;
 pub mod cli;
 pub mod dataset;
+pub mod embedding_workflow;
 pub mod discovery;
 pub mod edge_registry;
 pub mod error_response;
