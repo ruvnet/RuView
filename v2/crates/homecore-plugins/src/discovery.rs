@@ -197,12 +197,18 @@ fn bounded_regular_file(path: &Path, maximum: u64, kind: &str) -> Result<Vec<u8>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// Tests run in parallel threads of one process, and two of them can read
+    /// the same clock value; the counter keeps their directories apart.
+    static NEXT_ROOT: AtomicU64 = AtomicU64::new(0);
 
     fn root() -> PathBuf {
         let path = std::env::temp_dir().join(format!(
-            "homecore-plugin-discovery-{}-{}",
+            "homecore-plugin-discovery-{}-{}-{}",
             std::process::id(),
+            NEXT_ROOT.fetch_add(1, Ordering::Relaxed),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
