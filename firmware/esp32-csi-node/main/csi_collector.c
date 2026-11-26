@@ -844,9 +844,8 @@ void csi_collector_set_node_id(uint8_t node_id)
     s_filter_mac_set = (g_nvs_config.filter_mac_set != 0);
     if (s_filter_mac_set) {
         memcpy(s_filter_mac, g_nvs_config.filter_mac, 6);
-        ESP_LOGI(TAG, "Early capture filter_mac=%02x:%02x:%02x:%02x:%02x:%02x",
-                 s_filter_mac[0], s_filter_mac[1], s_filter_mac[2],
-                 s_filter_mac[3], s_filter_mac[4], s_filter_mac[5]);
+        /* Masked: never log a full MAC at info level. */
+        ESP_LOGI(TAG, "Early capture filter_mac=**:**:**:**:**:%02x", s_filter_mac[5]);
     }
 }
 
@@ -1043,10 +1042,7 @@ void csi_collector_init(void)
     ESP_ERROR_CHECK(esp_wifi_set_csi(true));
 
     if (g_nvs_config.filter_mac_set) {
-        ESP_LOGI(TAG, "MAC filter active: %02x:%02x:%02x:%02x:%02x:%02x",
-                 g_nvs_config.filter_mac[0], g_nvs_config.filter_mac[1],
-                 g_nvs_config.filter_mac[2], g_nvs_config.filter_mac[3],
-                 g_nvs_config.filter_mac[4], g_nvs_config.filter_mac[5]);
+        ESP_LOGI(TAG, "MAC filter active: **:**:**:**:**:%02x", g_nvs_config.filter_mac[5]);
     }
 
     ESP_LOGI(TAG, "CSI collection initialized (node_id=%u, channel=%u)",
