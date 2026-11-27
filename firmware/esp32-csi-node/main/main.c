@@ -21,6 +21,7 @@
 #include "led_strip.h"
 
 #include "csi_collector.h"
+#include "uplink_wd_core.h"   /* uplink watchdog decision, host-tested */
 #include "node_log.h"
 #include "thermal.h"
 #include "stream_sender.h"
@@ -174,21 +175,44 @@ static void event_handler(void *arg, esp_event_base_t event_base,
  *
  * It arms on the first successful send rather than at boot, so a node that has
  * never reached the network does not reboot-loop while the AP is down; the
- * unbounded reconnect above owns that case. */
+ * unbounded reconnect above owns that case.
+ *
+ * The decision (two rules: no bulk send at all, or < 5 % of bulk sends
+ * accepted, each for the whole timeout) lives in uplink_wd_core.c so it is
+ * host-tested; see its header for why rule 2 exists. */
+static void uplink_watchdog_fire(uint8_t rule, int64_t stalled_s)
+{
+    /* Packing documented in node_log.h next to NODE_LOG_EV_WATCHDOG. The
+     * priority path's idle time tells the two failure shapes apart: near 0
+     * means the stack still accepted small packets while bulk failed (a TX
+     * stall); large means the whole path was gone. node_log fsyncs, so this
+     * record is on flash before the restart -- the one post-mortem a power
+     * cycle cannot erase. */
+    int64_t prio = stream_sender_last_priority_success_us();
+    int64_t prio_idle_s = prio ? (esp_timer_get_time() - prio) / 1000000 : -1;
+    uint32_t stalled_c = (stalled_s > 0xFFFFFF) ? 0xFFFFFFu : (uint32_t)stalled_s;
+    node_log_event(NODE_LOG_EV_WATCHDOG,
+                   (int32_t)(((uint32_t)rule << 24) | stalled_c),
+                   (int32_t)prio_idle_s);
+    ESP_LOGE(TAG, "uplink watchdog: rule %u, bulk path stalled %lld s "
+                  "(limit %d s, priority path idle %lld s) -- restarting",
+             (unsigned)rule, (long long)stalled_s,
+             CONFIG_UPLINK_WATCHDOG_TIMEOUT_S, (long long)prio_idle_s);
+    esp_restart();
+}
+
 static void uplink_watchdog_tick(void)
 {
-    int64_t last = stream_sender_last_success_us();
-    if (last == 0) {
-        return;                      /* never delivered -- not armed yet */
+    static uwd_state_t s_uwd;
+    int64_t stalled_s = 0;
+    uint8_t rule = uwd_step(&s_uwd, esp_timer_get_time(),
+                            csi_collector_get_send_ok_count(),
+                            csi_collector_get_send_fail_total(),
+                            stream_sender_last_success_us(),
+                            CONFIG_UPLINK_WATCHDOG_TIMEOUT_S, &stalled_s);
+    if (rule != UWD_RULE_NONE) {
+        uplink_watchdog_fire(rule, stalled_s);
     }
-    int64_t idle_s = (esp_timer_get_time() - last) / 1000000;
-    if (idle_s < CONFIG_UPLINK_WATCHDOG_TIMEOUT_S) {
-        return;
-    }
-    ESP_LOGE(TAG, "uplink watchdog: no successful send for %lld s "
-                  "(limit %d s) -- restarting",
-             (long long)idle_s, CONFIG_UPLINK_WATCHDOG_TIMEOUT_S);
-    esp_restart();
 }
 #endif /* CONFIG_UPLINK_WATCHDOG */
 

@@ -151,6 +151,12 @@ uint16_t csi_collector_get_send_fail_count(void);
  */
 uint32_t csi_collector_get_send_ok_count(void);
 
+/** Unsaturated bulk-send failure total since boot, for the uplink watchdog's
+ *  success-ratio rule (main.c, uplink_wd_core.h); the u16 getter above pins at
+ *  65,535 within half an hour of a full TX stall. Pairs with
+ *  csi_collector_get_send_ok_count(). Monotonic; wraps at 2^32. */
+uint32_t csi_collector_get_send_fail_total(void);
+
 /** Reported by the gate accessors when this build has no selectable gate. */
 #define CSI_GATE_NOT_CONFIGURABLE 0xFF
 

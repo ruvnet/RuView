@@ -11,6 +11,7 @@
 #include "ota_update.h"
 #include "nvs_config.h"
 #include "config_rules.h"
+#include "stream_sender.h"   /* "active"."uplink_wd" reporting block */
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_timer.h"
@@ -380,6 +381,28 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "reassoc_count", s_reassoc_count);
     cJSON_AddNumberToObject(root, "reassoc_last_s_ago",
         s_reassoc_last_us ? (double)((esp_timer_get_time() - s_reassoc_last_us) / 1000000) : -1);
+
+    /* Runtime state, as opposed to the NVS values under "config".
+     * Uplink watchdog (main.c): bulk_idle_s is what it times out on;
+     * priority_idle_s small while bulk_idle_s grows is the TX-stall
+     * signature. -1 = that path has not succeeded since boot. timeout_s 0 =
+     * the watchdog is compiled out. */
+    {
+        cJSON *act = cJSON_AddObjectToObject(root, "active");
+        cJSON *uw = cJSON_AddObjectToObject(act, "uplink_wd");
+        int64_t now_us = esp_timer_get_time();
+        int64_t bulk = stream_sender_last_success_us();
+        int64_t prio = stream_sender_last_priority_success_us();
+#ifdef CONFIG_UPLINK_WATCHDOG
+        cJSON_AddNumberToObject(uw, "timeout_s", CONFIG_UPLINK_WATCHDOG_TIMEOUT_S);
+#else
+        cJSON_AddNumberToObject(uw, "timeout_s", 0);
+#endif
+        cJSON_AddNumberToObject(uw, "bulk_idle_s",
+            bulk ? (double)((now_us - bulk) / 1000000) : -1);
+        cJSON_AddNumberToObject(uw, "priority_idle_s",
+            prio ? (double)((now_us - prio) / 1000000) : -1);
+    }
 
     char *out = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
