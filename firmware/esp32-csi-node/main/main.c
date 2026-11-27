@@ -44,6 +44,7 @@
 #include "c6_antenna_select.h"     /* XIAO C6 RF switch (opt-in; generic C6 no-op) */
 #include "c6_sync_espnow.h"        /* ADR-110 D1 workaround: ESP-NOW sync */
 #include "c6_softap_he.h"          /* ADR-110 B1/B2: HE/TWT soft-AP (no-op when disabled) */
+#include "link_watchdog.h"         /* ADR-427: link-rate watchdog (no-op when off) */
 #include "node_mdns.h"             /* LAN discovery of this node */
 #ifdef CONFIG_CSI_MOCK_ENABLED
 #include "mock_csi.h"
@@ -130,6 +131,11 @@ static void event_handler(void *arg, esp_event_base_t event_base,
          * someone was watching the console at the time. Persist it. */
         node_log_note_disconnect((uint8_t)disc->reason, (int8_t)disc->rssi);
         node_log_event(NODE_LOG_EV_WIFI_DISCONNECT, disc->reason, disc->rssi);
+        /* ADR-427 inhibit: no link-watchdog action within boot_grace_s of
+         * ANY disconnect, not just one it caused itself -- an AP-side event
+         * already ends in a disconnect (guard 1), and this is what keeps the
+         * node quiet immediately after reconnecting too. */
+        link_watchdog_note_wifi_disconnect();
         s_retry_num++;
         /* Release the boot wait once, so a node that comes up while the AP is
          * down still starts CSI capture and the mesh instead of blocking in
@@ -537,6 +543,12 @@ void app_main(void)
         }
     }
 
+    /* ADR-427: NVS and g_nvs_config are up; no-op when CONFIG_LINK_WATCHDOG
+     * is unset or NVS linkwd=0. Must run before csi_collector_init() starts
+     * the self-ping session below, so the ping callbacks never see it
+     * uninitialised. */
+    link_watchdog_init();
+
     /* Bring thermal monitoring up before the radio is loaded, so the first
      * reading is taken against a known-idle baseline rather than mid-burst. */
     thermal_init();
@@ -744,6 +756,9 @@ void app_main(void)
 #ifdef CONFIG_UPLINK_WATCHDOG
         uplink_watchdog_tick();
 #endif
+        /* ADR-427: no-op until its own 60 s (default) window completes, and a
+         * no-op entirely when the feature is off. */
+        link_watchdog_tick();
         /* Offered every 10 s; node_log enforces its own floor, so the cadence
          * lives in one place rather than being implied by this loop's delay.
          * Also refresh the uptime NVS cell, which is what lets the NEXT boot

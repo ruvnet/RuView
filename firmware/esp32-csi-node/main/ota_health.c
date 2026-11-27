@@ -22,6 +22,10 @@ static const char *TAG = "ota_health";
  * aligned bool is enough; it only ever goes false -> true. */
 static volatile bool s_got_ip;
 
+/* True while the running image is PENDING_VERIFY and not yet marked valid.
+ * Set once in ota_health_start(), cleared by the health task. */
+static volatile bool s_pending_verify;
+
 static const char *state_name(esp_ota_img_states_t st)
 {
     switch (st) {
@@ -58,6 +62,7 @@ static void ota_health_task(void *arg)
         if (v == OTA_HEALTH_MARK_VALID) {
             esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
             if (err == ESP_OK) {
+                s_pending_verify = false;
                 ESP_LOGI(TAG, "marked valid after %s in %lu ms",
                          sm.reason, (unsigned long)now_ms);
             } else {
@@ -118,6 +123,7 @@ void ota_health_start(void)
 #endif
              );
 
+    s_pending_verify = true;
     if (xTaskCreate(ota_health_task, "ota_health", 4096, NULL, 2, NULL) != pdPASS) {
         /* Without the task nothing confirms the image, which is the same as
          * failing the check: the next reset reverts it. Say so. */
@@ -130,10 +136,16 @@ void ota_health_note_got_ip(void)
     s_got_ip = true;
 }
 
+bool ota_health_is_pending_verify(void)
+{
+    return s_pending_verify;
+}
+
 #else /* !CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE */
 
 /* Without bootloader rollback no image is ever PENDING_VERIFY. */
 void ota_health_start(void) {}
 void ota_health_note_got_ip(void) {}
+bool ota_health_is_pending_verify(void) { return false; }
 
 #endif /* CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE */

@@ -81,6 +81,25 @@ menu "CSI Node Configuration"
             are intentionally rejected because sustained callback load above
             50 Hz has caused WiFi ISR and packet-buffer failures on S3 and C6.
 
+    config CSI_SELF_PING_TIMEOUT_MS
+        int "Connected-STA CSI probe reply timeout (ms)"
+        default 200
+        range 20 1000
+        help
+            How long the probe session waits for one reply before counting it
+            lost. The session is sequential, so a lost reply stops the probes
+            (and the CSI they produce) for this long; the IDF default of
+            1000 ms costs a full second per loss (#2287).
+
+            Not one probe interval (20 ms at 50 Hz): gateway round trips of
+            38-40 ms average were measured on working nodes, and 67-83 ms on
+            a node held at a 1 Mbps link rate, so a one-interval timeout
+            records most replies on such links as losses and the reply
+            statistics stop describing the link. 200 ms keeps that band
+            measured; only replies slower than that (seen in heavily
+            busy-channel bursts) count as lost. Never below one probe
+            interval (ping_timeout_resolve). The probe cadence is unchanged.
+
 endmenu
 
 menu "Edge Intelligence (ADR-039)"
@@ -730,6 +749,115 @@ config UPLINK_WATCHDOG_TIMEOUT_S
 
       If nodes do restart unexpectedly, check the reset reason in the sync
       packet's health field before assuming the watchdog is responsible.
+
+config LINK_WATCHDOG
+    bool "ADR-427: watch the gateway ping RTT and remedy a sustained rate collapse"
+    default n
+    help
+      Some nodes have been measured stuck at <= 2 Mbps uplink for 40-50
+      minutes at a time, once for a full day, with no self-recovery, while
+      associated and sending. The node's existing health signals cannot see
+      it (send failures and low heap occur in a few percent of such minutes),
+      but the gateway RTT of the self-ping it already runs
+      (CSI_SELF_PING_HZ) can. See docs/adr/ADR-427-link-rate-watchdog.md.
+
+      Off by default: every action it can take (disconnect, reboot) is one a
+      CSI node deployment should opt into deliberately.
+
+      Even with this on, nothing acts by default: NVS key `linkwd` defaults
+      to 1 (observe -- detect and log "would act", never act). 2 (act) is a
+      /config push, not a reflash.
+
+      Act mode currently runs WITHOUT the ADR's peer-quorum guard: this
+      build does not carry a peer's degraded bit on the ESP-NOW beacon, so
+      the quorum is always empty and never holds. The outage guard, the
+      random delay, the inhibits and the rate limits still apply.
+
+      Pure decision logic: link_watchdog_core.h (host-tested,
+      tests/host/test_link_watchdog.c); ESP-IDF glue: link_watchdog.c.
+
+config LINK_WATCHDOG_WINDOW_S
+    int "Window length (seconds)"
+    depends on LINK_WATCHDOG
+    range 10 600
+    default 60
+    help
+      Also sets the cadence of the degraded/outage classification and
+      therefore the units n_reassoc/n_reboot below count in.
+
+config LINK_WATCHDOG_K
+    int "Degraded threshold multiplier (k * baseline)"
+    depends on LINK_WATCHDOG
+    range 2 10
+    default 3
+
+config LINK_WATCHDOG_ABS_MS
+    int "Degraded threshold floor (ms) -- max(k*baseline, this)"
+    depends on LINK_WATCHDOG
+    range 10 1000
+    default 40
+    help
+      Keep CSI_SELF_PING_TIMEOUT_MS well above this, or slow replies count
+      as losses (outage) instead of being measured.
+
+config LINK_WATCHDOG_BASELINE_FLOOR_MS
+    int "Minimum learned baseline (ms)"
+    depends on LINK_WATCHDOG
+    range 1 100
+    default 5
+    help
+      Stops a very clean link's ordinary jitter from making k*baseline so
+      small that normal noise reads as a collapse.
+
+config LINK_WATCHDOG_N_REASSOC
+    int "Consecutive degraded windows before a reassociate"
+    depends on LINK_WATCHDOG
+    range 1 120
+    default 10
+
+config LINK_WATCHDOG_N_REBOOT
+    int "Further consecutive degraded windows (after the grace) before a reboot"
+    depends on LINK_WATCHDOG
+    range 1 120
+    default 10
+
+config LINK_WATCHDOG_GRACE_WINDOWS
+    int "Post-reassociate re-learn grace (windows)"
+    depends on LINK_WATCHDOG
+    range 1 60
+    default 10
+    help
+      No degraded-window counting happens during the grace, so the just-
+      reassociated link gets this many clean windows to reprove itself (and
+      re-seed the baseline) before the ladder can escalate to a reboot.
+
+config LINK_WATCHDOG_REASSOC_MIN_PERIOD_S
+    int "Minimum seconds between reassociations"
+    depends on LINK_WATCHDOG
+    range 60 86400
+    default 1800
+
+config LINK_WATCHDOG_REBOOT_MIN_PERIOD_S
+    int "Minimum seconds between reboots (doubles, see reboot_backoff_max_mult)"
+    depends on LINK_WATCHDOG
+    range 300 172800
+    default 21600
+
+config LINK_WATCHDOG_REBOOT_BACKOFF_MAX_MULT
+    int "Cap on the reboot rate-limit doubling"
+    depends on LINK_WATCHDOG
+    range 1 64
+    default 8
+    help
+      The period doubles each time a reboot did not cure the collapse (still
+      degraded before the previous reboot's own rate-limit window elapsed),
+      capped at this multiple of REBOOT_MIN_PERIOD_S -- default 8x6h = 48h.
+
+config LINK_WATCHDOG_BOOT_GRACE_S
+    int "Inhibit actions for this long after boot or after any disconnect"
+    depends on LINK_WATCHDOG
+    range 60 7200
+    default 900
 
 endmenu
 

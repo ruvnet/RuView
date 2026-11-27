@@ -206,8 +206,8 @@ run_node_mdns: test_node_mdns
 run_edge_stbc: test_edge_stbc
 	./test_edge_stbc
 
-test_self_ping: test_self_ping.c $(MAIN_DIR)/csi_collector.c $(STUBS_SRC)
-	cc -std=c99 -Wall -Wextra -Istubs -I$(MAIN_DIR) -ffunction-sections test_self_ping.c $(STUBS_SRC) $(DEAD_STRIP_LDFLAGS) -o $@ -lm
+test_self_ping: test_self_ping.c $(MAIN_DIR)/csi_collector.c $(MAIN_DIR)/ping_rate.c $(STUBS_SRC)
+	cc -std=c99 -Wall -Wextra -Istubs -I$(MAIN_DIR) -ffunction-sections test_self_ping.c $(MAIN_DIR)/ping_rate.c $(STUBS_SRC) $(DEAD_STRIP_LDFLAGS) -o $@ -lm
 
 run_self_ping: test_self_ping
 	./test_self_ping
