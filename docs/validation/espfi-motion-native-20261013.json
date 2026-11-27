@@ -1,0 +1,221 @@
+{
+  "status": "complete",
+  "parity": {
+    "train": {
+      "samples": 837,
+      "batch_sizes": [
+        1,
+        32
+      ],
+      "references": {
+        "buffered_reference": {
+          "max_abs_logit_error": 4.218847493575595e-15,
+          "identical_predictions": true
+        },
+        "original": {
+          "max_abs_logit_error": 4.773959005888173e-15,
+          "identical_predictions": true
+        }
+      }
+    },
+    "validation": {
+      "samples": 70,
+      "batch_sizes": [
+        1,
+        32
+      ],
+      "references": {
+        "buffered_reference": {
+          "max_abs_logit_error": 2.6645352591003757e-15,
+          "identical_predictions": true
+        },
+        "original": {
+          "max_abs_logit_error": 2.4980018054066022e-15,
+          "identical_predictions": true
+        }
+      }
+    }
+  },
+  "rounds": [
+    {
+      "native": {
+        "min_ms": 0.21051,
+        "p50_ms": 0.270125,
+        "p95_ms": 0.405321,
+        "derived_calls_per_second": 3501.0865902319724
+      },
+      "buffered_reference": {
+        "min_ms": 0.29864,
+        "p50_ms": 0.38155,
+        "p95_ms": 0.5774275,
+        "derived_calls_per_second": 2460.625816180356
+      },
+      "round": 1,
+      "seed": 42,
+      "gain_at_least_10percent": true
+    },
+    {
+      "native": {
+        "min_ms": 0.21061,
+        "p50_ms": 0.24524,
+        "p95_ms": 0.3716755,
+        "derived_calls_per_second": 3793.373359871014
+      },
+      "buffered_reference": {
+        "min_ms": 0.29499,
+        "p50_ms": 0.3532395,
+        "p95_ms": 0.5254215,
+        "derived_calls_per_second": 2670.4977484940014
+      },
+      "round": 2,
+      "seed": 43,
+      "gain_at_least_10percent": true
+    },
+    {
+      "native": {
+        "min_ms": 0.21096,
+        "p50_ms": 0.2655,
+        "p95_ms": 0.402225,
+        "derived_calls_per_second": 3535.2220643729856
+      },
+      "buffered_reference": {
+        "min_ms": 0.29712,
+        "p50_ms": 0.37400500000000003,
+        "p95_ms": 0.5419134999999999,
+        "derived_calls_per_second": 2532.7907308734148
+      },
+      "round": 3,
+      "seed": 44,
+      "gain_at_least_10percent": true
+    }
+  ],
+  "retained_runtime": true,
+  "memory_bytes": {
+    "native_model_arrays": 487480,
+    "native_workspace": 163736,
+    "reference_model_arrays": 487480,
+    "reference_workspace": 163736
+  },
+  "receipt_sha256": "cd9ac18713ca430b01fd0d2887f58b216a11ed78d344cb426047c3887acac556",
+  "gains_percent": [
+    {
+      "round": 1,
+      "p50": 29.203249901716678,
+      "p95": 29.805733187283256
+    },
+    {
+      "round": 2,
+      "p50": 30.574015646608032,
+      "p95": 29.261459609094796
+    },
+    {
+      "round": 3,
+      "p50": 29.011644229355227,
+      "p95": 25.776899818882526
+    }
+  ],
+  "hashes": {
+    "manifest": "74e0fe039acbed1b287bd11ee6b779becbb8f9b66c3c249d260ed66f5583f02a",
+    "compact_artifact": "87765a4da415465e3a4c5415b199da4593ef173e8fc0a2398dbe67faa454374d",
+    "compact_metadata": "e80ceb9d6a68df18c35eb624fcadbfa9b715869998ee3f2fb39b504424df2372",
+    "compact_status": "a437f3cb1b87019ab0af9cae510de8f811bdd6b12c9d3bcdce2e3482934a051d",
+    "original_artifact": "8d3c8b144663808159159f7af9d14b09f54ee78dc1f852c643fbd001a23d2fc5",
+    "original_receipt": "f8a565cb031d3ce9b488432dfb97408a58cee8f511c0ddc89aa74edb90388b88",
+    "original_status": "a437f3cb1b87019ab0af9cae510de8f811bdd6b12c9d3bcdce2e3482934a051d",
+    "kernel": "ae3da3fbc6d71dbdb9c605f1ac515d22e3fe108aee7b62ffd22d9751443626ad",
+    "build_receipt": "24eaa46d21ce411962313084fe9b3e553e5802048e4dcb3694dc2c4c56699bd3"
+  },
+  "source_sha256": {
+    "espfi_motion_native_benchmark.py": "7c232af2cce2549c70c3a1c44cd8682fed3da95c370e4e710ab9794ac3637f60",
+    "espfi_motion_native.py": "b1d9a7de11f5cf4e797e24bb3f83e4a164f4360a14f49bc2645bd114c946305b",
+    "espfi_motion_native.c": "720523248507bd349788d58083181c5c1df1cf40b37fe92e9245635ca70e20ac",
+    "espfi_motion_native_build.py": "2a2d1c5ac2a7daa88b1be85904d26d29b08201cc53ec2054ee622869a6a5c678",
+    "espfi_motion_runtime.py": "1a468974a441045a852215529d73e3eaddf40c2c81842465b5952d0322490add",
+    "espfi_motion_compact.py": "74b13890afd33fbdf40efce3e91f44ddeb505d0f6d84f2d9a0b03adcd92c6f52",
+    "espfi_motion.py": "c6a8529ccf9d9f834383a2bdf5b14626764ec7ca2ade7ad5d4c1c14797d76054",
+    "espfi_kernel.py": "ae837cb2e3fac7f052b4bd371cd496e9636e5d5dbaf3a341526a4fc5aef23478",
+    "espfi_generalize.py": "956b3a5e918f7c263a2b9183b4a6a70c8f2157604262a4ec6cee2c324a69224f",
+    "espfi_train.py": "f3692319b383c67d092776a7690b72963061efeaa3516f2d5e41b5dac1cfbd1e",
+    "espfi.py": "1ea4f72b3bbb0fe68e9903e6f32663a887bd9c8eac3a659932ff97b7e3d87124"
+  },
+  "environment": {
+    "python": "3.12.3",
+    "numpy": "2.4.4",
+    "platform": "Linux-6.12.105-fly-x86_64-with-glibc2.39",
+    "machine": "x86_64",
+    "thread_environment": {
+      "OPENBLAS_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "MKL_NUM_THREADS": null
+    }
+  },
+  "protocol": {
+    "rounds": 3,
+    "calls_per_runtime_per_round": 1000,
+    "warmups_per_runtime_per_round": 100,
+    "seed": 42,
+    "batch_size": 1,
+    "alternating_runtime_order": true,
+    "output_dtype": "float64",
+    "max_abs_logit_error": 1e-10,
+    "exact_argmax_required": true,
+    "max_p50_and_p95_ratio_every_round": 0.9,
+    "rotating_seeded_development_order": true,
+    "primary_reference": "BufferedMotionBundle retained float64",
+    "original_reference": "parity only"
+  },
+  "elapsed_seconds": 4.57653488699998,
+  "native_build": {
+    "status": "complete",
+    "promotionAuthorized": false,
+    "abi": 1,
+    "compiler": "/usr/bin/cc",
+    "compiler_version": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\nCopyright (C) 2023 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\n",
+    "flags": [
+      "-std=c11",
+      "-O3",
+      "-fPIC",
+      "-shared",
+      "-fno-fast-math",
+      "-ffp-contract=off",
+      "-lm"
+    ],
+    "source_sha256": "720523248507bd349788d58083181c5c1df1cf40b37fe92e9245635ca70e20ac",
+    "library_sha256": "ae3da3fbc6d71dbdb9c605f1ac515d22e3fe108aee7b62ffd22d9751443626ad",
+    "library_bytes": 15736,
+    "build_implementation_sha256": "2a2d1c5ac2a7daa88b1be85904d26d29b08201cc53ec2054ee622869a6a5c678"
+  },
+  "reviewed_on": "2026-10-13",
+  "evidence": "MEASURED_AGGREGATE",
+  "promotionAuthorized": false,
+  "float64_default_unchanged": true,
+  "decision": "Retain explicit trusted native research option; unchanged weights and numerical contract. Failed NumPy reduction experiment preserved separately.",
+  "tests": {
+    "espfi": 85,
+    "csi_training": 28,
+    "total": 113,
+    "focused_native": 8,
+    "focused_reduction": 6,
+    "verified_exit_code": 0,
+    "sanitizers": {
+      "host": "ruOS",
+      "address": true,
+      "undefined_behavior": true,
+      "checks_disabled": false,
+      "exit_code": 0,
+      "probe_source_sha256": "a44bd4f70e4ce59b189932ac5f57a0c9e77782c62e4737cd9a346b63701ee484",
+      "local_note": "Local LeakSanitizer could not inspect proc under the local executor. The separate ruOS sanitizer run passed without disabling checks."
+    },
+    "source_sha256": {
+      "scripts/csi_training/espfi_motion_native.c": "720523248507bd349788d58083181c5c1df1cf40b37fe92e9245635ca70e20ac",
+      "scripts/csi_training/espfi_motion_native.py": "b1d9a7de11f5cf4e797e24bb3f83e4a164f4360a14f49bc2645bd114c946305b",
+      "scripts/csi_training/espfi_motion_native_build.py": "2a2d1c5ac2a7daa88b1be85904d26d29b08201cc53ec2054ee622869a6a5c678",
+      "scripts/csi_training/espfi_motion_native_probe.c": "a44bd4f70e4ce59b189932ac5f57a0c9e77782c62e4737cd9a346b63701ee484",
+      "scripts/csi_training/espfi_motion_native_benchmark.py": "7c232af2cce2549c70c3a1c44cd8682fed3da95c370e4e710ab9794ac3637f60",
+      "scripts/tests/test_espfi_motion_native.py": "9b8b8dafc8bf18b74a28b26b3b4a1a211af489855e612136161df56f8f4111d2",
+      "scripts/tests/test_espfi_motion_native_benchmark.py": "1c828ecb682b1940deb3ea09e7fae16e327d0932031e9ec2d469472a0fd8b2b9"
+    },
+    "notes": "Python ResourceWarnings report automatic temporary kernel directory cleanup on garbage collection; tests complete successfully."
+  },
+  "scope": "Full batch-one Python prediction versus BufferedMotionBundle float64, excluding compilation/loading/acquisition/pooling/IO. No mixed-precision composition measured. Retained NumPy array counts exclude native stack and mapped library. Reused development data is numerical evidence only; original final test was opened once in first pilot and not reopened. No new model accuracy, SOTA, target-device validation or deployment."
+}

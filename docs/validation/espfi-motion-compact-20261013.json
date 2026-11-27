@@ -1,0 +1,85 @@
+{
+  "parity": {
+    "train": {
+      "samples": 837,
+      "runtimes": {
+        "unfused": {
+          "max_abs_logit_error": 0,
+          "identical_predictions": true
+        },
+        "folded": {
+          "max_abs_logit_error": 2.9837243786801082e-15,
+          "identical_predictions": true
+        }
+      }
+    },
+    "validation": {
+      "samples": 70,
+      "runtimes": {
+        "unfused": {
+          "max_abs_logit_error": 0,
+          "identical_predictions": true
+        },
+        "folded": {
+          "max_abs_logit_error": 2.6645352591003757e-15,
+          "identical_predictions": true
+        }
+      }
+    }
+  },
+  "latency": {
+    "candidate": {
+      "p50_ms": 0.42239499999999996,
+      "p95_ms": 0.5943955
+    },
+    "incumbent": {
+      "p50_ms": 0.43037000000000003,
+      "p95_ms": 0.6234009999999999
+    }
+  },
+  "model_bytes": 16088,
+  "baseline_model_bytes": 496488,
+  "stored_scalars": 1967,
+  "retention_checks": {
+    "model_below_10percent": true,
+    "parity_all_admitted": true,
+    "p95_within_5percent": true
+  },
+  "retained_as_research_candidate": true,
+  "measured_10percent_speed_gain": false,
+  "model_sha256": "87765a4da415465e3a4c5415b199da4593ef173e8fc0a2398dbe67faa454374d",
+  "baseline_model_sha256": "8d3c8b144663808159159f7af9d14b09f54ee78dc1f852c643fbd001a23d2fc5",
+  "random_map_sha256": {
+    "projection": "0384cc3a32f32185e45ebaf1f782430159178e784a2caee07f0782c4673321b5",
+    "phase": "03e0b646010f9adb25d6845c4de9c6f938a455fc0cda856fbdd04d1409f2b74e"
+  },
+  "source_sha256": {
+    "espfi_motion_compact.py": "74b13890afd33fbdf40efce3e91f44ddeb505d0f6d84f2d9a0b03adcd92c6f52",
+    "espfi_motion.py": "c6a8529ccf9d9f834383a2bdf5b14626764ec7ca2ade7ad5d4c1c14797d76054",
+    "espfi_kernel.py": "ae837cb2e3fac7f052b4bd371cd496e9636e5d5dbaf3a341526a4fc5aef23478",
+    "espfi_train.py": "f3692319b383c67d092776a7690b72963061efeaa3516f2d5e41b5dac1cfbd1e",
+    "espfi.py": "1ea4f72b3bbb0fe68e9903e6f32663a887bd9c8eac3a659932ff97b7e3d87124"
+  },
+  "elapsed_seconds": 1.7623121050000066,
+  "numpy_version": "2.4.4",
+  "full_receipt_sha256": "fadd6665fb97fa97f7fc858e8991b47a286d5503d07b433adb102bcb8ff05129",
+  "inference_files_bytes": {
+    "model.safetensors": 16088,
+    "metadata.json": 1098,
+    "status.json": 59
+  },
+  "schema_version": 1,
+  "protocol_date": "2026-10-13",
+  "status": "complete",
+  "evidence": "MEASURED",
+  "promotionAuthorized": false,
+  "manifest_sha256": "74e0fe039acbed1b287bd11ee6b779becbb8f9b66c3c249d260ed66f5583f02a",
+  "test_access": "Original final test opened once in pilot; not reopened. Train and reused development used only for numerical parity.",
+  "validation": {
+    "public_pipeline_tests": 59,
+    "original_encoder_tests": 28,
+    "verified_exit_code": 0,
+    "independent_source_review": "NO BLOCK"
+  },
+  "model_bytes_reduction_percent": 96.75963970931825
+}

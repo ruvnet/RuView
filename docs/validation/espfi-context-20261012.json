@@ -1,0 +1,221 @@
+{
+  "status": "complete",
+  "promotionAuthorized": false,
+  "task": "public_context_ablation",
+  "evidence": "MEASURED",
+  "development": {
+    "accuracy": 0.4857142857142857,
+    "macro_f1": 0.4374577417173766,
+    "per_class_f1": [
+      0.3333333333333333,
+      0.6896551724137931,
+      0,
+      0.6666666666666666,
+      0.7058823529411765,
+      0.5128205128205128,
+      0.15384615384615385
+    ],
+    "confusion_matrix": [
+      [
+        2,
+        8,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        10,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        1,
+        0,
+        0,
+        1,
+        6,
+        2
+      ],
+      [
+        0,
+        0,
+        2,
+        5,
+        0,
+        3,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        6,
+        4,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        10,
+        0
+      ],
+      [
+        0,
+        0,
+        3,
+        0,
+        0,
+        6,
+        1
+      ]
+    ],
+    "samples": 70
+  },
+  "incumbent_development": {
+    "accuracy": 0.5571428571428572,
+    "macro_f1": 0.4998706443528175,
+    "per_class_f1": [
+      0.16666666666666666,
+      0.6451612903225806,
+      0,
+      0.8421052631578947,
+      0.5333333333333333,
+      0.6451612903225806,
+      0.6666666666666666
+    ],
+    "confusion_matrix": [
+      [
+        1,
+        9,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        10,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        1,
+        0,
+        0,
+        1,
+        6,
+        2
+      ],
+      [
+        0,
+        1,
+        1,
+        8,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        2,
+        0,
+        4,
+        4,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        10,
+        0
+      ],
+      [
+        1,
+        0,
+        1,
+        1,
+        0,
+        1,
+        6
+      ]
+    ],
+    "samples": 70
+  },
+  "baseline_state_exact": true,
+  "reload_max_abs_logit_error": 0,
+  "retention_checks": {
+    "macro_f1_gain": false,
+    "accuracy_nonregression": false,
+    "protect_each_previously_nonzero_class": true,
+    "p95_under_1ms": false
+  },
+  "retained_as_research_candidate": false,
+  "latency": {
+    "candidate": {
+      "p50_ms": 0.782435,
+      "p95_ms": 4.814087499999998
+    },
+    "incumbent": {
+      "p50_ms": 0.5122450000000001,
+      "p95_ms": 0.8616344999999994
+    }
+  },
+  "model_bytes": 712816,
+  "model_sha256": "589a04de997594a7e83dbb487e40509f038b4df21c76c81151c974fc5af8d317",
+  "baseline_model_sha256": "8d3c8b144663808159159f7af9d14b09f54ee78dc1f852c643fbd001a23d2fc5",
+  "baseline_receipt_sha256": "f8a565cb031d3ce9b488432dfb97408a58cee8f511c0ddc89aa74edb90388b88",
+  "source_sha256": {
+    "espfi_context.py": "736f3e68ef23298cbcd14f41343557f96698221596eeeda3909bf5ac870a3f5c",
+    "espfi_motion.py": "c6a8529ccf9d9f834383a2bdf5b14626764ec7ca2ade7ad5d4c1c14797d76054",
+    "espfi_generalize.py": "956b3a5e918f7c263a2b9183b4a6a70c8f2157604262a4ec6cee2c324a69224f",
+    "espfi_kernel.py": "ae837cb2e3fac7f052b4bd371cd496e9636e5d5dbaf3a341526a4fc5aef23478"
+  },
+  "elapsed_seconds": 6.865275681000185,
+  "scope": "18 configurations selected by original training folds; adaptive research on reused development data. 1000 paired batch1 calls include feature extraction/checks/classifier, exclude acquisition/pooling/IO. No cross-recording chronology, empty-room calibration, actual graph feature, final test or field accuracy.",
+  "selected": {
+    "candidate": {
+      "family": "ordered_trend",
+      "kind": "rff",
+      "dimensions": 128,
+      "gamma_multiplier": 0.1,
+      "alpha": 0.1
+    },
+    "minimum_cv_macro_f1": 0.3474042415498739,
+    "mean_cv_macro_f1": 0.35571616304408127,
+    "scalar_count": 89039
+  },
+  "fold_f1": [
+    0.3474042415498739,
+    0.3640280845382886
+  ],
+  "manifest_sha256": "74e0fe039acbed1b287bd11ee6b779becbb8f9b66c3c249d260ed66f5583f02a",
+  "full_receipt_sha256": "d84edfd5273edd22d23aead1d2f0500015c1e1e9b744d6923c81d216001cf50b",
+  "validation": {
+    "public_tests": 44,
+    "original_tests": 28,
+    "independent_review": "NO BLOCK",
+    "original_suite_setup": "First isolated run lacked unchanged collector script; exact dependency restored and 28 tests rerun successfully",
+    "final_test_opened": false
+  },
+  "latency_caveat": "Shared CPU timing overlaps independent Rust dependency compilation; not a stable runtime regression estimate. Accuracy and macro F1 alone reject this candidate."
+}
