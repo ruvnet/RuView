@@ -1,0 +1,214 @@
+name: AI Code Reviewer
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  review:
+    name: AI Review
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && contains(github.event.comment.body, '/review'))
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run AI Code Review
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+          REPO_NAME: ${{ github.repository }}
+        run: |
+          python3 - << 'EOF'
+          import os
+          import sys
+          import json
+          import subprocess
+          import urllib.request
+          import urllib.error
+
+          pr_number = os.environ.get("PR_NUMBER")
+          repo_name = os.environ.get("REPO_NAME")
+          gh_token = os.environ.get("GITHUB_TOKEN")
+          gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
+          groq_key = os.environ.get("GROQ_API_KEY", "").strip()
+
+          if not pr_number:
+              print("No PR number found. Skipping.")
+              sys.exit(0)
+
+          print(f"Starting AI Review for PR #{pr_number} on {repo_name}...")
+
+          # 1. Fetch PR metadata
+          pr_meta_cmd = ["gh", "pr", "view", pr_number, "--json", "title,body,author,baseRefName,headRefName"]
+          meta_res = subprocess.run(pr_meta_cmd, capture_output=True, text=True)
+          pr_meta = {}
+          if meta_res.returncode == 0:
+              try:
+                  pr_meta = json.loads(meta_res.stdout)
+              except Exception:
+                  pass
+
+          pr_title = pr_meta.get("title", f"PR #{pr_number}")
+          pr_author = pr_meta.get("author", {}).get("login", "unknown")
+          pr_base = pr_meta.get("baseRefName", "main")
+          pr_head = pr_meta.get("headRefName", "feature")
+
+          # 2. Check for API keys
+          if not gemini_key and not groq_key:
+              setup_msg = f"""### 🤖 AI Code Reviewer
+
+To enable 100% free AI code reviews for pull requests on **{repo_name}**:
+
+1. Get a free API key from [Google AI Studio](https://aistudio.google.com/app/apikey) (Zero cost, no credit card required).
+2. Go to **Settings > Secrets and variables > Actions** in this repository.
+3. Add a new repository secret named `GEMINI_API_KEY`.
+4. Comment `/review` on this PR to trigger your first review!
+"""
+              print("No API key configured. Posting setup guide.")
+              subprocess.run(["gh", "pr", "comment", pr_number, "--body", setup_msg], check=False)
+              sys.exit(0)
+
+          # 3. Fetch PR diff
+          diff_cmd = ["gh", "pr", "diff", pr_number]
+          diff_res = subprocess.run(diff_cmd, capture_output=True, text=True)
+          diff_text = diff_res.stdout
+
+          ignored_exts = (
+              ".lock", ".min.js", ".min.css", ".map", ".svg", ".png", ".jpg", ".jpeg",
+              ".gif", ".ico", ".bin", ".db", ".wasm", ".pdf", ".dmg", ".msi", ".exe",
+              ".zip", ".tar.gz", ".xz"
+          )
+          
+          lines = []
+          skip_file = False
+          for line in diff_text.splitlines(keepends=True):
+              if line.startswith("diff --git "):
+                  parts = line.split()
+                  filepath = parts[-1] if parts else ""
+                  skip_file = any(filepath.endswith(ext) for ext in ignored_exts) or "vendor/" in filepath
+              if not skip_file:
+                  lines.append(line)
+          
+          filtered_diff = "".join(lines)
+          if not filtered_diff.strip():
+              no_changes_msg = "### 🤖 AI Code Review\n\nNo reviewable source code changes found in this pull request (only ignored assets, binaries, or lock files modified)."
+              subprocess.run(["gh", "pr", "comment", pr_number, "--body", no_changes_msg], check=False)
+              print("No reviewable diff.")
+              sys.exit(0)
+
+          max_chars = 40000
+          if len(filtered_diff) > max_chars:
+              filtered_diff = filtered_diff[:max_chars] + "\n\n... [Diff truncated for length] ..."
+
+          prompt = f"""You are a principal software engineer and expert code reviewer.
+Review the following pull request thoroughly, constructively, and concisely.
+
+Repository: {repo_name}
+PR Title: {pr_title}
+Author: @{pr_author}
+Branches: {pr_head} -> {pr_base}
+
+Format your response in GitHub Markdown using these exact sections:
+1. ## 🎯 PR Summary
+Brief 2-3 sentence overview of what this pull request changes.
+
+2. ## 🔍 Critical Findings & Code Quality
+Review for:
+- Logic bugs, regressions, or unexpected side effects
+- Security vulnerabilities (credential leaks, injection, buffer overflows, path traversal)
+- Concurrency, memory leaks, or unhandled exceptions / edge cases
+- Performance and API ergonomics
+If code is clean and looks good, explicitly state that!
+
+3. ## 💡 Actionable Suggestions & Improvements
+Provide concrete recommendations with GitHub suggestion code blocks if relevant.
+
+4. ## 🧪 Testing & Verification
+Identify edge cases that should be tested.
+
+---
+Here is the code diff:
+```diff
+{filtered_diff}
+```
+"""
+
+          review_content = ""
+          if gemini_key:
+              print("Calling Google Gemini 2.0 Flash...")
+              url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={gemini_key}"
+              payload = {
+                  "contents": [{"parts": [{"text": prompt}]}],
+                  "generationConfig": {"temperature": 0.2, "maxOutputTokens": 4096}
+              }
+              req = urllib.request.Request(
+                  url,
+                  data=json.dumps(payload).encode("utf-8"),
+                  headers={"Content-Type": "application/json"}
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=90) as resp:
+                      data = json.loads(resp.read().decode("utf-8"))
+                      review_content = data["candidates"][0]["content"]["parts"][0]["text"]
+              except Exception as e:
+                  print(f"Gemini API error: {e}")
+                  try:
+                      url_fallback = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
+                      req_fb = urllib.request.Request(
+                          url_fallback,
+                          data=json.dumps(payload).encode("utf-8"),
+                          headers={"Content-Type": "application/json"}
+                      )
+                      with urllib.request.urlopen(req_fb, timeout=90) as resp:
+                          data = json.loads(resp.read().decode("utf-8"))
+                          review_content = data["candidates"][0]["content"]["parts"][0]["text"]
+                  except Exception as e2:
+                      print(f"Gemini fallback error: {e2}")
+
+          if not review_content and groq_key:
+              print("Calling Groq Llama 3.3 70B...")
+              url = "https://api.groq.com/openai/v1/chat/completions"
+              payload = {
+                  "model": "llama-3.3-70b-versatile",
+                  "messages": [{"role": "user", "content": prompt}],
+                  "temperature": 0.2,
+                  "max_tokens": 4096
+              }
+              req = urllib.request.Request(
+                  url,
+                  data=json.dumps(payload).encode("utf-8"),
+                  headers={"Content-Type": "application/json", "Authorization": f"Bearer {groq_key}"}
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=90) as resp:
+                      data = json.loads(resp.read().decode("utf-8"))
+                      review_content = data["choices"][0]["message"]["content"]
+              except Exception as e:
+                  print(f"Groq API error: {e}")
+
+          if not review_content:
+              review_content = "⚠️ AI Code Review was unable to generate a response. Please check your API key validity."
+
+          footer = "\n\n---\n*100% Free AI Code Reviewer • Comment `/review` to re-trigger*"
+          final_comment = review_content + footer
+
+          post_cmd = ["gh", "pr", "comment", pr_number, "--body", final_comment]
+          post_res = subprocess.run(post_cmd, capture_output=True, text=True)
+          if post_res.returncode == 0:
+              print(f"Successfully posted AI code review to PR #{pr_number}!")
+          else:
+              print(f"Failed to post comment: {post_res.stderr}")
+          EOF
