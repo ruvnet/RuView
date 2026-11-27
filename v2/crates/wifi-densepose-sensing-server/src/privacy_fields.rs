@@ -240,6 +240,30 @@ pub const FIELD_CLASSES: &[(&str, FieldClass)] = &[
     ("top_k_similarity", Public),
     ("signature_id", Public),
     ("above_threshold", Public),
+    // ADR-424 zone fusion: GET /api/v1/zones and /api/v1/pose/zones/summary.
+    // These describe per-zone presence from CSI plus other sources, not vitals.
+    ("task", Public),
+    ("configured", Public),
+    ("stale_after_ms", Public),
+    ("rejected_readings", Public),
+    ("presence_probability", Public),
+    ("agreement", Public),
+    ("evidence", Public),
+    ("weights_measured", Public),
+    ("sources", Public),
+    ("kind", Public),
+    ("health", Public),
+    ("probability", Public),
+    ("weight", Public),
+    ("contributing", Public),
+    ("synthetic", Public),
+    ("verified", Public),
+    // POST /api/v1/sources/readings report, and diagnostic flags such as
+    // /api/v1/shadow/fann `enabled`.
+    ("accepted", Public),
+    ("rejected", Public),
+    ("errors", Public),
+    ("enabled", Public),
 ];
 
 /// Frame kinds (`type` or `event_type`) that may leave the server in privacy
