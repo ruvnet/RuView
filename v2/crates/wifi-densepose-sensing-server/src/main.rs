@@ -14825,9 +14825,11 @@ async fn main() {
     // before any request can arrive. Zero-config for a single appliance; the
     // env var still wins for a multi-instance deployment that must share one.
     wifi_densepose_sensing_server::browser_session::init_secret(&data_dir);
+    let installation_id =
+        bootstrap_baseline::resolve_installation_id(args.installation_id.as_deref(), &data_dir);
     let (bootstrap_field_model, bootstrap_metadata, bootstrap_baseline_active) =
         if !args.calibrate {
-            args.installation_id.as_deref().map_or(
+            installation_id.as_deref().map_or(
                 (None, None, false),
                 |installation_id| {
                     let path = bootstrap_baseline::path_in(&data_dir);
@@ -15133,7 +15135,7 @@ async fn main() {
         )
         .with_node_positions(engine_bridge_node_positions),
         field_model: bootstrap_field_model,
-        installation_id: args.installation_id.clone(),
+        installation_id: installation_id.clone(),
         bootstrap_baseline: bootstrap_metadata.clone(),
         bootstrap_baseline_active,
         calibration_model_id: None,
@@ -15353,7 +15355,7 @@ async fn main() {
         );
         wifi_densepose_sensing_server::host_validation::HostAllowlist::disabled()
     } else {
-        let discovery_label = args.installation_id.as_deref().unwrap_or("installation");
+        let discovery_label = installation_id.as_deref().unwrap_or("installation");
         let discovery_host =
             wifi_densepose_sensing_server::discovery::discovery_hostname(discovery_label);
         let allowlist =
@@ -15616,7 +15618,7 @@ async fn main() {
         args.http_port
     );
 
-    let discovery_label = args.installation_id.as_deref().unwrap_or("installation");
+    let discovery_label = installation_id.as_deref().unwrap_or("installation");
     let discovery_hostname =
         wifi_densepose_sensing_server::discovery::discovery_hostname(discovery_label);
     let _discovery_advertiser = if args.no_mdns || bind_ip.is_loopback() {

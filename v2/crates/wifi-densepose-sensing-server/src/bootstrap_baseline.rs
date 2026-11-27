@@ -243,6 +243,55 @@ pub fn path_in(data_dir: &Path) -> PathBuf {
     data_dir.join("calibration").join("bootstrap-empty-v1.json")
 }
 
+pub fn installation_id_path_in(data_dir: &Path) -> PathBuf {
+    data_dir.join("installation-id")
+}
+
+/// Resolve the installation identity: an explicit CLI/env override wins when
+/// non-empty and valid; otherwise load or generate and persist a stable ID
+/// under `<data_dir>/installation-id`.
+pub fn resolve_installation_id(explicit: Option<&str>, data_dir: &Path) -> Option<String> {
+    if let Some(id) = explicit.map(str::trim).filter(|s| !s.is_empty()) {
+        if installation_binding(id).is_ok() {
+            return Some(id.to_string());
+        }
+        tracing::warn!(
+            len = id.len(),
+            "Configured installation_id exceeds 128 characters; falling back to data_dir identity"
+        );
+    }
+
+    let path = installation_id_path_in(data_dir);
+    if let Ok(existing) = fs::read_to_string(&path) {
+        let trimmed = existing.trim();
+        if !trimmed.is_empty() && installation_binding(trimmed).is_ok() {
+            tracing::info!(path = %path.display(), "Loaded installation id");
+            return Some(trimmed.to_string());
+        }
+    }
+
+    let mut bytes = [0_u8; 16];
+    OsRng.fill_bytes(&mut bytes);
+    let generated = format!(
+        "inst-{}",
+        bytes
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    );
+    if let Err(error) = atomic_write_private(&path, generated.as_bytes()) {
+        tracing::warn!(
+            path = %path.display(),
+            %error,
+            "Could not persist installation id; local bootstrap priors will not survive a restart. \
+             Set RUVIEW_INSTALLATION_ID or --installation-id to fix this permanently."
+        );
+        return Some(generated);
+    }
+    tracing::info!(path = %path.display(), "Generated and persisted installation id");
+    Some(generated)
+}
+
 pub fn installation_binding(installation_id: &str) -> Result<String, BootstrapBaselineError> {
     let installation_id = installation_id.trim();
     if installation_id.is_empty() || installation_id.len() > 128 {
@@ -814,5 +863,35 @@ mod tests {
 
         let (_, loaded) = load(&path, "home-a", now_ms + 1).unwrap();
         assert_eq!(loaded.content_sha256, digest);
+    }
+
+    #[test]
+    fn resolve_installation_id_generates_persists_and_reloads() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = resolve_installation_id(None, dir.path()).expect("generated id");
+        assert!(first.starts_with("inst-"));
+        assert!(installation_binding(&first).is_ok());
+
+        let persisted = fs::read_to_string(installation_id_path_in(dir.path())).unwrap();
+        assert_eq!(persisted.trim(), first);
+
+        let second = resolve_installation_id(None, dir.path()).expect("reloaded id");
+        assert_eq!(second, first);
+    }
+
+    #[test]
+    fn resolve_installation_id_prefers_explicit_override() {
+        let dir = tempfile::tempdir().unwrap();
+        let resolved = resolve_installation_id(Some("site-alpha"), dir.path()).unwrap();
+        assert_eq!(resolved, "site-alpha");
+        assert!(!installation_id_path_in(dir.path()).exists());
+    }
+
+    #[test]
+    fn resolve_installation_id_treats_blank_override_as_unset() {
+        let dir = tempfile::tempdir().unwrap();
+        let resolved = resolve_installation_id(Some("   "), dir.path()).unwrap();
+        assert!(resolved.starts_with("inst-"));
+        assert!(installation_id_path_in(dir.path()).exists());
     }
 }
