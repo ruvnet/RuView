@@ -5,6 +5,7 @@ import { DashboardTab } from './components/DashboardTab.js';
 import { HardwareTab } from './components/HardwareTab.js';
 import { LiveDemoTab } from './components/LiveDemoTab.js';
 import { SensingTab } from './components/SensingTab.js';
+import { DebugTab } from './components/DebugTab.js';
 import { apiService } from './services/api.service.js';
 import { wsService } from './services/websocket.service.js';
 import { healthService } from './services/health.service.js';
@@ -159,6 +160,12 @@ class WiFiDensePoseApp {
     const sensingContainer = document.getElementById('sensing');
     if (sensingContainer) {
       this.components.sensing = new SensingTab(sensingContainer);
+    }
+
+    // Debug tab
+    const debugContainer = document.getElementById('debug');
+    if (debugContainer) {
+      this.components.debug = new DebugTab(debugContainer);
     }
 
     // Training tab - lazy load to avoid breaking other tabs if import fails
@@ -333,6 +340,15 @@ class WiFiDensePoseApp {
         if (this.components.sensing && !this.components.sensing.splatRenderer) {
           this.components.sensing.init().catch(error => {
             console.error('Failed to initialize sensing tab:', error);
+          });
+        }
+        break;
+
+      case 'debug':
+        // Lazy-init debug tab on first visit
+        if (this.components.debug && !this.components.debug._timer) {
+          this.components.debug.init().catch(error => {
+            console.error('Failed to initialize debug tab:', error);
           });
         }
         break;
