@@ -81,6 +81,38 @@ menu "CSI Node Configuration"
             are intentionally rejected because sustained callback load above
             50 Hz has caused WiFi ISR and packet-buffer failures on S3 and C6.
 
+    choice CSI_TRAFFIC_SOURCE
+        prompt "Connected-STA CSI probe type"
+        default CSI_TRAFFIC_SOURCE_ICMP
+        help
+            What the node sends to its gateway at CSI_SELF_PING_HZ to get
+            unicast frames back for the CSI engine.
+
+        config CSI_TRAFFIC_SOURCE_ICMP
+            bool "ICMP echo (ping)"
+
+        config CSI_TRAFFIC_SOURCE_UDP_DNS
+            bool "UDP DNS query"
+            help
+                Some APs send ICMP echo replies at 802.11b rates, which carry
+                no CSI (#2287): pings succeed but CSI stays at a few frames/s.
+                This sends a small DNS query (recursion not requested) to the
+                gateway instead, so the replies are unicast UDP. Needs a
+                gateway that answers DNS on port 53; the node logs a warning
+                after 10 s if it gets no replies. Falls back to ICMP if the
+                probe cannot start.
+
+    endchoice
+
+    config CSI_TRAFFIC_DNS_QNAME
+        string "Name queried by the UDP DNS probe"
+        depends on CSI_TRAFFIC_SOURCE_UDP_DNS
+        default "localhost"
+        help
+            Any reply produces CSI, including NXDOMAIN or REFUSED. The default
+            "localhost" is answered by most resolvers without an upstream
+            lookup (RFC 6761). Letters, digits, '-' and '_' only.
+
 endmenu
 
 menu "Edge Intelligence (ADR-039)"
