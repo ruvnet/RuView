@@ -141,6 +141,41 @@ if [ $RUN_SCAN -eq 1 ]; then
     else
         note_skip "Phase 2: archive/v1/src not present"
     fi
+
+    # --------------------------------------------------------------
+    # PHASE 2b: Safe PyTorch checkpoint loading invariant
+    # Every torch.load( call must pass weights_only=True (or have it
+    # within the next 4 lines of the same call). grep-style gate —
+    # window lookahead handles multi-line calls; comments are ignored.
+    # --------------------------------------------------------------
+    phase 2b "torch.load without weights_only=True (safe checkpoint loading)"
+    findings_torch=0
+    while IFS= read -r -d '' pyfile; do
+        hits=$(awk '
+            { line[NR] = $0; if ($0 ~ /torch\.load\(/) load[NR] = 1 }
+            END {
+                for (n in load) {
+                    if (line[n] ~ /^[ \t]*#/ || line[n] ~ /weights_only/) continue
+                    ok = 0
+                    for (i = 1; i <= 4 && n + i <= NR; i++)
+                        if (line[n + i] ~ /weights_only/) { ok = 1; break }
+                    if (!ok) print FILENAME ":" n ": " line[n]
+                }
+            }' "$pyfile" || true)
+        if [ -n "$hits" ]; then
+            echo -e "    ${YELLOW}FOUND${RESET}: $hits"
+            findings_torch=$((findings_torch + 1))
+        fi
+    done < <(
+        find "$SCRIPT_DIR" -name '*.py' -type f \
+            ! -path '*/node_modules/*' ! -path '*/.git/*' ! -path '*__pycache__*' \
+            ! -path '*/build/*' ! -path '*/dist/*' -print0 2>/dev/null || true
+    )
+    if [ "$findings_torch" -eq 0 ]; then
+        note_pass "Phase 2b: all torch.load calls use weights_only=True"
+    else
+        note_fail "Phase 2b: $findings_torch torch.load file(s) missing weights_only=True"
+    fi
 fi
 
 # ------------------------------------------------------------------
