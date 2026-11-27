@@ -3,7 +3,7 @@
 // private vector indexes/transcripts are deliberately outside this package.
 
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -29,6 +29,10 @@ export function validateBrainRecord(record, { canonical = false } = {}) {
     errors.push('source.path and positive source.line are required');
   } else if (isAbsolute(record.source.path) || record.source.path.split(/[\\/]/).includes('..') || /^[A-Za-z]:/.test(record.source.path)) {
     errors.push('source.path must be repository-relative without traversal');
+  }
+  if (typeof record.source?.path === 'string'
+    && !record.source.path.split(/[\\/]/).some(part => part.trim() && part !== '.')) {
+    errors.push('source.path must identify a repository-relative file');
   }
   if (!Array.isArray(record.tags) || record.tags.some((tag) => typeof tag !== 'string')) errors.push('tags must be strings');
   if ((record.content || '').length > 8192) errors.push('content exceeds 8192 characters');
@@ -90,15 +94,23 @@ export function verifyBrain({ repo = process.cwd(), path = CORPUS_PATH } = {}) {
     if (isAbsolute(rel) || rel.startsWith('..') || !existsSync(source)) {
       findings.push({ id: record.id, reason: 'source_missing', source: record.source.path });
     } else {
-      const real = realpathSync(source);
-      const realRel = relative(realpathSync(root), real);
-      if (isAbsolute(realRel) || realRel.startsWith('..')) {
-        findings.push({ id: record.id, reason: 'source_escape', source: record.source.path });
-      } else {
-        const sourceLines = readFileSync(real, 'utf8').split(/\r?\n/);
-        if (record.source.line > sourceLines.length) {
-          findings.push({ id: record.id, reason: 'source_line_missing', source: record.source.path, line: record.source.line });
+      try {
+        const real = realpathSync(source);
+        const realRel = relative(realpathSync(root), real);
+        if (isAbsolute(realRel) || realRel.startsWith('..')) {
+          findings.push({ id: record.id, reason: 'source_escape', source: record.source.path });
+        } else {
+          if (!statSync(real).isFile()) {
+            findings.push({ id: record.id, reason: 'source_not_file', source: record.source.path });
+            continue;
+          }
+          const sourceLines = readFileSync(real, 'utf8').split(/\r?\n/);
+          if (record.source.line > sourceLines.length) {
+            findings.push({ id: record.id, reason: 'source_line_missing', source: record.source.path, line: record.source.line });
+          }
         }
+      } catch (error) {
+        findings.push({ id: record.id, reason: 'source_unreadable', source: record.source.path, code: error.code });
       }
     }
   }

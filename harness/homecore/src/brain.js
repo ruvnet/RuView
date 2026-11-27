@@ -2,7 +2,7 @@
 // Reviewable shared Homecore knowledge. Private indexes stay outside the package.
 
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -43,6 +43,10 @@ export function validateBrainRecord(record, { canonical = false } = {}) {
     || /^[A-Za-z]:/.test(record.source.path)
   ) {
     errors.push('source.path must be repository-relative without traversal');
+  }
+  if (typeof record.source?.path === 'string'
+    && !record.source.path.split(/[\\/]/).some(part => part.trim() && part !== '.')) {
+    errors.push('source.path must identify a repository-relative file');
   }
   if (canonical || record.source?.endLine !== undefined || record.source?.digest !== undefined) {
     if (
@@ -136,33 +140,41 @@ export function verifyBrain({ repo = process.cwd(), path = CORPUS_PATH } = {}) {
       findings.push({ id: record.id, reason: 'source_missing', source: record.source.path });
       continue;
     }
-    const real = realpathSync(source);
-    const realRel = relative(realRoot, real);
-    if (isAbsolute(realRel) || realRel.startsWith('..')) {
-      findings.push({ id: record.id, reason: 'source_escape', source: record.source.path });
-      continue;
-    }
-    const sourceLines = readFileSync(real, 'utf8').split(/\r?\n/);
-    if (record.source.endLine > sourceLines.length) {
-      findings.push({
-        id: record.id,
-        reason: 'source_line_missing',
-        source: record.source.path,
-        line: record.source.endLine,
-      });
-      continue;
-    }
-    const sourceSpan = sourceLines
-      .slice(record.source.line - 1, record.source.endLine)
-      .join('\n');
-    if (sha256(sourceSpan) !== record.source.digest) {
-      findings.push({
-        id: record.id,
-        reason: 'source_digest_mismatch',
-        source: record.source.path,
-        line: record.source.line,
-        endLine: record.source.endLine,
-      });
+    try {
+      const real = realpathSync(source);
+      const realRel = relative(realRoot, real);
+      if (isAbsolute(realRel) || realRel.startsWith('..')) {
+        findings.push({ id: record.id, reason: 'source_escape', source: record.source.path });
+        continue;
+      }
+      if (!statSync(real).isFile()) {
+        findings.push({ id: record.id, reason: 'source_not_file', source: record.source.path });
+        continue;
+      }
+      const sourceLines = readFileSync(real, 'utf8').split(/\r?\n/);
+      if (record.source.endLine > sourceLines.length) {
+        findings.push({
+          id: record.id,
+          reason: 'source_line_missing',
+          source: record.source.path,
+          line: record.source.endLine,
+        });
+        continue;
+      }
+      const sourceSpan = sourceLines
+        .slice(record.source.line - 1, record.source.endLine)
+        .join('\n');
+      if (sha256(sourceSpan) !== record.source.digest) {
+        findings.push({
+          id: record.id,
+          reason: 'source_digest_mismatch',
+          source: record.source.path,
+          line: record.source.line,
+          endLine: record.source.endLine,
+        });
+      }
+    } catch (error) {
+      findings.push({ id: record.id, reason: 'source_unreadable', source: record.source.path, code: error.code });
     }
   }
   return { ok: findings.length === 0, records: records.length, digest, bytes, findings };
