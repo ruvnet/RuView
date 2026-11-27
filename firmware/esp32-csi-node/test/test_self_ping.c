@@ -45,10 +45,16 @@ int main(void)
     csi_start_self_ping();
     assert(sessions == 1 && starts == 1);
     assert(observed.interval_ms == CSI_SELF_PING_INTERVAL_MS);
-    assert(observed.timeout_ms == observed.interval_ms);
+    /* CSI_SELF_PING_TIMEOUT_MS (200 ms default) floored at one interval:
+     * long enough to measure a slow-but-working gateway, short enough that a
+     * lost reply does not stall the probes for the IDF default 1 s. */
+    assert(observed.timeout_ms ==
+           ping_timeout_resolve(observed.interval_ms, CONFIG_CSI_SELF_PING_TIMEOUT_MS));
+    assert(observed.timeout_ms >= observed.interval_ms);
+    assert(observed.timeout_ms < 1000);
     assert(observed.count == ESP_PING_COUNT_INFINITE);
     csi_start_self_ping();
     assert(sessions == 1 && starts == 1);
-    puts("PASS: production ping timeout is bounded to one interval");
+    puts("PASS: production ping timeout is bounded (200 ms default, floored at one interval)");
     return 0;
 }

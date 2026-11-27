@@ -81,6 +81,25 @@ menu "CSI Node Configuration"
             are intentionally rejected because sustained callback load above
             50 Hz has caused WiFi ISR and packet-buffer failures on S3 and C6.
 
+    config CSI_SELF_PING_TIMEOUT_MS
+        int "Connected-STA CSI probe reply timeout (ms)"
+        default 200
+        range 20 1000
+        help
+            How long the probe session waits for one reply before counting it
+            lost. The session is sequential, so a lost reply stops the probes
+            (and the CSI they produce) for this long; the IDF default of
+            1000 ms costs a full second per loss (#2287).
+
+            Not one probe interval (20 ms at 50 Hz): gateway round trips of
+            38-40 ms average were measured on working nodes, and 67-83 ms on
+            a node held at a 1 Mbps link rate, so a one-interval timeout
+            records most replies on such links as losses and the reply
+            statistics stop describing the link. 200 ms keeps that band
+            measured; only replies slower than that (seen in heavily
+            busy-channel bursts) count as lost. Never below one probe
+            interval (ping_timeout_resolve). The probe cadence is unchanged.
+
 endmenu
 
 menu "Edge Intelligence (ADR-039)"

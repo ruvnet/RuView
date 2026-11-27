@@ -29,7 +29,7 @@ FEATURE_STATE_SRCS := $(MAIN_DIR)/rv_feature_state.c
 # before including the .c. The decide() body itself has no ESP-IDF deps.
 # Simpler: just recompile decide() here via a small shim.
 
-TESTS := test_adaptive_controller test_rv_feature_state test_rv_mesh
+TESTS := test_adaptive_controller test_rv_feature_state test_rv_mesh test_ping_rate
 
 all: $(TESTS)
 
@@ -46,12 +46,18 @@ test_rv_mesh: test_rv_mesh.c $(MAIN_DIR)/rv_mesh.c $(MAIN_DIR)/rv_mesh.h $(FEATU
 	    test_rv_mesh.c $(MAIN_DIR)/rv_mesh.c $(FEATURE_STATE_SRCS) \
 	    -o $@ $(LDLIBS)
 
+# Self-ping reply timeout (csi_collector.c csi_start_self_ping). 100% pure.
+test_ping_rate: test_ping_rate.c $(MAIN_DIR)/ping_rate.c $(MAIN_DIR)/ping_rate.h
+	$(CC) $(CFLAGS) test_ping_rate.c $(MAIN_DIR)/ping_rate.c -o $@ $(LDLIBS)
+
 check: all
 	./test_adaptive_controller
 	@echo ""
 	./test_rv_feature_state
 	@echo ""
 	./test_rv_mesh
+	@echo ""
+	./test_ping_rate
 
 clean:
 	rm -f $(TESTS) *.o
