@@ -600,9 +600,9 @@ install_verify_deps() {
     if $NEED_INSTALL; then
         echo "  Installing numpy and scipy..."
         if [ -f "${SCRIPT_DIR}/v1/requirements-lock.txt" ]; then
-            $PYTHON_CMD -m pip install -r "${SCRIPT_DIR}/v1/requirements-lock.txt" 2>&1 | tail -3
+            $PYTHON_CMD -m pip install --break-system-packages -r "${SCRIPT_DIR}/v1/requirements-lock.txt" 2>&1 | tail -3
         else
-            $PYTHON_CMD -m pip install numpy scipy 2>&1 | tail -3
+            $PYTHON_CMD -m pip install --break-system-packages numpy scipy 2>&1 | tail -3
         fi
         ok "numpy + scipy installed"
     else
@@ -614,7 +614,7 @@ install_python_deps() {
     echo -e "  ${CYAN}Python pipeline dependencies:${RESET}"
     if [ -f "${SCRIPT_DIR}/requirements.txt" ]; then
         echo "  Installing from requirements.txt..."
-        $PYTHON_CMD -m pip install -r "${SCRIPT_DIR}/requirements.txt" 2>&1 | tail -5
+        $PYTHON_CMD -m pip install --break-system-packages -r "${SCRIPT_DIR}/requirements.txt" 2>&1 | tail -5
         ok "Python dependencies installed"
     else
         warn "requirements.txt not found"
@@ -813,7 +813,7 @@ build_python() {
     # Install package in development mode
     if [ -f "${SCRIPT_DIR}/pyproject.toml" ]; then
         echo "  Installing wifi-densepose in development mode..."
-        (cd "${SCRIPT_DIR}" && $PYTHON_CMD -m pip install -e . 2>&1 | tail -3)
+        (cd "${SCRIPT_DIR}" && $PYTHON_CMD -m pip install --break-system-packages -e . 2>&1 | tail -3)
         ok "Package installed in dev mode"
     fi
 }
@@ -848,7 +848,10 @@ build_rust() {
         # Run tests
         echo ""
         echo -e "  ${CYAN}Running Rust tests...${RESET}"
-        (cd "${RUST_DIR}" && cargo test --workspace 2>&1 | tail -5)
+        # `cargo test --workspace` can feature-unify ndarray's BLAS path across
+        # crates, which requires cblas symbols even for crates that don't pull
+        # ndarray-linalg directly. Link OpenBLAS explicitly for this test run.
+        (cd "${RUST_DIR}" && RUSTFLAGS="${RUSTFLAGS:-} -l openblas" cargo test --workspace 2>&1 | tail -5)
         ok "Rust tests completed"
     else
         fail "Rust build failed (exit code: ${exit_code})"
@@ -893,6 +896,10 @@ build_wasm_field() {
 build_docker() {
     echo -e "  ${CYAN}Building Docker image...${RESET}"
     echo ""
+    if [ ! -f "${SCRIPT_DIR}/Dockerfile" ]; then
+        warn "Dockerfile not found at ${SCRIPT_DIR}/Dockerfile; skipping Docker image build"
+        return 0
+    fi
 
     local target="production"
     if $VERBOSE; then
