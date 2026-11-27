@@ -6,9 +6,8 @@
 
 import type { Argv } from "yargs";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, appendFileSync, openSync } from "node:fs";
+import { mkdirSync, appendFileSync, openSync, closeSync } from "node:fs";
 import path from "node:path";
-import os from "node:os";
 import { spawn } from "node:child_process";
 import { loadConfig } from "../config.js";
 
@@ -92,6 +91,11 @@ export function trainCommand(cli: Argv): void {
         stdio: ["ignore", logFdOut, logFdErr],
       });
       child.unref();
+
+      // The child holds its own duplicates of the log fds; close the parent's
+      // copies immediately to avoid leaking 2 fds per training job (ADR-264 F6/O6).
+      closeSync(logFdOut);
+      closeSync(logFdErr);
 
       child.on("error", (e) => {
         appendFileSync(logPath, `\n# ERROR: ${e.message}\n`);
