@@ -10,6 +10,7 @@
 #![allow(dead_code)]
 
 mod adaptive_classifier;
+mod rssi_motion;
 pub mod cli;
 pub mod csi;
 mod engine_bridge;
@@ -35,6 +36,9 @@ mod rvf_container;
 // (including `/ws/train/progress`) into the live router below.
 mod training_api;
 mod rvf_pipeline;
+#[cfg(feature = "fann-shadow")]
+mod fann_shadow;
+mod source_fusion;
 mod tracker_bridge;
 pub mod types;
 mod vital_signs;
@@ -1989,6 +1993,8 @@ pub(crate) fn save_runtime_config(data_dir: &std::path::Path, config: &RuntimeCo
 /// Shared application state
 struct AppStateInner {
     latest_update: Option<SensingUpdate>,
+    /// ADR-424: latest reading per source and the node-to-zone map.
+    source_fusion: source_fusion::FusionState,
     rssi_history: VecDeque<f64>,
     /// Circular buffer of recent CSI amplitude vectors for temporal analysis.
     /// Each entry is the full subcarrier amplitude vector for one frame.
@@ -2328,6 +2334,172 @@ mod adr323_pose_physics_http_tests {
 
 /// #2094: `--privacy-mode` is a top-level flag and filters REST and WebSocket
 /// output, not only MQTT.
+/// ADR-424 end to end over the real routes: a zone-mapped CSI node and an
+/// external radar reading in, one fused zone out. Readings are SYNTHETIC.
+#[cfg(test)]
+mod adr424_zone_fusion_http_tests {
+    use super::*;
+    use axum::{body::Body, http::Request};
+    use tower::ServiceExt;
+
+    fn csi_update(source: &str, presence: bool, age_s: f64) -> SensingUpdate {
+        let now = chrono::Utc::now().timestamp_millis() as f64 / 1000.0;
+        let features = serde_json::json!({
+            "mean_rssi": -50.0, "variance": 1.0, "motion_band_power": 0.5,
+            "breathing_band_power": 0.2, "dominant_freq_hz": 0.25,
+            "change_points": 0, "spectral_power": 1.0 });
+        let class = serde_json::json!({
+            "motion_level": "present_still", "presence": presence, "confidence": 0.9 });
+        serde_json::from_value(serde_json::json!({
+            "type": "sensing_update", "timestamp": now - age_s, "source": source, "tick": 1,
+            "nodes": [], "features": features, "classification": class,
+            "signal_field": { "grid_size": [1, 1, 1], "values": [0.0] },
+            "node_features": [{ "node_id": 1, "features": features, "classification": class,
+                                "rssi_dbm": -50.0, "last_seen_ms": 0, "frame_rate_hz": 20.0,
+                                "stale": false }]
+        }))
+        .expect("test SensingUpdate")
+    }
+
+    fn app(source: &str, update: Option<SensingUpdate>) -> Router {
+        let mut inner = AppStateInner::minimal();
+        inner.source = source.to_string();
+        inner.source_fusion =
+            source_fusion::FusionState::new(source_fusion::parse_node_zones("1=office/desk"));
+        inner.latest_update = update;
+        Router::new()
+            .route("/api/v1/zones", get(zones_endpoint))
+            .route("/api/v1/pose/zones/summary", get(pose_zones_summary))
+            .route("/api/v1/sources/readings", post(ingest_source_readings))
+            .with_state(Arc::new(RwLock::new(inner)))
+    }
+
+    async fn call(app: &Router, req: Request<Body>) -> (StatusCode, serde_json::Value) {
+        let response = app.clone().oneshot(req).await.unwrap();
+        let status = response.status();
+        let body = axum::body::to_bytes(response.into_body(), 1 << 20).await.unwrap();
+        (status, serde_json::from_slice(&body).unwrap())
+    }
+
+    fn get_req(uri: &str) -> Request<Body> {
+        Request::builder().uri(uri).body(Body::empty()).unwrap()
+    }
+
+    fn post_readings(body: String) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri("/api/v1/sources/readings")
+            .body(Body::from(body))
+            .unwrap()
+    }
+
+    fn radar(presence: u8, extra: &str) -> String {
+        format!(
+            r#"{{"timestamp_ms":{},"source":"radar-desk","kind":"mmwave_radar","room":"office","zone":"desk","values":{{"presence":{presence}}}{extra}}}"#,
+            chrono::Utc::now().timestamp_millis()
+        )
+    }
+
+    #[tokio::test]
+    async fn csi_node_and_radar_fuse_into_one_zone() {
+        let app = app("esp32", Some(csi_update("esp32", true, 0.0)));
+        let (status, body) = call(&app, post_readings(radar(1, ""))).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["accepted"], 1);
+
+        let (_, body) = call(&app, get_req("/api/v1/zones")).await;
+        let zone = &body["zones"][0];
+        assert_eq!((zone["room"].as_str(), zone["zone"].as_str()), (Some("office"), Some("desk")));
+        assert!(zone["presence_probability"].as_f64().unwrap() > 0.7);
+        assert_eq!(zone["agreement"], true);
+        // The CSI node is the server's own hardware reading; the radar line
+        // came over the open ingest route, so the fused result is a claim.
+        assert_eq!(zone["evidence"], "CLAIMED");
+        assert_eq!(zone["sources"][0]["verified"], true);
+        assert_eq!(zone["sources"][1]["verified"], false);
+        assert_eq!(zone["weights_measured"], false);
+        let sources: Vec<&str> =
+            zone["sources"].as_array().unwrap().iter().map(|s| s["source"].as_str().unwrap()).collect();
+        assert_eq!(sources, ["csi-node-1", "radar-desk"]);
+
+        // The legacy route serves the same fused zones, not invented ones.
+        let (_, legacy) = call(&app, get_req("/api/v1/pose/zones/summary")).await;
+        assert_eq!(legacy["zones"][0]["zone"], "desk");
+        assert!(legacy["zones"].as_array().unwrap().len() == 1);
+    }
+
+    #[tokio::test]
+    async fn hardware_csi_alone_is_measured() {
+        let app = app("esp32", Some(csi_update("esp32", true, 0.0)));
+        let (_, body) = call(&app, get_req("/api/v1/zones")).await;
+        assert_eq!(body["zones"][0]["evidence"], "MEASURED");
+    }
+
+    #[tokio::test]
+    async fn disagreement_and_synthetic_sources_are_reported() {
+        let app = app("simulated", Some(csi_update("simulated", true, 0.0)));
+        call(&app, post_readings(radar(0, ""))).await;
+        let (_, body) = call(&app, get_req("/api/v1/zones")).await;
+        let zone = &body["zones"][0];
+        assert_eq!(zone["agreement"], false);
+        assert_eq!(zone["evidence"], "SYNTHETIC", "a simulated CSI source taints the result");
+    }
+
+    #[tokio::test]
+    async fn quiet_csi_lowers_confidence_and_is_not_read_as_empty() {
+        // CSI last reported 60 s ago and the receiver is offline; only radar is live.
+        let app = app("esp32:offline", Some(csi_update("esp32", true, 60.0)));
+        call(&app, post_readings(radar(1, ""))).await;
+        let (_, body) = call(&app, get_req("/api/v1/zones")).await;
+        let zone = &body["zones"][0];
+        // Half the zone's weight is live, less the radar reading's few ms of age.
+        let confidence = zone["confidence"].as_f64().unwrap();
+        assert!((0.45..=0.5).contains(&confidence), "got {confidence}");
+        assert!(zone["presence_probability"].as_f64().unwrap() > 0.5);
+        let csi = &zone["sources"][0];
+        assert_eq!(csi["contributing"], false);
+        assert!(csi["probability"].is_null());
+    }
+
+    #[tokio::test]
+    async fn no_live_source_yields_null_not_zero() {
+        let app = app("esp32:offline", Some(csi_update("esp32", false, 60.0)));
+        let (_, body) = call(&app, get_req("/api/v1/zones")).await;
+        assert!(body["zones"][0]["presence_probability"].is_null());
+        assert_eq!(body["zones"][0]["confidence"], 0.0);
+        assert_eq!(body["zones"][0]["evidence"], "NONE");
+    }
+
+    #[tokio::test]
+    async fn bad_readings_are_rejected_line_by_line() {
+        let app = app("esp32", None);
+        let body = format!("{}\nnot json\n{}\n", radar(1, ""), radar(1, r#","quality":7"#));
+        let (status, report) = call(&app, post_readings(body)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!((report["accepted"].as_u64(), report["rejected"].as_u64()), (Some(1), Some(2)));
+        assert!(report["errors"][0].as_str().unwrap().starts_with("line 2:"));
+
+        let too_many = vec![radar(1, ""); source_fusion::MAX_LINES_PER_REQUEST + 1].join("\n");
+        let (status, _) = call(&app, post_readings(too_many)).await;
+        assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+
+        let (_, zones) = call(&app, get_req("/api/v1/zones")).await;
+        assert_eq!(zones["rejected_readings"], 2);
+    }
+
+    #[tokio::test]
+    async fn unconfigured_server_reports_no_zones() {
+        let mut inner = AppStateInner::minimal();
+        inner.latest_update = Some(csi_update("esp32", true, 0.0));
+        let app = Router::new()
+            .route("/api/v1/pose/zones/summary", get(pose_zones_summary))
+            .with_state(Arc::new(RwLock::new(inner)));
+        let (_, body) = call(&app, get_req("/api/v1/pose/zones/summary")).await;
+        assert_eq!(body["configured"], false);
+        assert!(body["zones"].as_array().unwrap().is_empty());
+    }
+}
+
 #[cfg(test)]
 mod privacy_mode_surface_tests {
     use super::*;
@@ -3321,6 +3493,7 @@ impl AppStateInner {
     pub(crate) fn minimal() -> Self {
         AppStateInner {
             latest_update: None,
+            source_fusion: source_fusion::FusionState::default(),
             rssi_history: VecDeque::new(),
             frame_history: VecDeque::new(),
             tick: 0,
@@ -4727,6 +4900,109 @@ fn raw_classify(score: f64) -> String {
     }
 }
 
+/// Host WiFi has RSSI samples, not CSI spatial-frequency bins. Keep the CSI
+/// extractor unchanged and replace only the single-link motion blend (#2557).
+fn extract_wifi_features_from_frame(
+    frame: &Esp32Frame,
+    history: &VecDeque<Vec<f64>>,
+    sample_rate_hz: f64,
+) -> (FeatureInfo, ClassificationInfo, f64, Vec<f64>, f64) {
+    let (features, mut classification, breathing, variances, score) =
+        extract_features_from_frame(frame, history, sample_rate_hz);
+    if frame.amplitudes.len() != 1 {
+        return (features, classification, breathing, variances, score);
+    }
+    let score = rssi_motion::motion_score(history, sample_rate_hz);
+    classification.motion_level = raw_classify(score);
+    classification.presence = score > 0.04;
+    (features, classification, breathing, variances, score)
+}
+
+#[cfg(test)]
+mod single_rssi_regression_tests {
+    use super::*;
+
+    fn frame(rssi: f64) -> Esp32Frame {
+        Esp32Frame {
+            magic: 0xC511_0001,
+            node_id: 0,
+            n_antennas: 1,
+            n_subcarriers: 1,
+            freq_mhz: 2437,
+            sequence: 0,
+            rssi: rssi as i8,
+            noise_floor: -90,
+            ppdu_type: wifi_densepose_hardware::PpduType::HtLegacy,
+            adr018_flags: wifi_densepose_hardware::Adr018Flags::default(),
+            amplitudes: vec![10.0_f64.powf((rssi + 100.0) / 20.0)],
+            phases: vec![0.0],
+        }
+    }
+
+    #[test]
+    fn synthetic_still_walk_still_reaches_motion_then_recovers_at_different_rssi_levels() {
+        // SYNTHETIC quantized samples, approximately 1 dB std and 0.8 dB
+        // mean absolute step while moving. This is not a replay of #2557.
+        let walk = [-1.0, 0.0, 1.0, 2.0, 1.0, 0.0, -1.0, -2.0, -1.0, 0.0];
+        for base in [-80.0, -56.0, -39.0] {
+            let mut state = AppStateInner::minimal();
+            for phase in 0..3 {
+                let mut moving = 0;
+                for tick in 0..120 {
+                    let offset = if phase == 1 {
+                        walk[tick % walk.len()]
+                    } else if tick % 50 == 0 {
+                        1.0
+                    } else {
+                        0.0
+                    };
+                    let f = frame(base + offset);
+                    state.frame_history.push_back(f.amplitudes.clone());
+                    if state.frame_history.len() > FRAME_HISTORY_CAPACITY {
+                        state.frame_history.pop_front();
+                    }
+                    let (_, mut c, _, _, score) =
+                        extract_wifi_features_from_frame(&f, &state.frame_history, 2.0);
+                    smooth_and_classify(&mut state, &mut c, score);
+                    assert_eq!(c.presence, c.motion_level != "absent");
+                    if tick >= 40 {
+                        if phase == 1 {
+                            if c.motion_level == "present_moving" || c.motion_level == "active" {
+                                moving += 1;
+                            }
+                        } else {
+                            assert_eq!(
+                                c.motion_level, "absent",
+                                "base={base} phase={phase} tick={tick}"
+                            );
+                        }
+                    }
+                }
+                if phase == 1 {
+                    assert_eq!(
+                        moving, 80,
+                        "base={base}: sustained walking must remain detected"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn multicarrier_extraction_keeps_the_existing_csi_score() {
+        let mut f = frame(-56.0);
+        f.amplitudes = (0..8).map(|i| 1.0 + i as f64).collect();
+        f.n_subcarriers = 8;
+        f.phases = vec![0.0; 8];
+        let history = VecDeque::from([vec![1.0; 8], f.amplitudes.clone()]);
+        let csi = extract_features_from_frame(&f, &history, 2.0);
+        let wifi = extract_wifi_features_from_frame(&f, &history, 2.0);
+        assert_eq!(wifi.4, csi.4);
+        assert_eq!(wifi.1.motion_level, csi.1.motion_level);
+        assert_eq!(wifi.0.variance, csi.0.variance);
+    }
+}
+
 /// Debounce frames required before state transition (at ~10 FPS = ~0.4s).
 /// Used only by [`smooth_and_classify`] (simulated / WiFi-scan sources,
 /// which run on a fixed tick cadence close to this design point).
@@ -5357,7 +5633,7 @@ async fn wifi_task(state: SharedState, tick_ms: u64) {
         }
         let sample_rate_hz = 1000.0 / tick_ms as f64;
         let (features, mut classification, breathing_rate_hz, sub_variances, raw_motion) =
-            extract_features_from_frame(&frame, &s_write_pre.frame_history, sample_rate_hz);
+            extract_wifi_features_from_frame(&frame, &s_write_pre.frame_history, sample_rate_hz);
         smooth_and_classify(&mut s_write_pre, &mut classification, raw_motion);
         adaptive_override(&s_write_pre, &features, &mut classification);
         drop(s_write_pre);
@@ -5538,7 +5814,7 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
         noise_floor: -90,
         ppdu_type: wifi_densepose_hardware::PpduType::HtLegacy,
         adr018_flags: wifi_densepose_hardware::Adr018Flags::default(),
-        amplitudes: vec![signal_pct],
+        amplitudes: vec![10.0_f64.powf((rssi_dbm + 100.0) / 20.0)],
         phases: vec![0.0],
     };
 
@@ -5550,7 +5826,7 @@ async fn windows_wifi_fallback_tick(state: &SharedState, seq: u32) {
     }
     let sample_rate_hz = 2.0_f64; // fallback tick ~ 500 ms => 2 Hz
     let (features, mut classification, breathing_rate_hz, sub_variances, raw_motion) =
-        extract_features_from_frame(&frame, &s.frame_history, sample_rate_hz);
+        extract_wifi_features_from_frame(&frame, &s.frame_history, sample_rate_hz);
     smooth_and_classify(&mut s, &mut classification, raw_motion);
     adaptive_override(&s, &features, &mut classification);
 
@@ -8238,21 +8514,52 @@ async fn pose_stats(State(state): State<SharedState>) -> Json<serde_json::Value>
     }))
 }
 
-async fn pose_zones_summary(State(state): State<SharedState>) -> Json<serde_json::Value> {
-    let s = state.read().await;
-    let presence = s
-        .latest_update
-        .as_ref()
-        .map(|u| u.classification.presence)
-        .unwrap_or(false);
-    Json(serde_json::json!({
-        "zones": {
-            "zone_1": { "person_count": if presence { 1 } else { 0 }, "status": "monitored" },
-            "zone_2": { "person_count": 0, "status": "clear" },
-            "zone_3": { "person_count": 0, "status": "clear" },
-            "zone_4": { "person_count": 0, "status": "clear" },
-        }
-    }))
+/// ADR-424 D5: fused per-zone presence. Refreshes the CSI nodes' readings from
+/// the latest sensing update, then fuses every zone's fresh, healthy sources.
+async fn zones_endpoint(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let mut s = state.write().await;
+    let source = s.effective_source();
+    let update = s.latest_update.clone();
+    s.source_fusion.refresh_csi(update.as_ref(), &source);
+    Json(s.source_fusion.zones_json(now_ms))
+}
+
+/// ADR-426 D5: status of the default-off ruv-FANN shadow. Diagnostic only.
+async fn fann_shadow_status() -> Json<serde_json::Value> {
+    #[cfg(feature = "fann-shadow")]
+    {
+        fann_shadow::status_endpoint().await
+    }
+    #[cfg(not(feature = "fann-shadow"))]
+    {
+        Json(serde_json::json!({
+            "enabled": false,
+            "hint": "build the server with --features fann-shadow",
+        }))
+    }
+}
+
+/// Legacy route. It used to return four invented zones; it now returns the
+/// fused zones, or none when no source is mapped to a zone.
+async fn pose_zones_summary(state: State<SharedState>) -> Json<serde_json::Value> {
+    zones_endpoint(state).await
+}
+
+/// ADR-424 D1: ingest source readings, one JSON object per line.
+async fn ingest_source_readings(
+    State(state): State<SharedState>,
+    payload: Bytes,
+) -> impl IntoResponse {
+    let Ok(text) = std::str::from_utf8(&payload) else {
+        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "body is not UTF-8"})));
+    };
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let mut s = state.write().await;
+    match s.source_fusion.ingest_lines(text, now_ms) {
+        Ok(report) => (StatusCode::OK, Json(serde_json::json!(report))),
+        Err(e) => (StatusCode::PAYLOAD_TOO_LARGE, Json(serde_json::json!({"error": e}))),
+    }
 }
 
 async fn stream_status(State(state): State<SharedState>) -> Json<serde_json::Value> {
@@ -15019,6 +15326,7 @@ async fn main() {
         .unwrap_or_default();
     let state: SharedState = Arc::new(RwLock::new(AppStateInner {
         latest_update: None,
+        source_fusion: source_fusion::FusionState::from_env(),
         rssi_history: VecDeque::new(),
         frame_history: VecDeque::new(),
         tick: 0,
@@ -15287,6 +15595,8 @@ async fn main() {
     if plan.run_simulator {
         tokio::spawn(simulated_data_task(state.clone(), args.tick_ms));
     }
+    #[cfg(feature = "fann-shadow")]
+    fann_shadow::spawn(state.clone());
     // Floor persistence (2026-09-20, floor-bootstrap fix): only when
     // --activity-state was given. Writes every
     // mediatek_activity::ACTIVITY_STATE_PERSIST_INTERVAL so a restart's
@@ -15513,6 +15823,10 @@ async fn main() {
         .route("/api/v1/pose/physics/metrics", get(pose_physics_metrics))
         .route("/api/v1/pose/stats", get(pose_stats))
         .route("/api/v1/pose/zones/summary", get(pose_zones_summary))
+        // ADR-424: any-source readings in, fused per-zone presence out.
+        .route("/api/v1/zones", get(zones_endpoint))
+        .route("/api/v1/sources/readings", post(ingest_source_readings))
+        .route("/api/v1/shadow/fann", get(fann_shadow_status))
         .route("/api/v1/pose/activities", get(pose_activities))
         // Dashboard-compatible aliases for the field-model calibration API.
         .route("/api/v1/pose/calibrate", post(calibration_start))

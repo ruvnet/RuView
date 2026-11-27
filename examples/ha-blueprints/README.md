@@ -5,16 +5,26 @@ RuView's HA-MIND semantic primitives unlock. Drop the YAML files into
 `<HA config>/blueprints/automation/ruvnet/` and import from the HA UI
 (**Settings → Automations & Scenes → Blueprints → Import Blueprint**).
 
-| # | Blueprint                                                           | Primary primitive            | Use case                              |
-|---|---------------------------------------------------------------------|------------------------------|---------------------------------------|
-| 1 | [Notify on possible distress](01-notify-on-possible-distress.yaml)   | `possible_distress`          | Healthcare / AAL / single-occupant    |
-| 2 | [Dim hallway when sleeping](02-dim-hallway-when-sleeping.yaml)       | `someone_sleeping`           | Convenience / sleep hygiene           |
-| 3 | [Wake routine on bed exit](03-wake-routine-on-bed-exit.yaml)         | `bed_exit`                   | Morning routine / smart home          |
-| 4 | [Alert on elderly inactivity anomaly](04-alert-elderly-inactivity-anomaly.yaml) | `elderly_inactivity_anomaly` | AAL / aging-in-place           |
-| 5 | [Meeting lights + presence mode](05-meeting-lights-presence-mode.yaml) | `meeting_in_progress`      | Conference room / WFH                 |
-| 6 | [Bathroom fan while occupied](06-bathroom-fan-while-occupied.yaml)   | `bathroom_occupied`          | Humidity / privacy-mode-safe          |
-| 7 | [Escalate on fall-risk crossing](07-fall-risk-escalation.yaml)       | `fall_risk_elevated`         | AAL / preventive intervention         |
-| 8 | [Auto-arm security when room not active](08-auto-arm-security-when-not-active.yaml) | `room_active` + `no_movement` | Self-arming security |
+| # | Blueprint                                                           | Primary primitive            | Use case                              | Published today? |
+|---|---------------------------------------------------------------------|------------------------------|---------------------------------------|------------------|
+| 1 | [Notify on possible distress](01-notify-on-possible-distress.yaml)   | `possible_distress`          | Healthcare / AAL / single-occupant    | ✅ |
+| 2 | [Dim hallway when sleeping](02-dim-hallway-when-sleeping.yaml)       | `someone_sleeping`           | Convenience / sleep hygiene           | ✅ |
+| 3 | [Wake routine on bed exit](03-wake-routine-on-bed-exit.yaml)         | `bed_exit`                   | Morning routine / smart home          | ❌ not yet: imports, never fires |
+| 4 | [Alert on elderly inactivity anomaly](04-alert-elderly-inactivity-anomaly.yaml) | `elderly_inactivity_anomaly` | AAL / aging-in-place           | ✅ |
+| 5 | [Meeting lights + presence mode](05-meeting-lights-presence-mode.yaml) | `meeting_in_progress`      | Conference room / WFH                 | ❌ not yet: use any binary_sensor |
+| 6 | [Bathroom fan while occupied](06-bathroom-fan-while-occupied.yaml)   | `bathroom_occupied`          | Humidity / privacy-mode-safe          | ❌ not yet: use the bathroom node's `presence` |
+| 7 | [Escalate on fall-risk crossing](07-fall-risk-escalation.yaml)       | `fall_risk_elevated`         | AAL / preventive intervention         | ✅ |
+| 8 | [Auto-arm security when room not active](08-auto-arm-security-when-not-active.yaml) | `room_active` + `no_movement` | Self-arming security | ✅ |
+
+"Published today?" means the RuView server's MQTT discovery planner has a
+source for the primitive. `bed_exit`, `meeting_in_progress` and
+`bathroom_occupied` don't yet, so their entities stay unavailable. Each of
+those blueprints says so in its description. ✅ is conditional too: every
+inferred primitive waits for the planner's warm-up, and 01, 02 and 07 are
+available only while heart rate, breathing rate and fall detection
+(respectively) are fresh. Separately,
+`scripts/validate-ha-blueprints.py` reads the planner and fails if a
+blueprint and the server disagree.
 
 ## Verifying the YAML
 
@@ -23,10 +33,8 @@ Each blueprint validates against the HA blueprint schema
 without an HA install:
 
 ```bash
-# Requires python3 + PyYAML
-for f in examples/ha-blueprints/*.yaml; do
-  python -c "import yaml,sys; yaml.safe_load(open('$f'))" && echo "✓ $f" || echo "✗ $f"
-done
+# Requires python3 + PyYAML; run from the repository root
+python scripts/validate-ha-blueprints.py
 ```
 
 ## Privacy-mode compatibility

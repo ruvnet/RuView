@@ -92,7 +92,7 @@ export class SensingService {
     //   'rejected' — the stored token was refused
     this._authRequired = null;
     // Data-source label exposed to the UI:
-    //   "live"              — real ESP32 hardware connected
+    //   "live"              — live measurements (see serverSource for modality)
     //   "server-simulated"  — server is running but using synthetic data (no hardware)
     //   "reconnecting"      — WebSocket disconnected, retrying
     //   "simulated"         — client-side fallback simulation (server unreachable)
@@ -168,7 +168,7 @@ export class SensingService {
 
   /**
    * Current data source label.
-   * "live"         — frames are arriving from the real ESP32 over WebSocket
+   * "live"         — live measurements are arriving over WebSocket
    * "reconnecting" — WebSocket disconnected; actively retrying, no frames emitted
    * "unreachable"  — retries exhausted, client simulation off; NO frames emitted
    *                  and whatever is on screen is the last live reading, stale
@@ -505,12 +505,13 @@ export class SensingService {
    * `source_state`) to the UI data-source label.
    */
   _applyServerSource(rawSource, sourceState) {
+    const sourceChanged = rawSource !== this._serverSource;
     this._serverSource = rawSource;
     // ADR-295: only the verified/unverified live states may show "live"; any
     // synthetic/stale/disconnected state must not.
     if (sourceState) {
       if (sourceState === 'live_verified' || sourceState === 'live_unverified') {
-        this._setDataSource('live');
+        this._setDataSource('live', sourceChanged);
       } else if (sourceState === 'synthetic') {
         this._setDataSource('server-simulated');
       } else {
@@ -518,8 +519,9 @@ export class SensingService {
       }
       return;
     }
-    if (rawSource === 'esp32' || rawSource === 'wifi' || rawSource === 'live') {
-      this._setDataSource('live');
+    if (rawSource === 'esp32' || rawSource === 'wifi' || rawSource === 'live' ||
+        (typeof rawSource === 'string' && rawSource.startsWith('wifi:'))) {
+      this._setDataSource('live', sourceChanged);
     } else if (rawSource === 'simulated' || rawSource === 'simulate') {
       this._setDataSource('server-simulated');
     } else {
@@ -533,6 +535,14 @@ export class SensingService {
     return this._serverSource;
   }
 
+  /** A modality label; a live connection alone does not establish ESP32 use. */
+  get liveSourceLabel() {
+    const source = typeof this._serverSource === 'string' ? this._serverSource : '';
+    if (source === 'wifi' || source?.startsWith('wifi:')) return 'HOST WIFI (RSSI ONLY)';
+    if (source === 'esp32' || source?.startsWith('esp32:')) return 'ESP32 HARDWARE';
+    return 'SOURCE UNSPECIFIED';
+  }
+
   // ---- Data handling -----------------------------------------------------
 
   _handleData(data) {
@@ -542,8 +552,8 @@ export class SensingService {
     // can react if the server switches between esp32 ↔ simulated at runtime.
     if (data.source && this._state === 'connected') {
       const raw = data.source;
-      if (raw !== this._serverSource) {
-        this._applyServerSource(raw);
+      if (raw !== this._serverSource || data.source_state) {
+        this._applyServerSource(raw, data.source_state);
       }
     }
 
@@ -594,8 +604,8 @@ export class SensingService {
    * react without needing a separate subscription.
    * @param {'live'|'server-simulated'|'reconnecting'|'unreachable'|'simulated'|'auth-required'} source
    */
-  _setDataSource(source) {
-    if (source === this._dataSource) return;
+  _setDataSource(source, sourceChanged = false) {
+    if (source === this._dataSource && !sourceChanged) return;
     this._dataSource = source;
     // Re-use the same state-listener channel — listeners receive the
     // connection state but can read dataSource via service.dataSource.

@@ -44,10 +44,16 @@ pub mod gaussian;
 pub mod heads;
 pub mod math;
 pub mod policy;
+/// Experimental latent prediction and leakage-safe pose evaluation controls.
+pub mod predictive;
 pub mod pretrain;
+/// Experimental RF residuals, geometry provenance and tracking ambiguity controls.
+pub mod scene_research;
 pub mod synth;
 pub mod tensor;
 pub mod tokenizer;
+/// Experimental quiet-baseline calibration controls; hardware transfer is unverified.
+pub mod transfer_calibration;
 
 pub use adapters::{AdapterRegistry, RawCapture, RfAdapter};
 pub use encoder::{EncoderConfig, RfEncoder, WindowContext};

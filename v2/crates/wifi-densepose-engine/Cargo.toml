@@ -7,6 +7,11 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+default = []
+# Explicit experimental projection; no model runs in the sensing cycle.
+pan2-physical = ["dep:wifi-densepose-worldmodel"]
+
 [dependencies]
 # Composed building blocks (ADR-135..146).
 wifi-densepose-core = { version = "0.3.0", path = "../wifi-densepose-core" }
@@ -17,6 +22,7 @@ wifi-densepose-ruvector = { version = "0.3.0", path = "../wifi-densepose-ruvecto
 wifi-densepose-bfld = { version = "0.3.0", path = "../wifi-densepose-bfld", features = ["std"] }
 wifi-densepose-worldgraph = { version = "0.3.0", path = "../worldgraph/wifi-densepose-worldgraph" }
 wifi-densepose-geo = { version = "0.1.0", path = "../worldgraph/wifi-densepose-geo" }
+wifi-densepose-worldmodel = { workspace = true, optional = true }
 # Deterministic witness over the trust decision (ADR-137 §2.7 / ADR-028).
 blake3 = { version = "1.5", default-features = false }
 # Dynamic min-cut over the live mesh coupling graph (mesh_guard.rs):
@@ -24,6 +30,7 @@ blake3 = { version = "1.5", default-features = false }
 ruvector-mincut = { workspace = true }
 
 [dev-dependencies]
+serde_json.workspace = true
 criterion = { version = "0.5", features = ["html_reports"] }
 
 [[bench]]

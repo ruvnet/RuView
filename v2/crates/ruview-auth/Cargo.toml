@@ -34,8 +34,6 @@ rand = { version = "0.8", optional = true }
 sha2 = { workspace = true, optional = true }
 base64 = { version = "0.21", optional = true }
 url = { version = "2", optional = true }
-# Advisory cross-process file lock around the refresh critical section (Unix).
-libc = { version = "0.2", optional = true }
 
 [features]
 default = ["ureq-transport"]
@@ -46,7 +44,7 @@ ureq-transport = ["dep:ureq"]
 pkce = ["dep:rand", "dep:sha2", "dep:base64"]
 # Interactive OAuth login: PKCE, loopback callback, OOB paste fallback,
 # credential storage, single-flight refresh. Opt in from a CLI or desktop app.
-login = ["pkce", "dep:reqwest", "dep:tokio", "dep:url", "dep:libc"]
+login = ["pkce", "dep:reqwest", "dep:tokio", "dep:url"]
 
 [dev-dependencies]
 # Test-only: sign real ES256 tokens so the negative matrix exercises the same
@@ -59,5 +57,5 @@ serde_json = { workspace = true }
 # to treat committed key material as normal, and this repo has no such
 # precedent (zero tracked `.pem` files). Generating also makes the matrix
 # self-contained: no fixture can drift out of sync with the JWKS it is served by.
-p256 = { version = "0.13", features = ["ecdsa", "pkcs8"] }
+ring = "0.17"
 base64 = "0.21"

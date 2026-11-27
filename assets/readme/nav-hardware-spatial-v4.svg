@@ -3,29 +3,13 @@ text{font-family:"Avenir Next","Segoe UI Variable Display","Segoe UI",Helvetica,
 .mono{font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace;letter-spacing:1.6px}
 .float{animation:float 5s ease-in-out infinite}
 .flow{stroke-dasharray:5 12;animation:flow 5s linear infinite}
-
-
-
-
-
-
 @keyframes float{0%,100%{transform:translate(0,0)}50%{transform:translate(3px,-10px)}}
 
-
-
-
-
 .layer{animation:layer 6s ease-in-out infinite}
-
-
-
 @keyframes layer{50%{transform:translateY(-5px)}}
 
 
 
 @keyframes flow{to{stroke-dashoffset:-136}}
-
-
-
 @media(prefers-reduced-motion:reduce){*{animation:none!important}}
 </style><rect x=".5" y=".5" width="179" height="115" rx="18" fill="url(#wash)" stroke="#2d4e77"/><g transform="translate(90 45) scale(0.65)"><ellipse cy="53" rx="48" ry="8" fill="#020816" opacity=".65"/><g class="float"><g class="layer" style="animation-delay:-0.0s"><path d="M-38 -23L0 -42L38 -23L0 -4Z" fill="#102749" stroke="#78cfff"/><path d="M-38 -23V-16L0 3L38 -16V-23M0 -4V3" fill="#09172c" stroke="#315685"/></g><g class="layer" style="animation-delay:-0.7s"><path d="M-38 -10L0 -29L38 -10L0 9Z" fill="#102749" stroke="#438fff"/><path d="M-38 -10V-3L0 16L38 -3V-10M0 9V16" fill="#09172c" stroke="#315685"/></g><g class="layer" style="animation-delay:-1.4s"><path d="M-38 3L0 -16L38 3L0 22Z" fill="#102749" stroke="#438fff"/><path d="M-38 3V10L0 29L38 10V3M0 22V29" fill="#09172c" stroke="#315685"/></g><path d="M-12 -31L0 -37L12 -31L0 -25Z" fill="none" stroke="#b8f36c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /><path d="M-26 22V39" fill="none" stroke="#ffb45e" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="flow"/><path d="M0 22V39" fill="none" stroke="#ffb45e" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="flow"/><path d="M26 22V39" fill="none" stroke="#ffb45e" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="flow"/></g></g><text x="90" y="98" font-size="16" fill="#f3f7ff" text-anchor="middle" font-weight="500" >Hardware</text><path d="M24 1H156" stroke="url(#accent)" opacity=".55"/><path d="M24 115H156" stroke="#438fff" opacity=".15"/></svg>

@@ -692,8 +692,11 @@ mod tests {
         let cy = (kp_y * s).round() as usize;
 
         let peak = hm[[cy, cx]];
+        // kp 0.5 on a 64-px map is the half-pixel point 31.5, so the max
+        // attainable at pixel 31 or 32 is exp(-(0.5^2+0.5^2)/(2*2^2)) ≈ 0.9394.
+        // The old 0.95 threshold was mathematically unreachable.
         assert!(
-            peak > 0.95,
+            peak > 0.93,
             "Peak value {peak} should be close to 1.0 at centre"
         );
 
@@ -931,7 +934,10 @@ mod tests {
         let vis = Tensor::ones(&[1i64, 1], (Kind::Float, dev));
         let hm = generate_gaussian_heatmaps(&kpts, &vis, 8, 1.5);
         let max_val: f64 = hm.max().double_value(&[]);
-        assert!(max_val > 0.9, "Peak value {max_val} should be > 0.9");
+        // kp 0.5 on an 8-px map is the half-pixel point 3.5, so the max
+        // attainable at pixel 3 or 4 is exp(-(0.5^2+0.5^2)/(2*1.5^2)) ≈ 0.8948.
+        // The old 0.9 threshold was mathematically unreachable.
+        assert!(max_val > 0.89, "Peak value {max_val} should be > 0.89");
     }
 
     #[test]

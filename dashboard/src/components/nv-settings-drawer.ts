@@ -172,7 +172,7 @@ export class NvSettingsDrawer extends LitElement {
               <div class="desc">Stops the rotating diamond, animated field lines, and chart easing. Auto-on if your system has the prefers-reduced-motion preference set.</div>
             </div>
             <span class="toggle ${motionReduced.value ? 'on' : ''}"
-              role="switch" aria-checked=${motionReduced.value}
+              role="switch" aria-checked=${motionReduced.value} aria-label="Reduce motion"
               @click=${() => motionReduced.value = !motionReduced.value}></span>
           </div>
         </div>
@@ -185,7 +185,7 @@ export class NvSettingsDrawer extends LitElement {
               <div class="desc">When you change a Tunables slider or load a new scene, push the change to the worker without a manual restart.</div>
             </div>
             <span class="toggle ${autoUpdate.value ? 'on' : ''}"
-              role="switch" aria-checked=${autoUpdate.value}
+              role="switch" aria-checked=${autoUpdate.value} aria-label="Auto-rerun on edit"
               @click=${() => autoUpdate.value = !autoUpdate.value}></span>
           </div>
         </div>

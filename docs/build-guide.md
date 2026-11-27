@@ -383,6 +383,27 @@ The multi-stage `Dockerfile` provides four targets:
 
 ## 6. ESP32 Hardware Setup
 
+### ESP32-C5 experimental build
+
+Use ESP-IDF 6.0.2 and a separate build directory from S3/C6:
+
+```sh
+cd firmware/esp32-csi-node
+idf.py -B build-c5 -D IDF_TARGET=esp32c5 -D SDKCONFIG=build-c5/sdkconfig build
+python test/test_delivery_contract.py --built-app build-c5/esp32-csi-node.bin --target esp32c5 --flasher-args build-c5/flasher_args.json
+```
+
+The profile uses 2.4 GHz, UART console, 240 MHz CPU, 8 Hz edge DSP and a 4 MB
+OTA layout. Display, WASM and PSRAM are disabled. The C5 bootloader belongs at
+`0x2000`; follow the generated flash plan rather than S3/C6's bootloader offset.
+esptool must be at least 5.3 for the corrected C5 security layout.
+
+Build success does not prove board operation. Identify the exact board and
+flash capacity, preserve its original flash privately, and require real boot
+and sustained CSI transport evidence before claiming qualification.
+See the [C5 user guide](user-guide.md#esp32-c5-experimental-csi-target) and
+[qualification record](validation/2026-10-28-esp32-c5-candidate.md).
+
 Uses ESP32-S3 boards as WiFi CSI sensor nodes. See [ADR-012](adr/ADR-012-esp32-csi-sensor-mesh.md) for the full specification.
 
 ### Bill of Materials (Starter Kit -- $54)

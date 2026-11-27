@@ -12,6 +12,7 @@
  * - Pose-adaptive aura shape (wider for exercise, narrower for crouching)
  */
 import * as THREE from 'three';
+import { visiblePersons } from './live-data.js';
 
 // 17-keypoint COCO skeleton connectivity
 export const SKELETON_PAIRS = [
@@ -266,7 +267,7 @@ export class FigurePool {
    * @param {number} elapsed - Elapsed time in seconds
    */
   update(data, elapsed) {
-    const persons = data?.persons || [];
+    const persons = visiblePersons(data, this._settings.dataSource === 'ws');
     const vs = data?.vital_signs || {};
     const isPresent = data?.classification?.presence || false;
     const breathBpm = vs.breathing_rate_bpm || 0;
