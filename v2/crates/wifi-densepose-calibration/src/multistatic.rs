@@ -293,7 +293,45 @@ mod tests {
         m.add_node(1, bank("b1"), "b2"); // trained on b1, now observing b2 → stale
         let mut per = BTreeMap::new();
         per.insert(1u8, live(12.0, 0.2, 0.3, 0.9));
-        assert!(m.infer(&per).stale);
+        let s = m.infer(&per);
+        assert!(s.stale);
+        assert!(s.presence.is_none(), "stale is unknown, not empty");
+        assert!(s.breathing.is_none());
+        assert!(s.heartbeat.is_none());
+        assert!(s.posture.is_none());
+        assert!(s.anomaly.is_none());
+        assert!(s.restlessness.is_none());
+    }
+
+    #[test]
+    fn stale_node_cannot_supply_vitals_or_veto_fresh_node() {
+        let mut m = MultiNodeMixture::new();
+        m.add_node(1, bank("old"), "new");
+        m.add_node(2, bank("fresh"), "fresh");
+        let mut per = BTreeMap::new();
+        per.insert(1u8, live(9000.0, 500.0, 0.2, 0.99));
+        per.insert(2u8, live(12.0, 0.2, 0.3, 0.95));
+        let s = m.infer(&per);
+        assert!(s.stale, "existing conservative room flag is preserved");
+        assert!(!s.vetoed, "stale anomaly must abstain");
+        assert_eq!(s.presence.unwrap().value, 1.0);
+        assert!((s.breathing.unwrap().value - 18.0).abs() < 0.3);
+    }
+
+    #[test]
+    fn incomplete_node_bank_does_not_invent_absent_presence_or_vitals() {
+        let mut m = MultiNodeMixture::new();
+        let mut incomplete = bank("b1");
+        incomplete.presence = None;
+        m.add_node(1, incomplete, "b1");
+        let mut per = BTreeMap::new();
+        per.insert(1u8, live(12.0, 0.2, 0.3, 0.95));
+        let s = m.infer(&per);
+        assert!(!s.stale);
+        assert!(s.presence.is_none());
+        assert!(s.breathing.is_none());
+        assert!(s.heartbeat.is_none());
+        assert!(s.posture.is_none());
     }
 
     #[test]
