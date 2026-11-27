@@ -10,17 +10,103 @@ below was learned by getting it wrong at least once.
 
 ## 1. Build
 
-**One command. Copy it.** From the **repository root**, not this directory:
+**Pick the command for your board's flash size, then copy it.** Run from the
+**repository root**, not this directory.
+
+### 16MB boards
 
 ```bash
 MSYS_NO_PATHCONV=1 docker run --rm \
   -v "$(pwd)/firmware/esp32-csi-node:/project" -w /project \
   espressif/idf:v5.4 bash -c \
-  "cat sdkconfig.defaults sdkconfig.defaults.16mb sdkconfig.defaults.esp32c6 \
+  "cat sdkconfig.defaults sdkconfig.defaults.esp32c6 sdkconfig.defaults.16mb \
      > sdkconfig.defaults.build && \
    SDKCONFIG_DEFAULTS='sdkconfig.defaults.build' idf.py set-target esp32c6 && \
    idf.py build"
 ```
+
+### 4MB and 8MB C6 dev boards
+
+**Omit `sdkconfig.defaults.16mb` entirely.** `sdkconfig.defaults.esp32c6`
+already carries 4MB geometry, so with the 16MB layer absent the target overlay
+is the last word and no override is needed:
+
+```bash
+MSYS_NO_PATHCONV=1 docker run --rm \
+  -v "$(pwd)/firmware/esp32-csi-node:/project" -w /project \
+  espressif/idf:v5.4 bash -c \
+  "cat sdkconfig.defaults sdkconfig.defaults.esp32c6 \
+     > sdkconfig.defaults.build && \
+   SDKCONFIG_DEFAULTS='sdkconfig.defaults.build' idf.py set-target esp32c6 && \
+   idf.py build"
+```
+
+That yields `FLASHSIZE "4MB"` with `partitions_4mb.csv` -- two 1.875 MB OTA
+slots against a roughly 978 KB binary, so OTA has ample headroom.
+
+**One behavioural difference to know about.** `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`
+is set *only* in `sdkconfig.defaults.16mb`. A 4MB build therefore has no
+automatic rollback: an OTA'd image does not boot PENDING_VERIFY and the
+bootloader will not revert a bad image on the next boot. Nothing about 4MB
+flash forces that -- `partitions_4mb.csv` has an `otadata` partition and two
+OTA slots -- it is simply which layer the flag currently lives in. Treat a 4MB
+OTA as unguarded until that is changed deliberately, and keep a serial recovery
+path available.
+
+### CORRECTED 2026-09-10 — why order matters on the 16MB path
+
+The 16MB command previously read
+`... sdkconfig.defaults.16mb sdkconfig.defaults.esp32c6`, and **it silently produced a
+4MB image on 16MB hardware** -- not a broken build, just the wrong one, which is
+why it survived so long. In a single
+concatenated file the *last* assignment wins, and the three files disagree:
+
+| file | sets |
+|---|---|
+| `sdkconfig.defaults` | `FLASHSIZE "8MB"`, `partitions_display.csv` |
+| `sdkconfig.defaults.16mb` | `FLASHSIZE "16MB"`, `partitions_16mb.csv`, `BOOTLOADER_APP_ROLLBACK_ENABLE=y` |
+| `sdkconfig.defaults.esp32c6` | `FLASHSIZE "4MB"`, `partitions_4mb.csv` |
+
+With `.esp32c6` last it overrode `.16mb`, so the build came out 4MB with
+`partitions_4mb.csv`. Only the rollback flag survived, because `.esp32c6` does
+not set it -- which is exactly why this was hard to spot: the one symptom the
+old text warned about (missing rollback) was the one symptom that *didn't*
+appear.
+
+**MEASURED both ways, 2026-09-10**, same worktree, same container, only the
+order changed:
+
+```
+.16mb then .esp32c6  ->  FLASHSIZE "4MB"   partitions_4mb.csv    ROLLBACK=y
+.esp32c6 then .16mb  ->  FLASHSIZE "16MB"  partitions_16mb.csv   ROLLBACK=y
+```
+
+`.16mb` must come **last** because it is the override layer: it is the only
+file that describes the fleet's actual flash geometry, and every earlier file
+is a more general default.
+
+**This is not a new theory -- it restores what the file always said.**
+`sdkconfig.defaults.16mb` documents the correct order in its own header:
+
+```
+# Build:
+#   idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.esp32c6;sdkconfig.defaults.16mb" build
+```
+
+So there are two independent confirmations: the A/B measurement above, and the
+file's own docstring. The runbook's `cat` simply had the last two arguments
+transposed relative to the instructions sitting inside the file it was
+concatenating.
+
+### OPEN: `DYNAMIC_TX_BUFFER_NUM` is 64 here, but the fleet is documented at 128
+
+Even with the corrected order the build yields
+`CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=64`. Only `sdkconfig.defaults` sets it
+(to 64) and neither other file overrides it, so **no combination of these three
+files produces 128.** Either 128 arrives from somewhere not yet found, or the
+"fleet runs 128" claim is wrong. Do not "fix" this by editing a defaults file
+until that is settled -- read it off a running node first. The verification
+grep below therefore expects 64 today, not 128.
 
 Takes ~3 minutes cold, well under a minute incremental.
 
