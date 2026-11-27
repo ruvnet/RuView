@@ -1,0 +1,1068 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fleet KPIs</title>
+<!--
+  One row per node: is the sink actually receiving its CSI, and is the node
+  healthy by its own account. Around it:
+  fleet delivery, AP-link signal, link-table health, datagrams the sink could
+  not parse, node restarts, sink host/trust, and server-side trends.
+
+  No dependencies, so it works with the internet down, like mesh.html and
+  groups.html. Read-only: it polls this server and never contacts a node
+  directly. Endpoints, once per poll (default and minimum 60 s):
+    /api/v1/mesh  /api/v1/nodes  /api/v1/links  /api/v1/links/inventory
+    /api/v1/status  /health/metrics  /api/v1/kpi/history
+  plus /health/version once at load. It never reads /api/v1/fusion/*.
+  One extra poll runs 15 s after load (and after the tab becomes visible
+  again) so the first delivered-fps figure does not take a full minute.
+
+  NOT SHOWN, by rule: presence, occupancy, motion, pose, person counts, or any
+  history of them. /api/v1/links carries a motion column; this page reads only
+  its signal fields (rssi, noise floor, snr, window span).
+
+  WHY DELIVERY IS COMPUTED HERE, NOT READ FROM A FIELD:
+
+    csi_fps_samples  sink-side arrival count. The ONLY /api/v1/mesh field that
+                     proves CSI reached the sink. Delivered fps on this page is
+                     its difference between two polls divided by the time
+                     between them.
+    csi_fps_ema      falls back to exactly 20.0 when the sink has fewer than 5
+                     samples (a later sink build returns null instead). 20.0 or
+                     null is shown as "no data", never as a rate.
+    sequence,        the node's own reports, carried in its sync packet. A node
+    health.*         can report a climbing sequence, 20-29 fps and send_fail 0
+                     while every CSI datagram it sends is dropped at the sink.
+                     Rows 112/113/114/121 were misread exactly this way while
+                     nodes 0/3/7 were dark.
+
+  Counter semantics worth knowing before reading a number:
+    - csi_fps_samples counts inter-arrival deltas that pass the sink's EMA
+      plausibility gate, so it can read slightly under the raw arrival rate.
+      It also counts frames the grid gate later rejects: it measures arrival,
+      not acceptance into sensing.
+    - It resets to 0 when the sink restarts. A decrease is treated as a reset
+      and the node is re-baselined, not reported as a negative rate.
+    - Hiding the tab pauses polling. On return the baselines are discarded, so
+      a rate never averages over a gap nobody was watching.
+
+  Other traps this page is built around:
+    - AP-link RSSI comes from the link rows whose transmitter is the AP
+      (tx_position_source "ap" in /api/v1/links/inventory). /api/v1/nodes
+      rssi_dbm is NOT the AP link and is never shown.
+    - Links are only counted or compared inside one window-span bucket
+      (<= 30 s live, <= 5 min, older); spans run from ~1 s to ~1 h.
+    - A rate within WARMUP_S of a node reboot or sink restart is tagged
+      warm-up: it is not steady state.
+
+  Firmware version and node uptime are NOT shown: the sink does not expose
+  them. The only firmware path, /api/v1/nodes/:id/firmware, proxies a live
+  request to the node itself, which this page deliberately never does.
+  Restarts are inferred from node counters going backwards.
+-->
+<style>
+  :root{
+    --bg:#0d1117; --fg:#e6edf3; --dim:#8b949e; --line:#30363d; --card:#161b22;
+    --ok:#2ea043; --warn:#d29922; --bad:#f85149; --info:#388bfd; --self:#21262d;
+    --grid:#21262d;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; padding:18px; background:var(--bg); color:var(--fg);
+       font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
+  h1{font-size:16px; margin:0 0 3px;}
+  h2{font-size:12px; margin:0 0 10px; color:var(--dim); letter-spacing:.06em;
+     text-transform:uppercase; font-weight:600;}
+  h2 .tag{margin-left:6px;}
+  .sub{color:var(--dim); font-size:12px; margin-bottom:14px;}
+  .card{border:1px solid var(--line); border-radius:9px; padding:14px;
+        margin-bottom:14px; background:var(--card);}
+  .cards{display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:14px;
+         margin-bottom:14px;}
+  .cards .card{margin-bottom:0;}
+  .scroll{overflow-x:auto;}
+  .row{display:flex; gap:9px; align-items:center; flex-wrap:wrap; margin-bottom:12px;}
+  button,select{font:inherit; padding:6px 12px; border-radius:6px; cursor:pointer;
+         border:1px solid var(--line); background:#21262d; color:var(--fg);}
+  button[aria-pressed="true"]{border-color:var(--info); color:var(--info);}
+  label{color:var(--dim);}
+  .err{color:var(--bad);}
+  code{font-size:11.5px;}
+
+  .strip{display:flex; gap:12px; flex-wrap:wrap;}
+  .tile{border:1px solid var(--line); border-radius:7px; padding:8px 12px;
+        background:var(--bg); min-width:130px;}
+  .tile .k{color:var(--dim); font-size:10.5px; letter-spacing:.06em;
+           text-transform:uppercase;}
+  .tile .v{font-size:20px; font-weight:700;}
+  .tile .m{color:var(--dim); font-size:11px;}
+
+  table{border-collapse:collapse; font-variant-numeric:tabular-nums; width:100%;}
+  th,td{padding:6px 8px; border-bottom:1px solid rgba(48,54,61,.6);
+        white-space:nowrap; text-align:right; vertical-align:top;}
+  th{color:var(--dim); font-weight:600; font-size:10.5px; letter-spacing:.05em;
+     text-transform:uppercase; border-bottom:1px solid var(--line);}
+  th.grp{text-align:center; border-bottom:1px solid var(--line); font-size:10px;}
+  th.grp.sink{color:var(--info);}
+  th.grp.node{color:var(--warn);}
+  td.l,th.l{text-align:left;}
+  td.sep,th.sep{border-left:1px solid var(--line);}
+  td .m{display:block; font-size:10.5px; color:var(--dim); font-weight:400;}
+  td .big{font-weight:700; font-size:14px;}
+  .cards .card{min-width:0; overflow-x:auto;}
+  .cards td{white-space:normal;}
+  table.kv td{padding:3px 6px; text-align:left;}
+  table.kv td:first-child{color:var(--dim); white-space:nowrap; width:1%;}
+
+  .badge{display:inline-block; min-width:62px; text-align:center; padding:1px 7px;
+         border-radius:4px; font-weight:700; font-size:11.5px;}
+  .b-green{background:rgba(46,160,67,.18); color:var(--ok); border:1px solid var(--ok);}
+  .b-amber{background:rgba(210,153,34,.16); color:var(--warn); border:1px solid var(--warn);}
+  .b-red{background:rgba(248,81,73,.18); color:var(--bad); border:1px solid var(--bad);}
+  .b-grey{background:var(--self); color:var(--dim); border:1px solid var(--line);}
+  .tag{display:inline-block; padding:0 5px; border-radius:3px; font-size:10px;
+       font-weight:700; letter-spacing:.04em; border:1px solid var(--line); color:var(--dim);}
+  .tag.meas{color:var(--info); border-color:var(--info);}
+  .tag.node{color:var(--warn); border-color:var(--warn);}
+  tr.red td{background:rgba(248,81,73,.07);}
+  .ok{color:var(--ok);} .warn{color:var(--warn);} .bad{color:var(--bad);} .dim{color:var(--dim);}
+  .why{color:var(--dim); font-size:11px; white-space:normal; min-width:180px; text-align:left;}
+
+  /* trends */
+  .charts{display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:12px;}
+  .chart{border:1px solid var(--line); border-radius:7px; padding:8px 10px; background:var(--bg);}
+  .chart .k{color:var(--dim); font-size:10.5px; letter-spacing:.06em; text-transform:uppercase;}
+  .chart .now{font-size:16px; font-weight:700;}
+  .chart .ax{display:flex; justify-content:space-between; color:var(--dim); font-size:10px;
+             font-variant-numeric:tabular-nums;}
+  .plot{position:relative;}
+  .plot svg{display:block; width:100%; overflow:visible;}
+  svg .gl{stroke:var(--grid); stroke-width:1; vector-effect:non-scaling-stroke;}
+  svg .ln{fill:none; stroke:var(--info); stroke-width:2; stroke-linejoin:round;
+          stroke-linecap:round; vector-effect:non-scaling-stroke;}
+  svg .rb{stroke:var(--warn); stroke-width:1.5; vector-effect:non-scaling-stroke;}
+  svg .xh{stroke:var(--dim); stroke-width:1; vector-effect:non-scaling-stroke; visibility:hidden;}
+  td.spark{min-width:120px; width:16%; padding:4px 8px;}
+  td.spark .plot svg{height:26px;}
+  .tip{position:absolute; top:-6px; transform:translate(-50%,-100%); pointer-events:none;
+       background:#010409; border:1px solid var(--line); border-radius:5px; padding:3px 7px;
+       font-size:11px; white-space:nowrap; color:var(--fg); visibility:hidden; z-index:5;}
+  .plot:focus{outline:1px solid var(--info); outline-offset:2px;}
+
+  .rules{font-size:12px; color:var(--dim); margin:0; padding-left:18px;}
+  .rules li{margin:2px 0;}
+  .rules b{color:var(--fg);}
+  footer{color:var(--dim); font-size:11.5px; margin-top:6px; max-width:110ch;}
+</style>
+</head>
+<body>
+
+<h1>Fleet KPIs</h1>
+<div class="sub">Per node: is the sink receiving its CSI, and is the node healthy by its own account.
+  <span class="tag meas">MEASURED</span> = the sink observed it;
+  <span class="tag node">NODE-REPORTED</span> = the node's own claim in its sync packet.
+  Nothing here is a sensing-accuracy figure.</div>
+
+<div class="row">
+  <button id="refresh">Refresh</button>
+  <label><input type="checkbox" id="auto" checked> auto every</label>
+  <select id="interval" aria-label="poll interval">
+    <option value="60000" selected>1 min</option>
+    <option value="120000">2 min</option>
+    <option value="300000">5 min</option>
+  </select>
+  <span id="stamp" class="sub" style="margin:0"></span>
+</div>
+
+<div class="card">
+  <div class="strip" id="strip"></div>
+</div>
+
+<div class="card">
+  <div class="scroll"><table id="kpi"></table></div>
+</div>
+
+<div class="cards">
+  <div class="card"><h2>Link table <span class="tag meas">MEASURED</span></h2><div id="linkcard"></div></div>
+  <div class="card"><h2>Datagrams the sink did not parse <span class="tag meas">MEASURED</span></h2><div id="dropcard"></div></div>
+  <div class="card"><h2>Node restarts</h2><div id="restartcard"></div></div>
+  <div class="card"><h2>Sink host and trust <span class="tag meas">MEASURED</span></h2><div id="sinkcard"></div></div>
+</div>
+
+<div class="card">
+  <h2>Trends (server-side history)</h2>
+  <div class="row" id="rangeRow" role="group" aria-label="history range">
+    <button data-min="60">1 h</button>
+    <button data-min="360">6 h</button>
+    <button data-min="1440" aria-pressed="true">24 h</button>
+    <span id="histStamp" class="sub" style="margin:0"></span>
+  </div>
+  <div id="trends"></div>
+</div>
+
+<div class="card">
+  <ul class="rules" id="rules"></ul>
+</div>
+
+<footer>
+  <b>Sink-measured</b> (blue header): delivered fps, share, EMA, last CSI, links, AP link, sync packet age &mdash;
+  the sink observed these itself. <b>Node-reported</b> (amber header): sync flags, offset, temperature,
+  heap, tx power, tx/edge counters, reset reason &mdash; the node's own claims, carried in its sync packet;
+  they prove nothing about whether its CSI reaches the sink.
+</footer>
+
+<script>
+// ---- thresholds (rendered into the rules card, so page and logic cannot drift) ----
+var DARK_AFTER_S     = 10;    // red: csi_fps_samples has not advanced for longer than this
+var LOW_FPS          = 10;    // amber: delivered fps below this
+var SYNC_STALE_MS    = 9000;  // amber: sync packet older than the sink's own 9 s mesh-time gate
+var LIVE_LINK_SPAN_S = 30;    // a link counts as live if its 64-frame window spans <= this
+var MID_LINK_SPAN_S  = 300;   // second span bucket; older windows are a third bucket
+var WEAK_AP_DBM      = -75;   // amber: AP link weaker than this
+var WARMUP_S         = 600;   // rates within this long of a (re)start are tagged warm-up
+var MIN_POLL_MS      = 60000; // at most one poll a minute
+var REBASELINE_AFTER_HIDDEN_MS = 300000; // hidden longer than this: rates re-baseline
+var FOLLOWUP_MS      = 3000;  // one extra poll after load or tab re-show, for a first rate
+                               // (was 15 s: every re-shown tab sat blank that long)
+// Magic numbers that carry CSI. Seeing one in the sink's unparsed counter
+// means CSI is being dropped (e.g. batched frames sent to a sink with no batch parser).
+var CSI_MAGICS = {'0xC5110001':'CSI v1', '0xC5110008':'CSI v2', '0xC511000A':'CSI v3', '0xC511000B':'CSI batch'};
+// Names from firmware/esp32-csi-node/main/{edge_processing,rv_feature_state,rv_mesh}.h.
+var OTHER_MAGICS = {'0xC5110003':'feature vector (ADR-069)', '0xC5110005':'compressed CSI (ADR-039)',
+                    '0xC5110006':'feature state (ADR-081)', '0xC5118100':'rv_mesh'};
+
+// Expected fleet ids 0..N-1. ?nodes=N overrides; ids the sink reports beyond
+// that are still shown.
+var EXPECTED = (function(){
+  var m = /[?&]nodes=(\d{1,2})/.exec(location.search);
+  var n = m ? parseInt(m[1], 10) : 9;
+  var ids = [];
+  for (var i = 0; i < n; i++) ids.push(i);
+  return ids;
+})();
+// ?ap=aa:bb:cc:dd:ee:ff pins the AP; otherwise the "ap"-positioned
+// transmitter heard by the most nodes is taken as the AP the fleet uses.
+var AP_PIN = (function(){
+  var m = /[?&]ap=([0-9a-fA-F:]{17})/.exec(location.search);
+  return m ? m[1].toLowerCase() : null;
+})();
+
+// Per-node memory across polls. Keyed by node id.
+//   samples, t        previous csi_fps_samples and its receive time (ms)
+//   lastAdvance       time the sample count was last seen to increase
+//   offset, offsetT   previous offset_us and its time, for drift
+//   sendFail, earlyDrop, rejected   previous node counters, for deltas
+//   seq, processed    previous node sequence / frames_processed, for reboots
+//   startedAt         when a (re)start was last seen, for warm-up
+var mem = {};
+// Survives tab hide/show (only rate baselines are discarded):
+var restarts = [];            // {t, id, kind, reason} seen since this page opened
+var sinkRestartAt = null;     // last time the sink's sample counters all reset
+var dropMem = null;           // {t, byMagic:{hex:count}} for unparsed rates
+var histMinutes = 1440, lastHist = null;
+
+function num(v){ return (typeof v === 'number' && isFinite(v)) ? v : null; }
+function get(o, path){
+  for (var i = 0; i < path.length; i++) {
+    if (o === null || o === undefined || typeof o !== 'object') return null;
+    o = o[path[i]];
+  }
+  return o === undefined ? null : o;
+}
+function esc(s){
+  return String(s).replace(/[&<>"']/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
+function fmt(v, d){ v = num(v); return v === null ? '&mdash;' : v.toFixed(d || 0); }
+function ago(ms){
+  ms = num(ms);
+  if (ms === null) return '&mdash;';
+  if (ms >= 999999) return 'never';
+  if (ms < 1000) return ms.toFixed(0) + ' ms';
+  if (ms < 120000) return (ms / 1000).toFixed(1) + ' s';
+  if (ms < 7200000) return (ms / 60000).toFixed(1) + ' min';
+  return (ms / 3600000).toFixed(1) + ' h';
+}
+function hhmm(t){ return new Date(t).toTimeString().slice(0, 5); }
+function delta(prev, cur){
+  // Monotonic node counter: a decrease means the node rebooted.
+  if (num(prev) === null || num(cur) === null) return null;
+  return cur >= prev ? cur - prev : null;
+}
+function wentBack(prev, cur){ return num(prev) !== null && num(cur) !== null && cur < prev; }
+function deltaTxt(d){
+  if (d === null) return '';
+  return d > 0 ? '<span class="warn">+' + d + '</span>' : '<span class="dim">+0</span>';
+}
+
+function fetchJSON(p){
+  return fetch(p, {cache:'no-store'}).then(function(r){
+    if (!r.ok) { var e = new Error(p + ' HTTP ' + r.status); e.status = r.status; throw e; }
+    return r.json();
+  });
+}
+function soft(p){
+  // One endpoint failing must not blank the page; the caller shows which failed.
+  return fetchJSON(p).then(function(j){ return {ok:true, j:j}; },
+                           function(e){ return {ok:false, status:e && e.status, e:String(e && e.message || e)}; });
+}
+
+// ---- AP link: pick the AP, then its link row per receiving node ----
+function apLinks(inv, links){
+  var rows = (inv && inv.links) || [];
+  var heard = {};
+  rows.forEach(function(l){
+    if (l && l.tx_position_source === 'ap' && l.tx_mac) heard[l.tx_mac] = (heard[l.tx_mac] || 0) + 1;
+  });
+  var mac = AP_PIN;
+  if (!mac) {
+    var best = 0;
+    Object.keys(heard).forEach(function(k){ if (heard[k] > best) { best = heard[k]; mac = k; } });
+  }
+  var out = {mac:mac, candidates:Object.keys(heard).length, by:{}};
+  if (!mac) return out;
+  rows.forEach(function(l){
+    if (l.tx_mac !== mac || num(l.rx_node) === null) return;
+    out.by[l.rx_node] = {rssi:num(l.rssi_dbm), fps:num(l.fps), span:num(l.window_span_s),
+                         stale:num(l.stale_after_s), reason:l.reason};
+  });
+  (links || []).forEach(function(l){
+    if (l.tx_mac !== mac || num(l.rx_node) === null) return;
+    var o = out.by[l.rx_node] || (out.by[l.rx_node] = {});
+    o.snr = num(l.snr_db); o.nf = num(l.noise_floor_dbm);
+    if (o.rssi === undefined || o.rssi === null) o.rssi = num(l.rssi_dbm);
+  });
+  return out;
+}
+
+function assess(id, sync, node, links, ap, now){
+  var m = mem[id] || (mem[id] = {});
+  var r = {id:id, sync:sync, node:node, links:links, ap:ap, why:[], level:'grey',
+           fps:null, flatS:null, reset:false, warm:false};
+
+  // ---- delivered fps: the one number that proves sink-side arrival ----
+  var s = sync ? num(sync.csi_fps_samples) : null;
+  if (s !== null) {
+    if (m.samples !== undefined && m.samples !== null && s < m.samples) {
+      r.reset = true;               // sink restarted: re-baseline
+      m.lastAdvance = now;
+      m.samples = s; m.t = now; m.fps = null;
+    } else if (m.samples !== undefined && m.samples !== null) {
+      if (s > m.samples) m.lastAdvance = now;
+      var dt = (now - m.t) / 1000;
+      // A manual Refresh right after a poll would divide by a sub-second
+      // interval; keep the old baseline and rate until 2 s have passed.
+      if (dt >= 2) { m.fps = (s - m.samples) / dt; m.samples = s; m.t = now; }
+      r.fps = num(m.fps);
+    } else {
+      m.samples = s; m.t = now; m.fps = null;
+    }
+    if (m.lastAdvance === undefined) m.lastAdvance = now;
+    r.flatS = (now - m.lastAdvance) / 1000;
+  }
+
+  // ---- node reboot: its own sequence or processed-frame counter went back ----
+  var seq = sync ? num(sync.sequence) : null;
+  var proc = num(get(sync, ['health','edge','frames_processed']));
+  if (wentBack(m.seq, seq) || wentBack(m.processed, proc)) {
+    r.rebooted = true;
+    m.startedAt = now;
+    restarts.push({t:now, id:id, kind:'node', reason:sync && sync.reset_reason});
+  }
+  if (seq !== null) m.seq = seq;
+  if (proc !== null) m.processed = proc;
+  var since = Math.max(m.startedAt || 0, sinkRestartAt || 0);
+  r.warm = since > 0 && (now - since) < WARMUP_S * 1000;
+
+  // ---- offset drift between polls (node-reported offset, differenced here) ----
+  var off = sync ? num(sync.offset_us) : null;
+  r.driftUsPerS = null;
+  if (off !== null && m.offset !== undefined && m.offset !== null && now > m.offsetT) {
+    r.driftUsPerS = (off - m.offset) / ((now - m.offsetT) / 1000);
+  }
+  if (off !== null) { m.offset = off; m.offsetT = now; }
+
+  // ---- node counters since last poll ----
+  var sf = num(get(sync, ['health','tx','send_fail']));
+  var ed = num(get(sync, ['health','tx','early_drop']));
+  var rj = num(get(sync, ['health','edge','frames_rejected']));
+  r.dSendFail = delta(m.sendFail, sf); r.dEarlyDrop = delta(m.earlyDrop, ed);
+  r.dRejected = delta(m.rejected, rj);
+  m.sendFail = sf; m.earlyDrop = ed; m.rejected = rj;
+
+  // ---- classification ----
+  var red = [], amber = [];
+  var csiAge = node ? num(node.csi_last_seen_ms) : null;
+  // Until this browser has a delta, the sink's EMA stands in for the rate so
+  // the state is judged rather than left grey. 20.0 is the no-data fallback.
+  var provisional = sync ? num(sync.csi_fps_ema) : null;
+  if (provisional === 20) provisional = null;
+  if (!sync && !node) {
+    red.push('not known to the sink');
+  } else if (s === null) {
+    // No sync packet, so no sample counter. Fall back to the sink's own
+    // last-accepted-CSI age; the rate is unknown.
+    if (csiAge === null || csiAge > DARK_AFTER_S * 1000) red.push('DARK: no CSI accepted for > ' + DARK_AFTER_S + ' s');
+    else amber.push('no sync packet: delivery rate unknown');
+  } else if (r.reset) {
+    amber.push('sample counter went backwards (sink restart?), re-baselined');
+  } else if (r.flatS > DARK_AFTER_S) {
+    red.push('DARK: samples flat for ' + r.flatS.toFixed(0) + ' s');
+  } else if (r.fps !== null && r.fps < LOW_FPS) {
+    amber.push('delivering ' + r.fps.toFixed(1) + ' fps (< ' + LOW_FPS + ')');
+  } else if (r.fps === null && !r.reset && provisional !== null && provisional < LOW_FPS) {
+    amber.push('sink EMA ' + provisional.toFixed(1) + ' fps (< ' + LOW_FPS + '), not yet measured here');
+  }
+  if (r.rebooted) amber.push('node rebooted since the last poll');
+  if (sync) {
+    if (sync.is_valid === false) amber.push('is_valid false: no fresh root time (fw v2: 30 beacon periods; v1: 3 s)');
+    var st = num(sync.staleness_ms);
+    if (st !== null && st > SYNC_STALE_MS) amber.push('sync packet ' + ago(st) + ' old');
+    if (r.dSendFail) amber.push('send_fail +' + r.dSendFail + ' since last poll');
+    if (sync.rebooted_badly === true) amber.push('last reset: ' + (sync.reset_reason || 'abnormal'));
+    var th = num(get(sync, ['health','thermal_state']));
+    if (th !== null && th >= 2) amber.push('thermal state ' + (th === 3 ? 'critical' : 'throttled'));
+  }
+  if (ap && ap.rssi !== null && ap.rssi !== undefined && ap.rssi < WEAK_AP_DBM)
+    amber.push('AP link ' + ap.rssi.toFixed(0) + ' dBm (< ' + WEAK_AP_DBM + ')');
+
+  r.why = red.concat(amber);
+  if (red.length) r.level = 'red';
+  else if (s !== null && r.fps === null && !r.reset && provisional === null) r.level = amber.length ? 'amber' : 'grey';
+  else r.level = amber.length ? 'amber' : 'green';
+  if (r.level === 'grey' && !r.why.length) r.why = ['measuring: needs two polls'];
+  if (r.fps === null && provisional !== null && r.level !== 'red')
+    r.why.push('rate: sink EMA until the next poll measures it');
+  return r;
+}
+
+function badge(r){
+  var t = {green:'GREEN', amber:'AMBER', red:'DARK', grey:'&hellip;'}[r.level];
+  if (r.level === 'red' && r.why[0] && r.why[0].indexOf('DARK') !== 0) t = 'RED';
+  return '<span class="badge b-' + r.level + '">' + t + '</span>';
+}
+function tile(k, v, m, cls){
+  return '<div class="tile"><div class="k">' + k + '</div><div class="v ' + (cls || '') + '">' +
+         v + '</div><div class="m">' + (m || '&nbsp;') + '</div></div>';
+}
+function kv(pairs){
+  return '<table class="kv">' + pairs.map(function(p){
+    return '<tr><td>' + p[0] + '</td><td>' + p[1] + '</td></tr>';
+  }).join('') + '</table>';
+}
+
+function render(res, now){
+  var errs = [];
+  var names = ['mesh', 'nodes', 'links', 'inventory', 'status', 'metrics'];
+  for (var i = 0; i < names.length; i++) if (!res[i].ok) errs.push(names[i] + ': ' + res[i].e);
+  var meshJ = res[0].ok ? res[0].j : null;
+  var mesh  = meshJ ? (meshJ.nodes || {}) : null;
+  var nodes = res[1].ok ? (res[1].j.nodes || []) : null;
+  var links = res[2].ok ? (res[2].j.links || []) : null;
+  var inv   = res[3].ok ? res[3].j : null;
+  var ap = apLinks(inv, links);
+
+  var byNode = {};
+  (nodes || []).forEach(function(n){ if (n && num(n.node_id) !== null) byNode[n.node_id] = n; });
+  var linkStat = {};
+  (links || []).forEach(function(l){
+    var id = num(l && l.rx_node); if (id === null) return;
+    var s = linkStat[id] || (linkStat[id] = {n:0, live:0});
+    s.n++;
+    var span = num(l.window_span_s);
+    if (span !== null && span <= LIVE_LINK_SPAN_S) s.live++;
+  });
+
+  var ids = {};
+  EXPECTED.forEach(function(i){ ids[i] = true; });
+  Object.keys(mesh || {}).forEach(function(k){ if (/^\d+$/.test(k)) ids[+k] = true; });
+  Object.keys(byNode).forEach(function(k){ ids[+k] = true; });
+  var list = Object.keys(ids).map(Number).sort(function(a,b){ return a - b; });
+
+  // Sink restart: every node's sample counter went backwards at once.
+  var backs = 0, withCounter = 0;
+  list.forEach(function(id){
+    var s = mesh && mesh[id] ? num(mesh[id].csi_fps_samples) : null;
+    if (s === null || !mem[id] || num(mem[id].samples) === null) return;
+    withCounter++;
+    if (s < mem[id].samples) backs++;
+  });
+  if (withCounter && backs === withCounter) {
+    sinkRestartAt = now;
+    restarts.push({t:now, id:null, kind:'sink', reason:'all sample counters reset'});
+  }
+
+  var rows = list.map(function(id){
+    return assess(id, mesh ? (mesh[id] || null) : null, byNode[id] || null,
+                  links ? (linkStat[id] || {n:0, live:0}) : null,
+                  inv ? (ap.by[id] || {rssi:null}) : null, now);
+  });
+
+  // ---- header strip ----
+  var delivering = rows.filter(function(r){ return r.level === 'green' || r.level === 'amber'; })
+                       .filter(function(r){ return r.fps !== null && r.fps > 0; }).length;
+  var total = 0, haveRate = 0, anyWarm = false;
+  rows.forEach(function(r){ if (r.fps !== null) { total += r.fps; haveRate++; if (r.warm) anyWarm = true; } });
+  // Fallback for the tile while this browser has no delta yet: the sink's EMAs.
+  var emaTotal = 0, emaN = 0;
+  rows.forEach(function(r){ var e = r.sync ? num(r.sync.csi_fps_ema) : null; if (e !== null && e !== 20) { emaTotal += e; emaN++; } });
+  var dark = rows.filter(function(r){ return r.level === 'red'; }).map(function(r){ return 'n' + r.id; });
+  var leaders = rows.filter(function(r){ return r.sync && r.sync.is_leader === true; })
+                    .map(function(r){ return 'n' + r.id; });
+  var valid = rows.filter(function(r){ return r.sync && r.sync.is_valid === true; }).length;
+  var frozen = rows.filter(function(r){
+    return r.sync && r.sync.is_leader !== true && r.driftUsPerS !== null && Math.abs(r.driftUsPerS) < 0.05;
+  }).map(function(r){ return 'n' + r.id; });
+  var nLinks = 0, nLive = 0;
+  Object.keys(linkStat).forEach(function(k){ nLinks += linkStat[k].n; nLive += linkStat[k].live; });
+  var fleet = list.length;
+  var apVals = rows.map(function(r){ return r.ap ? r.ap.rssi : null; }).filter(function(v){ return num(v) !== null; });
+  var apWeak = rows.filter(function(r){ return r.ap && num(r.ap.rssi) !== null && r.ap.rssi < WEAK_AP_DBM; })
+                   .map(function(r){ return 'n' + r.id; });
+
+  document.getElementById('strip').innerHTML =
+    tile('delivering (sink)', haveRate ? delivering + ' / ' + fleet : '&hellip;',
+         dark.length ? 'red: ' + dark.join(' ') : (haveRate ? 'none red' : 'measuring'),
+         !haveRate ? 'dim' : (delivering === fleet ? 'ok' : (dark.length ? 'bad' : 'warn'))) +
+    tile('delivered fps (sink)', haveRate ? total.toFixed(1) : (emaN ? '&asymp;' + emaTotal.toFixed(1) : '&hellip;'),
+         haveRate ? 'sum of ' + haveRate + ' node(s)' + (anyWarm ? ' &middot; <span class="warn">incl. warm-up</span>' : '')
+                  : (emaN ? 'sink EMA of ' + emaN + ' node(s); measured delta needs two polls' : 'needs two polls')) +
+    tile('AP link (sink)', apVals.length ? Math.min.apply(null, apVals).toFixed(0) + ' &hellip; ' +
+                                          Math.max.apply(null, apVals).toFixed(0) : '&mdash;',
+         ap.mac ? 'dBm, ' + apVals.length + ' node(s) hear ' + esc(ap.mac.slice(-8)) +
+                  (apWeak.length ? ' &middot; <span class="warn">weak: ' + apWeak.join(' ') + '</span>' : '')
+                : 'no AP-positioned transmitter',
+         apWeak.length ? 'warn' : '') +
+    tile('sync valid (node)', mesh ? valid + ' / ' + fleet : '&mdash;',
+         frozen.length ? '<span class="warn">frozen offset: ' + frozen.join(' ') + '</span>' : 'fresh root time',
+         mesh ? (valid === fleet ? 'ok' : 'warn') : 'dim') +
+    tile('leaders (node)', mesh ? String(leaders.length) : '&mdash;',
+         leaders.length ? leaders.join(' ') + (leaders.length > 1 ? ' &mdash; expected 1' : '') : 'none reported',
+         leaders.length === 1 ? 'ok' : 'warn') +
+    tile('links (sink)', links ? nLinks : '&mdash;', links ? nLive + ' live (span &le; ' + LIVE_LINK_SPAN_S + ' s)' : '');
+
+  // ---- table ----
+  var h = '<thead><tr>' +
+    '<th class="l" colspan="2"></th>' +
+    '<th class="grp sink sep" colspan="7">sink-measured</th>' +
+    '<th class="grp node sep" colspan="8">node-reported (sync packet)</th>' +
+    '<th class="l sep"></th></tr><tr>' +
+    '<th class="l">node</th><th class="l">state</th>' +
+    '<th class="sep">delivered fps</th><th>share</th><th>ema</th><th>last CSI</th><th>links rx</th>' +
+    '<th>AP link</th><th>sync age</th>' +
+    '<th class="sep">sync</th><th>offset drift</th><th>die &deg;C</th><th>min heap</th><th>tx dBm</th>' +
+    '<th>send_fail</th><th>early_drop</th><th>edge rej</th>' +
+    '<th class="l sep">why / last reset</th></tr></thead><tbody>';
+
+  rows.forEach(function(r){
+    var s = r.sync, n = r.node;
+    // delivered fps
+    var d;
+    if (r.fps !== null) {
+      var cls = r.level === 'red' ? 'bad' : (r.fps < LOW_FPS ? 'warn' : 'ok');
+      d = '<span class="big ' + cls + '">' + r.fps.toFixed(1) + '</span>';
+    } else {
+      // Until this browser has two polls, show the sink's own EMA, marked as
+      // such, rather than a blank: a tab that keeps losing its baseline
+      // (hidden/shown) otherwise never shows a rate at all.
+      var e0 = s ? num(s.csi_fps_ema) : null;
+      d = (e0 !== null && e0 !== 20)
+        ? '<span class="big dim" title="sink EMA; the measured delta needs two polls">&asymp;' + e0.toFixed(1) + '</span>'
+        : '<span class="dim">&hellip;</span>';
+    }
+    var samples = s ? num(s.csi_fps_samples) : null;
+    d += '<span class="m">' + (r.warm ? '<span class="warn">warm-up</span> &middot; ' : '') +
+         (samples === null ? 'no counter' : samples + ' samples') +
+         (r.flatS !== null && r.flatS > 0.5 && r.fps !== null && r.fps === 0
+            ? ' &middot; flat ' + r.flatS.toFixed(0) + ' s' : '') + '</span>';
+    // share of fleet delivered fps (fleet-wide drift is common-mode; a node's share is not)
+    var share = (r.fps !== null && total > 0) ? (100 * r.fps / total).toFixed(1) + '%' : '<span class="dim">&hellip;</span>';
+    // ema (secondary): exactly 20.0 or null is the no-data fallback
+    var ema = s ? num(s.csi_fps_ema) : null;
+    var emaTxt = (ema === null || ema === 20)
+      ? '<span class="dim">no data</span>' : ema.toFixed(1);
+    // last CSI accepted / last packet of any kind
+    var csiAge = n ? n.csi_last_seen_ms : null;
+    var lastC = n ? ago(csiAge) : '&mdash;';
+    if (num(csiAge) !== null && csiAge > DARK_AFTER_S * 1000) lastC = '<span class="bad">' + lastC + '</span>';
+    if (num(csiAge) === null && n) lastC = '<span class="bad">never</span>';
+    lastC += '<span class="m">any pkt ' + (n ? ago(n.last_seen_ms) : '&mdash;') + '</span>';
+    // links
+    var lk = r.links ? r.links.n + '<span class="m">' + r.links.live + ' live</span>' : '&mdash;';
+    if (r.links && r.links.n === 0) lk = '<span class="bad">0</span><span class="m">0 live</span>';
+    // AP link: rssi of the AP's frames at this node (NOT /api/v1/nodes rssi_dbm)
+    var apc = '&mdash;';
+    if (r.ap) {
+      if (num(r.ap.rssi) === null) apc = '<span class="warn">not heard</span>';
+      else {
+        apc = (r.ap.rssi < WEAK_AP_DBM ? '<span class="warn">' : '<span>') + r.ap.rssi.toFixed(0) + '</span>' +
+              '<span class="m">' + (num(r.ap.snr) !== null ? 'snr ' + r.ap.snr.toFixed(0) + ' dB' : 'snr &mdash;') +
+              (num(r.ap.span) !== null && r.ap.span > LIVE_LINK_SPAN_S ? ' &middot; <span class="warn">span ' + ago(r.ap.span * 1000) + '</span>' : '') +
+              '</span>';
+      }
+    }
+    // sync age
+    var st = s ? num(s.staleness_ms) : null;
+    var sa = s ? ago(st) : '<span class="warn">no sync</span>';
+    if (st !== null && st > SYNC_STALE_MS) sa = '<span class="warn">' + sa + '</span>';
+    // sync flags
+    var sy = '&mdash;';
+    if (s) {
+      sy = (s.is_valid === true ? '<span class="ok">valid</span>'
+           : s.is_valid === false ? '<span class="warn">invalid</span>' : '<span class="dim">?</span>') +
+           '<span class="m">' + (s.is_leader === true ? 'leader'
+             : 'follower' + (typeof s.mesh_hops === 'number'
+                 ? ' &middot; ' + s.mesh_hops + (s.mesh_hops >= 7 ? '+' : '') + ' hop' + (s.mesh_hops === 1 ? '' : 's') : '')) +
+           (s.smoothed === false && s.is_leader !== true ? ' &middot; unsmoothed' : '') + '</span>';
+    }
+    var off = s ? num(s.offset_us) : null;
+    var dr = r.driftUsPerS === null ? '<span class="dim">&hellip;</span>'
+           : (r.driftUsPerS >= 0 ? '+' : '') + r.driftUsPerS.toFixed(1) + ' &micro;s/s';
+    if (s && s.is_leader !== true && r.driftUsPerS !== null && Math.abs(r.driftUsPerS) < 0.05)
+      dr = '<span class="warn">' + dr + '</span>';
+    dr += '<span class="m">off ' + (off === null ? '&mdash;' : (off / 1e6).toFixed(3) + ' s') + '</span>';
+    // node health
+    var h0 = s ? s.health : null;
+    var die = num(get(h0, ['die_c'])), therm = num(get(h0, ['thermal_state']));
+    var dieTxt = fmt(die) + '<span class="m">' +
+      (therm === null ? '' : ['ok','warn','throttled','critical'][therm] || ('state ' + therm)) + '</span>';
+    if (therm !== null && therm >= 2) dieTxt = '<span class="warn">' + dieTxt + '</span>';
+    var heap = num(get(h0, ['min_heap_kib']));
+    var heapTxt = heap === null ? '&mdash;' : heap + ' KiB';
+    var txd = fmt(get(h0, ['tx_dbm']));
+    function ctr(path, dd){
+      var v = num(get(h0, path));
+      return v === null ? '&mdash;' : v + '<span class="m">' + deltaTxt(dd) + '</span>';
+    }
+    var why = r.why.map(esc).join('; ');
+    if (s && s.reset_reason) why += (why ? '<br>' : '') + '<span class="dim">last reset: ' + esc(s.reset_reason) +
+      (s.rebooted_badly === true ? ' <span class="warn">(abnormal)</span>' : '') + '</span>';
+    var ip = n && n.ip ? '<span class="m">' + esc(n.ip) + '</span>' : '';
+
+    h += '<tr class="' + (r.level === 'red' ? 'red' : '') + '">' +
+      '<td class="l"><b>node ' + r.id + '</b>' + ip + '</td>' +
+      '<td class="l">' + badge(r) + '</td>' +
+      '<td class="sep">' + d + '</td><td>' + share + '</td><td>' + emaTxt + '</td><td>' + lastC + '</td>' +
+      '<td>' + lk + '</td><td>' + apc + '</td><td>' + sa + '</td>' +
+      '<td class="sep">' + sy + '</td><td>' + dr + '</td><td>' + dieTxt + '</td><td>' + heapTxt + '</td>' +
+      '<td>' + txd + '</td>' +
+      '<td>' + ctr(['tx','send_fail'], r.dSendFail) + '</td>' +
+      '<td>' + ctr(['tx','early_drop'], r.dEarlyDrop) + '</td>' +
+      '<td>' + ctr(['edge','frames_rejected'], r.dRejected) + '</td>' +
+      '<td class="why sep">' + (why || '<span class="ok">ok</span>') + '</td></tr>';
+  });
+  document.getElementById('kpi').innerHTML = h + '</tbody>';
+
+  renderLinkCard(inv, links);
+  renderDropCard(meshJ, res[0].ok, now);
+  renderRestartCard(rows);
+  renderSinkCard(res[4].ok ? res[4].j : null, res[5].ok ? res[5].j : null);
+
+  document.getElementById('stamp').innerHTML = errs.length
+    ? '<span class="err">' + esc(errs.join(' | ')) + '</span>'
+    : 'updated ' + new Date().toTimeString().slice(0, 8);
+}
+
+// ---- link table: counts only inside one span bucket, never across ----
+function renderLinkCard(inv, links){
+  var el = document.getElementById('linkcard');
+  if (!inv) { el.innerHTML = '<span class="dim">/api/v1/links/inventory unavailable</span>'; return; }
+  var b = {live:0, mid:0, old:0, none:0};
+  (inv.links || []).forEach(function(l){
+    var s = num(l.window_span_s);
+    if (s === null) b.none++;
+    else if (s <= LIVE_LINK_SPAN_S) b.live++;
+    else if (s <= MID_LINK_SPAN_S) b.mid++;
+    else b.old++;
+  });
+  var hidden = inv.hidden_by_reason || {};
+  var hid = Object.keys(hidden).filter(function(k){ return k !== 'ok'; })
+                  .map(function(k){ return esc(k) + ' ' + hidden[k]; }).join(', ') || 'none';
+  var pos = inv.positioned_by_source || {};
+  var cap = num(inv.max_links), tot = num(inv.links_total);
+  el.innerHTML = kv([
+    ['links held', fmt(tot) + (cap ? ' <span class="dim">of ' + cap + ' (headroom ' + fmt(inv.headroom) + ')</span>' : '')],
+    ['shown on /links', fmt(inv.links_visible) + ' <span class="dim">&middot; hidden: ' + hid + '</span>'],
+    ['window &le; ' + LIVE_LINK_SPAN_S + ' s (live)', '<span class="ok">' + b.live + '</span>'],
+    ['window &le; ' + (MID_LINK_SPAN_S / 60) + ' min', String(b.mid)],
+    ['window &gt; ' + (MID_LINK_SPAN_S / 60) + ' min', '<span class="dim">' + b.old + '</span>' +
+       (b.none ? ' <span class="dim">&middot; no span ' + b.none + '</span>' : '')],
+    ['transmitters', fmt(inv.distinct_transmitters) + ' <span class="dim">&middot; positioned: ' +
+       Object.keys(pos).map(function(k){ return esc(k) + ' ' + pos[k]; }).join(', ') +
+       ' &middot; unpositioned ' + fmt(inv.unpositioned_transmitters) + '</span>']
+  ]) + '<div class="sub" style="margin:8px 0 0">Windows span ~1 s to ~1 h; a slow illuminator\'s link is not ' +
+       'comparable with a live one, so links are only ever counted per bucket.</div>';
+}
+
+// ---- unparsed datagrams, by magic, with a per-minute rate ----
+function renderDropCard(meshJ, ok, now){
+  var el = document.getElementById('dropcard');
+  var u = meshJ ? meshJ.unparsed_datagrams : null;
+  if (!ok) { el.innerHTML = '<span class="dim">/api/v1/mesh unavailable</span>'; return; }
+  if (!u || typeof u !== 'object') {
+    el.innerHTML = '<span class="dim">This sink build does not expose <code>unparsed_datagrams</code> on /api/v1/mesh.</span>';
+    return;
+  }
+  var by = u.by_magic || {};
+  var prev = dropMem, dt = prev ? (now - prev.t) / 60000 : null;
+  var csiDropped = [];
+  var rows = Object.keys(by).sort().map(function(k){
+    var c = num(by[k] && by[k].count);
+    var rate = '';
+    if (prev && dt > 0.02 && prev.byMagic[k] !== undefined && c !== null && c >= prev.byMagic[k])
+      rate = ((c - prev.byMagic[k]) / dt).toFixed(0) + '/min';
+    var isCsi = CSI_MAGICS[k] !== undefined;
+    if (isCsi && c) csiDropped.push(k);
+    var name = isCsi ? '<span class="bad">' + CSI_MAGICS[k] + '</span>' : (OTHER_MAGICS[k] || 'unknown');
+    return '<tr><td class="l"><code>' + esc(k) + '</code></td><td class="l">' + name + '</td><td>' + fmt(c) +
+           '</td><td style="white-space:nowrap">' + (rate || '<span class="dim">&hellip;</span>') + '</td></tr>';
+  });
+  var map = {};
+  Object.keys(by).forEach(function(k){ map[k] = num(by[k] && by[k].count); });
+  dropMem = {t:now, byMagic:map};
+  el.innerHTML =
+    (csiDropped.length
+      ? '<div class="bad" style="margin-bottom:8px"><b>CSI is being dropped:</b> ' + csiDropped.map(esc).join(', ') +
+        ' reached the sink but no parser accepted it.</div>'
+      : '<div class="ok" style="margin-bottom:8px">No CSI-carrying magic is in the unparsed set.</div>') +
+    '<table><thead><tr><th class="l">magic</th><th class="l">packet</th><th>count</th><th>rate</th></tr></thead><tbody>' +
+    rows.join('') + '</tbody></table>' +
+    '<div class="sub" style="margin:8px 0 0">total ' + fmt(u.total) + ' &middot; short ' + fmt(u.short) +
+    ' &middot; overflow ' + fmt(u.overflow) + '. Non-CSI packets here are ones this sink has no ' +
+    'consumer for; they are ignored, not lost CSI.</div>';
+}
+
+// ---- restarts: server-side history if the sink has it, else since page open ----
+function renderRestartCard(rows){
+  var el = document.getElementById('restartcard');
+  var ev = [], src;
+  if (lastHist && lastHist.samples) {
+    src = 'from server history (since ' + hhmm(lastHist.samples.length ? lastHist.samples[0].t_ms : Date.now()) + ')';
+    lastHist.samples.forEach(function(s){
+      Object.keys(s.nodes || {}).forEach(function(id){
+        if (s.nodes[id] && s.nodes[id].rebooted) ev.push({t:s.t_ms, id:+id, kind:'node', reason:s.nodes[id].reset_reason});
+      });
+    });
+  } else {
+    src = 'seen by this page since ' + hhmm(pageOpened) + ' (the sink keeps no restart history in this build)';
+    ev = restarts.slice();
+  }
+  var perNode = {};
+  ev.forEach(function(e){ if (e.kind === 'node') perNode[e.id] = (perNode[e.id] || 0) + 1; });
+  var recent = ev.slice(-8).reverse().map(function(e){
+    return '<tr><td class="l">' + hhmm(e.t) + '</td><td class="l">' + (e.kind === 'sink' ? '<b>sink</b>' : 'node ' + e.id) +
+           '</td><td class="l dim">' + esc(e.reason || '') + '</td></tr>';
+  }).join('');
+  // Group nodes by reason: "software: n0 n1 ...", abnormal reasons in amber.
+  var byReason = {}, order = [];
+  rows.forEach(function(r){
+    if (!r.sync || !r.sync.reset_reason) return;
+    var k = r.sync.reset_reason + (r.sync.rebooted_badly === true ? '\u0000' : '');
+    if (!byReason[k]) { byReason[k] = []; order.push(k); }
+    byReason[k].push('n' + r.id);
+  });
+  var reasons = order.map(function(k){
+    var bad = k.indexOf('\u0000') >= 0, name = k.replace('\u0000', '');
+    return (bad ? '<span class="warn">' + esc(name) + ' (abnormal)</span>' : esc(name)) + ': ' + byReason[k].join(' ');
+  });
+  el.innerHTML =
+    '<div class="sub" style="margin:0 0 6px">Inferred: the node\'s own sequence or frames_processed ' +
+    'counter went backwards. ' + src + '.</div>' +
+    kv([['restarts', ev.length ? String(ev.length) + ' <span class="dim">&middot; ' +
+           Object.keys(perNode).map(function(k){ return 'n' + k + '&times;' + perNode[k]; }).join(' ') + '</span>'
+         : '<span class="ok">none seen</span>'],
+        ['last reset reason <span class="tag node">NODE</span>', reasons.length ? reasons.join('<br>') : '&mdash;']]) +
+    (recent ? '<table style="margin-top:6px"><tbody>' + recent + '</tbody></table>' : '') +
+    '<div class="sub" style="margin:8px 0 0">Node uptime is not exposed by the sink, so it is not shown. ' +
+    'Rates within ' + (WARMUP_S / 60) + ' min of a restart are tagged warm-up.</div>';
+}
+
+// ---- sink host + trust ----
+var sinkVersion = null;
+function renderSinkCard(status, metrics){
+  var el = document.getElementById('sinkcard');
+  var sm = metrics ? metrics.system_metrics : null;
+  var tr = status ? status.trust : null;
+  function flag(v, bad){ return v === null || v === undefined ? '&mdash;' : (v === bad ? '<span class="warn">' + v + '</span>' : '<span class="ok">' + v + '</span>'); }
+  el.innerHTML = kv([
+    ['version', sinkVersion ? esc(sinkVersion) : '&mdash;'],
+    ['cpu / memory / disk', sm ? fmt(get(sm, ['cpu','percent']), 1) + '% / ' + fmt(get(sm, ['memory','used_mb'])) + ' MB (' +
+        fmt(get(sm, ['memory','percent']), 1) + '%) / ' + fmt(get(sm, ['disk','percent']), 0) + '%' : '&mdash;'],
+    ['source', status ? esc(status.source || '?') + ' &middot; ' + esc(status.source_state || '?') : '&mdash;'],
+    ['trust demoted', flag(tr && tr.demoted, true)],
+    ['raw outputs suppressed', flag(tr && tr.raw_outputs_suppressed, true)],
+    ['recalibration recommended', flag(tr && tr.recalibration_recommended, true)],
+    ['engine errors', tr ? (num(tr.engine_error_count) ? '<span class="warn">' + tr.engine_error_count + '</span>' : '0') : '&mdash;']
+  ]) + '<div class="sub" style="margin:8px 0 0">Trust flags are the sink\'s own state, not an accuracy measure.</div>';
+}
+
+// ---- trends: SVG sparklines from /api/v1/kpi/history ----
+// One series per chart, so no legend and no categorical palette; hover or
+// focus a chart for the value at that minute; the tables above carry the
+// current values.
+var CH_W = 600;
+function chartSvg(ts, vs, marks, h, t0, t1){
+  var lo = Infinity, hi = -Infinity;
+  vs.forEach(function(v){ if (v !== null) { if (v < lo) lo = v; if (v > hi) hi = v; } });
+  if (lo === Infinity) return {svg:'', lo:null, hi:null};
+  if (hi === lo) { hi += 1; lo -= 1; }
+  var pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
+  var span = Math.max(1, t1 - t0);
+  function x(t){ return ((t - t0) / span * CH_W).toFixed(1); }
+  function y(v){ return (h - (v - lo) / (hi - lo) * h).toFixed(1); }
+  var d = '', pen = false;
+  for (var i = 0; i < ts.length; i++) {
+    if (vs[i] === null) { pen = false; continue; }
+    d += (pen ? 'L' : 'M') + x(ts[i]) + ' ' + y(vs[i]);
+    pen = true;
+  }
+  var rb = (marks || []).map(function(t){ return '<line class="rb" x1="' + x(t) + '" x2="' + x(t) + '" y1="0" y2="' + h + '"/>'; }).join('');
+  var svg = '<svg viewBox="0 0 ' + CH_W + ' ' + h + '" preserveAspectRatio="none" style="height:' + h + 'px" aria-hidden="true">' +
+    '<line class="gl" x1="0" x2="' + CH_W + '" y1="' + h + '" y2="' + h + '"/>' + rb +
+    '<path class="ln" d="' + d + '"/><line class="xh" x1="0" x2="0" y1="0" y2="' + h + '"/></svg>';
+  return {svg:svg, lo:lo + pad, hi:hi - pad};
+}
+function plotHtml(key, svg, label){
+  return '<div class="plot" tabindex="0" data-key="' + key + '" aria-label="' + esc(label) + '">' + svg + '<div class="tip"></div></div>';
+}
+
+var series = {};   // key -> {ts, vs, unit, d}
+function renderTrends(hist, status){
+  var el = document.getElementById('trends'), st = document.getElementById('histStamp');
+  if (!hist) {
+    series = {};
+    st.textContent = '';
+    el.innerHTML = '<div class="dim">' + (status === 404
+      ? 'This sink does not expose <code>/api/v1/kpi/history</code> yet, so the page shows only current values.'
+      : 'History unavailable' + (status ? ' (HTTP ' + status + ')' : '') + '.') + '</div>';
+    return;
+  }
+  var ss = hist.samples || [];
+  var t1 = Date.now(), t0 = t1 - histMinutes * 60000;
+  ss = ss.filter(function(s){ return num(s.t_ms) !== null && s.t_ms >= t0; });
+  st.innerHTML = ss.length + ' one-minute samples, in sink memory since ' +
+    (num(hist.sink_started_ms) !== null ? hhmm(hist.sink_started_ms) : '?') + ' (lost on sink restart) ' +
+    '<span class="tag meas">MEASURED</span>';
+  if (!ss.length) { el.innerHTML = '<div class="dim">No samples in this range yet.</div>'; return; }
+  var ts = ss.map(function(s){ return s.t_ms; });
+  series = {};
+  function col(f){ return ss.map(function(s){ var v = f(s); return num(v); }); }
+
+  // unparsed datagrams per minute, from the cumulative total
+  var up = [];
+  for (var i = 0; i < ss.length; i++) {
+    var a = i ? num(ss[i - 1].unparsed_total) : null, b = num(ss[i].unparsed_total);
+    var dtm = i ? (ss[i].t_ms - ss[i - 1].t_ms) / 60000 : 0;
+    up.push(a !== null && b !== null && b >= a && dtm > 0 ? (b - a) / dtm : null);
+  }
+  var fleetCharts = [
+    ['fleet', 'fleet delivered fps', col(function(s){ return s.fleet_fps; }), 'fps', 1],
+    ['live', 'live links (span &le; ' + LIVE_LINK_SPAN_S + ' s)', col(function(s){ return s.links_live; }), '', 0],
+    ['valid', 'nodes with sync valid', col(function(s){
+      var n = 0, any = false;
+      Object.keys(s.nodes || {}).forEach(function(k){ var v = s.nodes[k] && s.nodes[k].is_valid; if (v !== null && v !== undefined) any = true; if (v === true) n++; });
+      return any ? n : null; }), '', 0],
+    ['unp', 'unparsed datagrams / min', up, '/min', 0],
+    ['cpu', 'sink cpu %', col(function(s){ return s.cpu_pct; }), '%', 1]
+  ];
+  var sinkRestarts = hist.sink_restarts_ms || [];
+  var h = '<div class="charts">' + fleetCharts.map(function(c){
+    var r = chartSvg(ts, c[2], [], 70, t0, t1);
+    series[c[0]] = {ts:ts, vs:c[2], unit:c[3], d:c[4]};
+    var last = null;
+    for (var i = c[2].length - 1; i >= 0; i--) if (c[2][i] !== null) { last = c[2][i]; break; }
+    return '<div class="chart"><div class="k">' + c[1] + '</div>' +
+      '<div class="now">' + (last === null ? '&mdash;' : last.toFixed(c[4]) + (c[3] && c[3] !== 'fps' ? c[3] : '')) + '</div>' +
+      plotHtml(c[0], r.svg, c[1]) +
+      '<div class="ax"><span>' + hhmm(t0) + '</span><span>' + (r.lo === null ? '' : 'range ' + r.lo.toFixed(c[4]) + '&ndash;' + r.hi.toFixed(c[4])) +
+      '</span><span>now</span></div></div>';
+  }).join('') + '</div>';
+
+  // per-node small multiples: one row per node, one sparkline per metric
+  var ids = {};
+  ss.forEach(function(s){ Object.keys(s.nodes || {}).forEach(function(k){ ids[k] = true; }); });
+  var metrics = [
+    ['fps', 'delivered fps', 'fps', 1, 'sink'],
+    ['ap_rssi', 'AP link dBm', 'dBm', 0, 'sink'],
+    ['die_c', 'die &deg;C', '&deg;C', 0, 'node'],
+    ['min_heap_kib', 'min heap KiB', 'KiB', 0, 'node']
+  ];
+  h += '<div class="scroll" style="margin-top:12px"><table><thead><tr><th class="l">node</th>' +
+    metrics.map(function(m){ return '<th class="l sep"><span class="' + (m[4] === 'sink' ? 'tag meas' : 'tag node') + '">' +
+      m[1] + '</span></th>'; }).join('') + '<th class="sep">restarts</th></tr></thead><tbody>';
+  Object.keys(ids).map(Number).sort(function(a,b){ return a - b; }).forEach(function(id){
+    var marks = [];
+    ss.forEach(function(s){ var n = s.nodes && s.nodes[id]; if (n && n.rebooted) marks.push(s.t_ms); });
+    h += '<tr><td class="l"><b>node ' + id + '</b></td>' + metrics.map(function(m){
+      var vs = col(function(s){ return s.nodes && s.nodes[id] ? s.nodes[id][m[0]] : null; });
+      var key = 'n' + id + '_' + m[0];
+      series[key] = {ts:ts, vs:vs, unit:m[2], d:m[3], marks:marks};
+      var r = chartSvg(ts, vs, marks, 26, t0, t1);
+      var last = null;
+      for (var i = vs.length - 1; i >= 0; i--) if (vs[i] !== null) { last = vs[i]; break; }
+      return '<td class="spark sep">' + (r.svg ? plotHtml(key, r.svg, 'node ' + id + ' ' + m[1]) : '') +
+        '<span class="m">' + (last === null ? '&mdash;' : 'now ' + last.toFixed(m[3])) +
+        (r.lo === null ? '' : ' &middot; ' + r.lo.toFixed(m[3]) + '&ndash;' + r.hi.toFixed(m[3])) + '</span></td>';
+    }).join('') + '<td class="sep">' + (marks.length ? '<span class="warn">' + marks.length + '</span>' : '<span class="dim">0</span>') +
+      '</td></tr>';
+  });
+  h += '</tbody></table></div><div class="sub" style="margin:8px 0 0">Amber ticks: node restarts. ' +
+    (sinkRestarts.length ? 'Sink restarts: ' + sinkRestarts.map(hhmm).join(', ') + '. ' : '') +
+    'fps and AP dBm are sink-measured; die &deg;C and heap are node-reported.</div>';
+  el.innerHTML = h;
+}
+
+// Crosshair + tooltip, shared by every plot (hover or keyboard focus + arrows).
+function nearest(sr, t){
+  var best = -1, bd = Infinity;
+  for (var i = 0; i < sr.ts.length; i++) {
+    if (sr.vs[i] === null) continue;
+    var d = Math.abs(sr.ts[i] - t);
+    if (d < bd) { bd = d; best = i; }
+  }
+  return best;
+}
+function showAt(plot, i){
+  var sr = series[plot.getAttribute('data-key')], tip = plot.querySelector('.tip'), xh = plot.querySelector('.xh');
+  if (!sr || i < 0 || !tip || !xh) return;
+  var t1 = Date.now(), t0 = t1 - histMinutes * 60000;
+  var fx = (sr.ts[i] - t0) / Math.max(1, t1 - t0);
+  xh.setAttribute('x1', fx * CH_W); xh.setAttribute('x2', fx * CH_W);
+  xh.style.visibility = 'visible';
+  var rb = sr.marks && sr.marks.indexOf(sr.ts[i]) >= 0 ? ' &middot; <span class="warn">restart</span>' : '';
+  tip.innerHTML = hhmm(sr.ts[i]) + ' &middot; <b>' + sr.vs[i].toFixed(sr.d) + '</b> ' + sr.unit + rb;
+  tip.style.left = Math.min(Math.max(fx * 100, 10), 90) + '%';
+  tip.style.visibility = 'visible';
+  plot._i = i;
+}
+function hide(plot){
+  var tip = plot.querySelector('.tip'), xh = plot.querySelector('.xh');
+  if (tip) tip.style.visibility = 'hidden';
+  if (xh) xh.style.visibility = 'hidden';
+}
+(function(){
+  var tr = document.getElementById('trends');
+  tr.addEventListener('mousemove', function(ev){
+    var plot = ev.target.closest && ev.target.closest('.plot');
+    if (!plot) return;
+    var sr = series[plot.getAttribute('data-key')]; if (!sr) return;
+    var b = plot.getBoundingClientRect();
+    var t1 = Date.now(), t0 = t1 - histMinutes * 60000;
+    showAt(plot, nearest(sr, t0 + (ev.clientX - b.left) / b.width * (t1 - t0)));
+  });
+  tr.addEventListener('mouseout', function(ev){
+    var plot = ev.target.closest && ev.target.closest('.plot');
+    if (plot && !plot.contains(ev.relatedTarget)) hide(plot);
+  });
+  tr.addEventListener('focusin', function(ev){
+    var plot = ev.target.closest && ev.target.closest('.plot');
+    if (!plot) return;
+    var sr = series[plot.getAttribute('data-key')]; if (!sr) return;
+    showAt(plot, nearest(sr, Date.now()));
+  });
+  tr.addEventListener('focusout', function(ev){ var p = ev.target.closest && ev.target.closest('.plot'); if (p) hide(p); });
+  tr.addEventListener('keydown', function(ev){
+    var plot = ev.target.closest && ev.target.closest('.plot');
+    if (!plot || (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight')) return;
+    var sr = series[plot.getAttribute('data-key')]; if (!sr) return;
+    var i = plot._i === undefined ? sr.ts.length - 1 : plot._i, step = ev.key === 'ArrowLeft' ? -1 : 1;
+    for (var j = i + step; j >= 0 && j < sr.ts.length; j += step) if (sr.vs[j] !== null) { showAt(plot, j); break; }
+    ev.preventDefault();
+  });
+  document.getElementById('rangeRow').addEventListener('click', function(ev){
+    var b = ev.target.closest && ev.target.closest('button[data-min]');
+    if (!b) return;
+    histMinutes = parseInt(b.getAttribute('data-min'), 10);
+    Array.prototype.forEach.call(this.querySelectorAll('button[data-min]'), function(x){
+      x.setAttribute('aria-pressed', x === b ? 'true' : 'false');
+    });
+    renderTrends(lastHist, lastHistStatus);
+  });
+})();
+
+function renderRules(){
+  document.getElementById('rules').innerHTML =
+    '<li><b class="bad">DARK / RED</b>: the sink-side sample count (<code>csi_fps_samples</code>) has not advanced for more than ' +
+      DARK_AFTER_S + ' s, or the node has no sync packet and no CSI accepted in ' + DARK_AFTER_S + ' s, or the sink does not know the node.</li>' +
+    '<li><b class="warn">AMBER</b>: delivered &lt; ' + LOW_FPS + ' fps; <code>is_valid</code> false; sync packet older than ' +
+      (SYNC_STALE_MS / 1000) + ' s; no sync packet; <code>send_fail</code> rose since the last poll; last reset abnormal ' +
+      '(panic / watchdog / brownout); thermal state throttled or critical; the node rebooted since the last poll; ' +
+      'AP link weaker than ' + WEAK_AP_DBM + ' dBm; or the sample counter went backwards.</li>' +
+    '<li><b class="ok">GREEN</b>: samples advancing at &ge; ' + LOW_FPS + ' fps and none of the above.</li>' +
+    '<li><b>Delivered fps</b> = &Delta;<code>csi_fps_samples</code> / &Delta;t between polls, computed in this browser ' +
+      '(the trends compute the same on the sink, once a minute). <b>Share</b> = the node\'s part of the fleet total: ' +
+      'fleet rate drifts together, so a falling share singles out the node. <b>Warm-up</b>: within ' +
+      (WARMUP_S / 60) + ' min of a node or sink restart; not steady state. ' +
+      '<b>EMA</b> is secondary: exactly 20.0 or null is the sink\'s no-data fallback and is shown as "no data". ' +
+      'A follower whose offset drift is ~0 &micro;s/s (amber) has a frozen offset: it is receiving no root time. On firmware with multi-hop mesh sync, time is relayed node to node, and a follower shows its distance from the root in hops.</li>' +
+    '<li><b>AP link</b> = RSSI of the AP\'s own frames at the node (link row whose transmitter is positioned as the AP' +
+      (AP_PIN ? ', pinned to ' + esc(AP_PIN) : '; override with <code>?ap=</code>') + '). ' +
+      '<code>/api/v1/nodes</code> <code>rssi_dbm</code> is a different link and is not used. ' +
+      '<b>Links rx</b> counts links this node receives; <i>live</i> = window span &le; ' + LIVE_LINK_SPAN_S + ' s.</li>' +
+    '<li>This page shows radio and pipeline health only: no presence, occupancy, motion or pose, current or historical.</li>';
+}
+
+var timer = null, inflight = false, pageOpened = Date.now(), lastHistStatus = null;
+function poll(){
+  if (inflight) return;
+  inflight = true;
+  Promise.all([soft('/api/v1/mesh'), soft('/api/v1/nodes'), soft('/api/v1/links'),
+               soft('/api/v1/links/inventory'), soft('/api/v1/status'), soft('/health/metrics'),
+               soft('/api/v1/kpi/history?minutes=1440')])
+    .then(function(res){
+      var now = Date.now();
+      lastHist = res[6].ok ? res[6].j : null;
+      lastHistStatus = res[6].ok ? 200 : res[6].status;
+      try { render(res, now); renderTrends(lastHist, lastHistStatus); }
+      catch (e) {
+        document.getElementById('stamp').innerHTML = '<span class="err">render error: ' + esc(e && e.message || e) + '</span>';
+      }
+    })
+    .then(function(){ inflight = false; }, function(){ inflight = false; });
+}
+function schedule(){
+  if (timer) clearTimeout(timer);
+  timer = null;
+  if (document.hidden || !document.getElementById('auto').checked) return;
+  var ms = Math.max(MIN_POLL_MS, parseInt(document.getElementById('interval').value, 10) || MIN_POLL_MS);
+  timer = setTimeout(function(){ poll(); schedule(); }, ms);
+}
+var followup = null;
+function start(){
+  // Poll now, once more after FOLLOWUP_MS for a first rate, then every interval.
+  poll();
+  if (followup) clearTimeout(followup);
+  followup = setTimeout(function(){ followup = null; if (!document.hidden) poll(); }, FOLLOWUP_MS);
+  schedule();
+}
+
+document.getElementById('refresh').onclick = function(){ poll(); schedule(); };
+document.getElementById('auto').onchange = schedule;
+document.getElementById('interval').onchange = schedule;
+var hiddenAt = null;
+document.addEventListener('visibilitychange', function(){
+  if (document.hidden) { hiddenAt = Date.now(); schedule(); return; }
+  // Back from hidden. Windows reports an occluded window as hidden, so an
+  // Alt-Tab away and back is a hide/show: after a short absence
+  // keep the baselines, and the next poll's rate simply spans the gap. Only
+  // after a long one are they discarded, so no rate averages over it.
+  // Restart history and the warm-up clock are always kept.
+  if (hiddenAt !== null && Date.now() - hiddenAt > REBASELINE_AFTER_HIDDEN_MS) {
+    Object.keys(mem).forEach(function(k){
+      var m = mem[k];
+      mem[k] = {seq:m.seq, processed:m.processed, startedAt:m.startedAt};
+    });
+    dropMem = null;
+  }
+  hiddenAt = null;
+  start();
+});
+
+fetchJSON('/health/version').then(function(j){ sinkVersion = (j.name || '') + ' ' + (j.version || ''); }, function(){});
+renderRules();
+start();
+</script>
+</body>
+</html>
