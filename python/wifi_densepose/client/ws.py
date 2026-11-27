@@ -26,7 +26,7 @@ async def main():
 
 asyncio.run(main())
 ```
-"""
+"""  # noqa: E501 — markdown table rows above must stay on one line
 
 from __future__ import annotations
 
@@ -35,8 +35,9 @@ import inspect
 import json
 import logging
 import os
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Optional
+from typing import Any
 
 # Defer import — only fail at construction time, not at module load.
 try:
@@ -108,12 +109,12 @@ class EdgeVitalsMessage(SensingMessage):
     presence: bool = False
     fall_detected: bool = False
     motion: float = 0.0
-    breathing_rate_bpm: Optional[float] = None
-    heartrate_bpm: Optional[float] = None
+    breathing_rate_bpm: float | None = None
+    heartrate_bpm: float | None = None
     n_persons: int = 0
     motion_energy: float = 0.0
     presence_score: float = 0.0
-    rssi: Optional[float] = None
+    rssi: float | None = None
 
 
 @dataclass(frozen=True)
@@ -212,7 +213,7 @@ class SensingClient:
         self,
         url: str,
         *,
-        token: Optional[str] = None,
+        token: str | None = None,
         ping_interval: float = 20.0,
         ping_timeout: float = 20.0,
         max_size: int = 16 * 1024 * 1024,
@@ -233,7 +234,7 @@ class SensingClient:
         self._max_size = max_size
         self._ws: Any = None  # websockets.WebSocketClientProtocol — typed Any to avoid import cost
 
-    async def __aenter__(self) -> "SensingClient":
+    async def __aenter__(self) -> SensingClient:
         connect_kwargs: dict[str, Any] = dict(
             ping_interval=self._ping_interval,
             ping_timeout=self._ping_timeout,
@@ -287,7 +288,7 @@ class SensingClient:
             raise RuntimeError("SensingClient not connected. Use `async with` first.")
         await self._ws.send(json.dumps({"type": "ping"}))
 
-    async def recv_one(self, *, timeout: Optional[float] = None) -> SensingMessage:
+    async def recv_one(self, *, timeout: float | None = None) -> SensingMessage:
         """Receive a single decoded message. Convenience for short
         scripts and tests that don't need an async generator."""
         if self._ws is None:

@@ -24,7 +24,6 @@ import pytest
 import wifi_densepose
 from wifi_densepose import BfldFrame, BfldKind, BfldReport
 
-
 # ─── BfldKind enum ───────────────────────────────────────────────────
 
 

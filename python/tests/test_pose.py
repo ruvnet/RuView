@@ -15,7 +15,6 @@ from wifi_densepose import (
     PoseEstimate,
 )
 
-
 # ─── BoundingBox ─────────────────────────────────────────────────────
 
 

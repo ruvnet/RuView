@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import pathlib
 
-
 TOMBSTONE = pathlib.Path(__file__).parent.parent / "src" / "wifi_densepose" / "__init__.py"
 
 

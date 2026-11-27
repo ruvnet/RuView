@@ -28,7 +28,6 @@ from wifi_densepose.client import (
 )
 from wifi_densepose.client.mqtt import _topic_matches
 
-
 # ─── Topic wildcard matcher ──────────────────────────────────────────
 
 

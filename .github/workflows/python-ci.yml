@@ -62,6 +62,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Ruff lint gate for the shipped wheel's Python sources. The rule set and
+  # line length are defined once in python/pyproject.toml ([tool.ruff]); this
+  # job only enforces them. Before it existed the config was never run, and
+  # 50 findings had accumulated. Needs no Rust build, so it finishes in
+  # seconds and fails fast. Keep the Ruff pin in sync with the ruff-pre-commit
+  # rev in .pre-commit-config.yaml.
+  lint:
+    name: Ruff lint (python/)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+
+      - name: Install Ruff (pinned)
+        run: python -m pip install "ruff==0.17.5"
+
+      - name: ruff check
+        working-directory: python
+        run: ruff check --output-format=github .
+
   # Build the wheel with ALL SOTA features and run the full parity suite.
   # `--features sota` = aether + meridian + mat, so the compiled feature
   # submodules (wifi_densepose.aether / .meridian / .mat) exist and their

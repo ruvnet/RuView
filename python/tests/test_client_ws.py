@@ -10,7 +10,6 @@ binary, but the wire protocol is the contract under test here.
 
 from __future__ import annotations
 
-import asyncio
 import json
 from typing import Any
 
@@ -24,7 +23,6 @@ from wifi_densepose.client import (
     SensingClient,
     SensingMessage,
 )
-
 
 # ─── In-process WS server fixture ────────────────────────────────────
 
