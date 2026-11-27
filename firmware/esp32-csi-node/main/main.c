@@ -21,6 +21,7 @@
 #include "led_strip.h"
 
 #include "csi_collector.h"
+#include "uplink_wd_core.h"   /* uplink watchdog decision, host-tested */
 #include "node_log.h"
 #include "thermal.h"
 #include "stream_sender.h"
@@ -44,6 +45,7 @@
 #include "c6_antenna_select.h"     /* XIAO C6 RF switch (opt-in; generic C6 no-op) */
 #include "c6_sync_espnow.h"        /* ADR-110 D1 workaround: ESP-NOW sync */
 #include "c6_softap_he.h"          /* ADR-110 B1/B2: HE/TWT soft-AP (no-op when disabled) */
+#include "link_watchdog.h"         /* ADR-427: link-rate watchdog (no-op when off) */
 #include "node_mdns.h"             /* LAN discovery of this node */
 #ifdef CONFIG_CSI_MOCK_ENABLED
 #include "mock_csi.h"
@@ -130,6 +132,11 @@ static void event_handler(void *arg, esp_event_base_t event_base,
          * someone was watching the console at the time. Persist it. */
         node_log_note_disconnect((uint8_t)disc->reason, (int8_t)disc->rssi);
         node_log_event(NODE_LOG_EV_WIFI_DISCONNECT, disc->reason, disc->rssi);
+        /* ADR-427 inhibit: no link-watchdog action within boot_grace_s of
+         * ANY disconnect, not just one it caused itself -- an AP-side event
+         * already ends in a disconnect (guard 1), and this is what keeps the
+         * node quiet immediately after reconnecting too. */
+        link_watchdog_note_wifi_disconnect();
         s_retry_num++;
         /* Release the boot wait once, so a node that comes up while the AP is
          * down still starts CSI capture and the mesh instead of blocking in
@@ -149,11 +156,18 @@ static void event_handler(void *arg, esp_event_base_t event_base,
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
+        /* Whether DHCP completed after a rejoin is otherwise unknowable from
+         * node_log. b = the address, network byte order. */
+        node_log_event(NODE_LOG_EV_IP, NODE_LOG_IP_GOT,
+                       (int32_t)event->ip_info.ip.addr);
         s_retry_num = 0;
         ota_health_note_got_ip();
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
         /* Proof that a pending config trial produced a usable network. */
         config_trial_notify_connected();
+    } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_LOST_IP) {
+        ESP_LOGW(TAG, "Lost IP");
+        node_log_event(NODE_LOG_EV_IP, NODE_LOG_IP_LOST, 0);
     }
 }
 
@@ -174,21 +188,59 @@ static void event_handler(void *arg, esp_event_base_t event_base,
  *
  * It arms on the first successful send rather than at boot, so a node that has
  * never reached the network does not reboot-loop while the AP is down; the
- * unbounded reconnect above owns that case. */
+ * unbounded reconnect above owns that case.
+ *
+ * The decision (three rules, each for the whole timeout: no bulk send at all;
+ * < 5 % of bulk sends accepted; associated with no gateway ping answered)
+ * lives in uplink_wd_core.c so it is host-tested; see its header for why
+ * rules 2 and 3 exist. */
+static void uplink_watchdog_fire(uint8_t rule, int64_t stalled_s)
+{
+    /* Packing documented in node_log.h next to NODE_LOG_EV_WATCHDOG. The
+     * priority path's idle time tells the two failure shapes apart: near 0
+     * means the stack still accepted small packets while bulk failed (a TX
+     * stall); large means the whole path was gone. node_log fsyncs, so this
+     * record is on flash before the restart -- the one post-mortem a power
+     * cycle cannot erase. */
+    int64_t prio = stream_sender_last_priority_success_us();
+    int64_t prio_idle_s = prio ? (esp_timer_get_time() - prio) / 1000000 : -1;
+    uint32_t stalled_c = (stalled_s > 0xFFFFFF) ? 0xFFFFFFu : (uint32_t)stalled_s;
+    node_log_event(NODE_LOG_EV_WATCHDOG,
+                   (int32_t)(((uint32_t)rule << 24) | stalled_c),
+                   (int32_t)prio_idle_s);
+    ESP_LOGE(TAG, "uplink watchdog: rule %u, bulk path stalled %lld s "
+                  "(limit %d s, priority path idle %lld s) -- restarting",
+             (unsigned)rule, (long long)stalled_s,
+             CONFIG_UPLINK_WATCHDOG_TIMEOUT_S, (long long)prio_idle_s);
+    esp_restart();
+}
+
 static void uplink_watchdog_tick(void)
 {
-    int64_t last = stream_sender_last_success_us();
-    if (last == 0) {
-        return;                      /* never delivered -- not armed yet */
+    static uwd_state_t s_uwd;
+    int64_t stalled_s = 0;
+    uint8_t rule = uwd_step(&s_uwd, esp_timer_get_time(),
+                            csi_collector_get_send_ok_count(),
+                            csi_collector_get_send_fail_total(),
+                            stream_sender_last_success_us(),
+                            CONFIG_UPLINK_WATCHDOG_TIMEOUT_S, &stalled_s);
+    if (rule != UWD_RULE_NONE) {
+        uplink_watchdog_fire(rule, stalled_s);
     }
-    int64_t idle_s = (esp_timer_get_time() - last) / 1000000;
-    if (idle_s < CONFIG_UPLINK_WATCHDOG_TIMEOUT_S) {
-        return;
+
+    /* Rule 3: associated, sends accepted, but no gateway ping answered for
+     * the whole timeout -- the shape rules 1-2 cannot see. Fed by the ADR-427
+     * link watchdog's windows, so inert unless CONFIG_LINK_WATCHDOG is set. */
+    static uwd_path_state_t s_path;
+    uint32_t ping_ok;
+    bool assoc;
+    if (link_watchdog_take_window(&ping_ok, &assoc)) {
+        rule = uwd_path_step(&s_path, esp_timer_get_time(), ping_ok, assoc,
+                             CONFIG_UPLINK_WATCHDOG_TIMEOUT_S, &stalled_s);
+        if (rule != UWD_RULE_NONE) {
+            uplink_watchdog_fire(rule, stalled_s);
+        }
     }
-    ESP_LOGE(TAG, "uplink watchdog: no successful send for %lld s "
-                  "(limit %d s) -- restarting",
-             (long long)idle_s, CONFIG_UPLINK_WATCHDOG_TIMEOUT_S);
-    esp_restart();
 }
 #endif /* CONFIG_UPLINK_WATCHDOG */
 
@@ -209,6 +261,9 @@ static void wifi_init_sta(void)
         WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler, NULL, &instance_any_id));
     ESP_ERROR_CHECK(esp_event_handler_instance_register(
         IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler, NULL, &instance_got_ip));
+    esp_event_handler_instance_t instance_lost_ip;
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(
+        IP_EVENT, IP_EVENT_STA_LOST_IP, &event_handler, NULL, &instance_lost_ip));
 
     wifi_config_t wifi_config = {
         .sta = {
@@ -537,6 +592,12 @@ void app_main(void)
         }
     }
 
+    /* ADR-427: NVS and g_nvs_config are up; no-op when CONFIG_LINK_WATCHDOG
+     * is unset or NVS linkwd=0. Must run before csi_collector_init() starts
+     * the self-ping session below, so the ping callbacks never see it
+     * uninitialised. */
+    link_watchdog_init();
+
     /* Bring thermal monitoring up before the radio is loaded, so the first
      * reading is taken against a known-idle baseline rather than mid-burst. */
     thermal_init();
@@ -744,6 +805,9 @@ void app_main(void)
 #ifdef CONFIG_UPLINK_WATCHDOG
         uplink_watchdog_tick();
 #endif
+        /* ADR-427: no-op until its own 60 s (default) window completes, and a
+         * no-op entirely when the feature is off. */
+        link_watchdog_tick();
         /* Offered every 10 s; node_log enforces its own floor, so the cadence
          * lives in one place rather than being implied by this loop's delay.
          * Also refresh the uptime NVS cell, which is what lets the NEXT boot

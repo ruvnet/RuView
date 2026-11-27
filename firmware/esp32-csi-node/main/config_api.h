@@ -43,3 +43,11 @@ void config_trial_boot_check(void);
  * Call from the IP_EVENT_STA_GOT_IP handler.
  */
 void config_trial_notify_connected(void);
+
+/**
+ * True while a config trial is pending: the node banked its old values,
+ * wrote new ones, and has not yet proved it can still associate. ADR-427:
+ * one of the link watchdog's inhibits, since a reassociate or reboot here
+ * would race the trial's own revert logic.
+ */
+bool config_trial_is_pending(void);

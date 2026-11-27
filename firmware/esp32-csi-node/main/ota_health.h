@@ -108,3 +108,9 @@ void ota_health_start(void);
 
 /** Call from the IP_EVENT_STA_GOT_IP handler. Cheap; safe from any task. */
 void ota_health_note_got_ip(void);
+
+/** True from ota_health_start() finding the running image PENDING_VERIFY
+ *  until the health check marks it valid. A reboot in that window rolls the
+ *  image back, so automatic restarts (the ADR-427 link watchdog) hold off.
+ *  Always false without bootloader rollback. Cheap; safe from any task. */
+bool ota_health_is_pending_verify(void);

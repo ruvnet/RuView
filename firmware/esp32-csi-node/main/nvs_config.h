@@ -72,6 +72,13 @@ typedef struct {
      * in a bedroom -- hence runtime selectable rather than Kconfig-only. */
     uint8_t  led_mode;                   /**< 0=off, 1=steady colour, 2=40Hz flicker. */
     uint8_t  led_brightness;             /**< Percent, 0-100, scales the colormap. */
+
+    /* ADR-427: link-rate watchdog run mode (NVS `linkwd`). 0 off, 1 observe
+     * (detect and log "would act", never act), 2 act. Defaults to 1; act is
+     * a deliberate per-node choice. Runtime rather than Kconfig-only so a
+     * mode change costs one /config push, not a reflash. Inert unless
+     * CONFIG_LINK_WATCHDOG is set. */
+    uint8_t  linkwd_mode;
 } nvs_config_t;
 
 #define LED_MODE_OFF     0
