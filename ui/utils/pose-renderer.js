@@ -252,7 +252,7 @@ export class PoseRenderer {
       const hue = (personIdx * 60) % 360; // different hue per person
 
       person.keypoints.forEach((kp) => {
-        if (kp.confidence <= this.config.keypointConfidenceThreshold) return;
+        if (kp.confidence < this.config.keypointConfidenceThreshold) return;
 
         const cx = this.scaleX(kp.x);
         const cy = this.scaleY(kp.y);
@@ -306,7 +306,7 @@ export class PoseRenderer {
       bodyParts.forEach((part) => {
         // Collect valid keypoints for this body part
         const points = part.kps
-          .filter(i => kps[i] && kps[i].confidence > this.config.keypointConfidenceThreshold)
+          .filter(i => kps[i] && kps[i].confidence >= this.config.keypointConfidenceThreshold)
           .map(i => ({ x: this.scaleX(kps[i].x), y: this.scaleY(kps[i].y) }));
 
         if (points.length < 2) return;
@@ -354,8 +354,8 @@ export class PoseRenderer {
       const keypointB = keypoints[pointB];
 
       if (keypointA && keypointB && 
-          keypointA.confidence > this.config.keypointConfidenceThreshold &&
-          keypointB.confidence > this.config.keypointConfidenceThreshold) {
+          keypointA.confidence >= this.config.keypointConfidenceThreshold &&
+          keypointB.confidence >= this.config.keypointConfidenceThreshold) {
         
         const x1 = this.scaleX(keypointA.x);
         const y1 = this.scaleY(keypointA.y);
@@ -401,7 +401,7 @@ export class PoseRenderer {
   // Render keypoints
   renderKeypoints(keypoints, confidence, enhancedMode = false) {
     keypoints.forEach((keypoint, index) => {
-      if (keypoint.confidence > this.config.keypointConfidenceThreshold) {
+      if (keypoint.confidence >= this.config.keypointConfidenceThreshold) {
         const x = this.scaleX(keypoint.x);
         const y = this.scaleY(keypoint.y);
         
