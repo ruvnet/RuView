@@ -16,6 +16,7 @@
 use serde::Serialize;
 
 use super::{MANUFACTURER, ORIGIN_NAME, SUPPORT_URL};
+use crate::privacy_fields::FieldClass;
 
 /// HA component kinds we publish today. Strings match the HA URL slug.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -203,15 +204,39 @@ impl EntityKind {
         }
     }
 
-    /// True iff this entity carries biometric data that `--privacy-mode`
-    /// must suppress per ADR-115 §3.10 and §3.12.3. Semantic primitives
-    /// stay published even in privacy mode because they're inferred
-    /// states, not raw values.
+    /// Privacy class of this entity (#2165). The match has no wildcard, so
+    /// a new entity doesn't compile until it is classified. Semantic states
+    /// whose inputs include vital signs (sleeping reads breathing rate,
+    /// possible distress reads heart rate) are biometric too.
+    pub fn privacy_class(self) -> FieldClass {
+        match self {
+            EntityKind::BreathingRate
+            | EntityKind::HeartRate
+            | EntityKind::PoseKeypoints
+            | EntityKind::SomeoneSleeping
+            | EntityKind::PossibleDistress => FieldClass::Biometric,
+            EntityKind::Presence
+            | EntityKind::PersonCount
+            | EntityKind::MotionLevel
+            | EntityKind::MotionEnergy
+            | EntityKind::FallDetected
+            | EntityKind::PresenceScore
+            | EntityKind::Rssi
+            | EntityKind::ZoneOccupancy
+            | EntityKind::RoomActive
+            | EntityKind::ElderlyInactivityAnomaly
+            | EntityKind::MeetingInProgress
+            | EntityKind::BathroomOccupied
+            | EntityKind::FallRiskElevated
+            | EntityKind::BedExit
+            | EntityKind::NoMovement
+            | EntityKind::MultiRoomTransition => FieldClass::Public,
+        }
+    }
+
+    /// True iff `--privacy-mode` must suppress this entity (ADR-115 §3.10).
     pub fn is_biometric(self) -> bool {
-        matches!(
-            self,
-            EntityKind::BreathingRate | EntityKind::HeartRate | EntityKind::PoseKeypoints
-        )
+        self.privacy_class() != FieldClass::Public
     }
 
     /// False for entities the sensing broadcast has no source for. They are
@@ -629,9 +654,16 @@ mod tests {
         for e in &entities {
             assert!(!e.is_biometric(), "biometric {:?} leaked with privacy_mode", e);
         }
-        // Semantic primitives must remain available (ADR-115 §3.12.3).
-        assert!(entities.contains(&EntityKind::SomeoneSleeping));
-        assert!(entities.contains(&EntityKind::PossibleDistress));
+        // States derived from vital signs are biometric (#2165).
+        assert!(!entities.contains(&EntityKind::SomeoneSleeping));
+        assert!(!entities.contains(&EntityKind::PossibleDistress));
+        // Primitives built only on presence, motion, zones and falls remain.
+        assert!(entities.contains(&EntityKind::RoomActive));
+        assert!(entities.contains(&EntityKind::NoMovement));
+        // Without privacy mode both are announced.
+        let all = DiscoveryBuilder::enabled_entities(false, true, &[]);
+        assert!(all.contains(&EntityKind::SomeoneSleeping));
+        assert!(all.contains(&EntityKind::PossibleDistress));
     }
 
     #[test]

@@ -12,9 +12,11 @@
 //!
 //! - **Server-side inference.** All primitives run inside this process.
 //!   Only the inferred *state* (true/false, scalar, event) crosses the
-//!   wire. This is what makes `--privacy-mode` compatible with
+//!   wire. This is what makes `--privacy-mode` compatible with most
 //!   semantic primitives — biometric *values* can be stripped at the
 //!   integration boundary while the inferred *states* still publish.
+//!   Primitives whose inputs include vital signs (sleeping, distress) are
+//!   suppressed with them (#2165).
 //! - **One source of truth.** Each primitive's FSM lives in one file
 //!   alongside its tests. The `SemanticBus` aggregates output and
 //!   broadcasts to MQTT + Matter consumers. Adding a new primitive is

@@ -3,7 +3,7 @@
 | Field | Value |
 |-------|-------|
 | **Status** | **Accepted** (MQTT track P1–P7 + P8a + P9 + P10 shipped 2026-05-23 in PR #778, 410 lib tests, witness bundle VERIFIED) / **Proposed** (Matter SDK wiring P8b deferred to v0.7.1 per §9.10) |
-| **Date** | 2026-05-23 (amended 2026-10-02: P4.5 status note, §11) |
+| **Date** | 2026-05-23 (amended 2026-10-02: P4.5 status note, §11; 2026-10-06: deny-by-default privacy mode, §12) |
 | **Deciders** | ruv |
 | **Codename** | **HA-DISCO** (MQTT) + **HA-FABRIC** (Matter) + **HA-MIND** (semantic primitives) |
 | **Relates to** | ADR-018 (CSI binary frame format), ADR-021 (ESP32 vitals), ADR-031 (RuView sensing-first), ADR-039 (edge vitals packet 0xC511_0002), ADR-079 (camera ground-truth), ADR-103 (cog-person-count), ADR-110 (ESP32-C6 firmware), ADR-114 (cog-quantum-vitals) |
@@ -306,6 +306,7 @@ Env var equivalents follow `RUVIEW_MQTT_HOST`, `RUVIEW_MQTT_USERNAME`, etc., so 
 | Heart rate | published | **stripped** |
 | Fall events | published | **published** (safety > privacy) |
 | Pose keypoints | off by default | **stripped** (cannot be force-enabled) |
+| Someone sleeping, possible distress | published | **stripped** (inferred from BR / HR; since 2026-10-06, §12) |
 
 This implements the ADR-106 primitive-isolation contract at the integration boundary: HR / BR / pose are biometric-class signals and must not leak to an unconstrained MQTT broker without explicit operator opt-in.
 
@@ -401,7 +402,7 @@ These eight cover the **top automation requests from the smart-home market** wit
 
 - **Healthcare / aging-in-place** — "elderly inactivity anomaly", "fall risk elevated", "possible distress", "no movement (safety check)", "bed exit (overnight)" — directly map to AAL (Active and Assisted Living) device-class expectations
 - **Convenience automation** — "someone sleeping", "room active", "meeting in progress", "bathroom occupied" — the four highest-volume HA forum-requested binary states
-- **Privacy** — none of these require biometric *values* to be published, only the inferred *states*. A `--privacy-mode` deployment can keep semantic primitives ON and still strip HR/BR/pose, because the inference happens server-side and only the state crosses the wire
+- **Privacy** — none of these require biometric *values* to be published, only the inferred *states*. A `--privacy-mode` deployment can keep semantic primitives ON and still strip HR/BR/pose, because the inference happens server-side and only the state crosses the wire. Amended 2026-10-06 (§12): a state inferred from HR or BR still discloses something about them, so `someone_sleeping` and `possible_distress` are suppressed in privacy mode
 
 #### 3.12.4 Inference quality contract
 
@@ -717,6 +718,17 @@ After the change, five announced entities had no state: `heart_rate` and `breath
 - Zone and threshold files, `--semantic*` / `--no-semantic` flags on `sensing-server`, the `reason` attribute (§3.12.4), and `semantic_events.jsonl`.
 - MQTT last-will and offline-on-shutdown (§3.6). The server registers no LWT and SIGTERM does not publish `offline`, so availability stays as last published after the server stops.
 - Matter consumption of the semantic states.
+
+## 12. Status note: deny-by-default privacy mode (2026-10-06)
+
+The review in [#2165](https://github.com/ruvnet/RuView/issues/2165) of the privacy filter added in [#2125](https://github.com/ruvnet/RuView/pull/2125) pointed out that `--privacy-mode` was a key list: the server removed named biometric keys and passed everything else, so a new biometric field leaked until its name was added, and states derived from vitals were published. This is a behaviour change for privacy-mode deployments.
+
+- **One classification table.** `privacy_fields::FIELD_CLASSES` classifies every JSON key the sensing surfaces emit as public, id-map or biometric. In privacy mode REST, WebSocket and recordings keep only public keys; biometric and unclassified keys are removed at any depth. Frames whose kind is not in `PUBLIC_FRAME_KINDS` (raw CSI, radar, vendor RF, edge WASM events) are dropped. REST routes are classified in `ROUTE_CLASSES`: control-plane routes lose only biometric keys, raw-signal routes return `403 privacy_mode`, and any other route, including one added later, gets the full filter. `/ws/introspection` is now filtered too.
+- **Vitals-derived states are biometric.** `EntityKind::privacy_class` is an exhaustive match, so a new entity has no default class. `someone_sleeping` (reads BR) and `possible_distress` (reads HR) are now suppressed from MQTT discovery and state in privacy mode. `room_active`, `no_movement`, `elderly_inactivity_anomaly` and `fall_risk_elevated` read only presence, motion and falls and are still published.
+- **Newly withheld JSON fields.** `features.breathing_band_power`, `features.dominant_freq_hz` (the breathing frequency when someone is still), `nodes[].amplitude` (per-subcarrier CSI, from which rates can be recomputed), `edge_fused_vitals.fusion_confidence`, the vital-signs `authority`, `buffer_status` and `abstention_reason`, and `numeric_vitals_authorized`.
+- **Entity count.** With `--privacy-mode`, 11 entities are announced per node instead of the 13 measured in §11.2 (CODE-DERIVED from `DiscoveryBuilder::enabled_entities`, not re-measured on a broker). Home Assistant keeps retained discovery configs for the two removed states until they are cleared.
+- **Unchanged.** Without `--privacy-mode` every surface is byte-identical. `/api/field` and `/ws/field` keep their own governed privacy class (ADR-262); their events are signed and are not rewritten.
+- **Regression guard.** Tests serialize a fully populated `sensing_update` (built field by field, so a new struct field must be added to the fixture), the `edge_vitals` and `edge_fused_vitals` frames, the pose stream and eleven REST sensing responses, and fail on any key that is not classified.
 
 ---
 
