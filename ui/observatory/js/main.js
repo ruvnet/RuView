@@ -19,6 +19,10 @@ import { FigurePool, SKELETON_PAIRS } from './figure-pool.js';
 import { PoseSystem } from './pose-system.js';
 import { ScenarioProps } from './scenario-props.js';
 import { HudController, DEFAULTS, SETTINGS_VERSION, PRESETS, SCENARIO_NAMES } from './hud-controller.js';
+import { frameSource, reconnectDelayMs, isSensingFrame } from './live-data.js';
+
+// Drawn when live mode has no current frame: an empty room, never demo data.
+const NO_DATA_FRAME = Object.freeze({});
 
 // ---- Palette ----
 const C = {
@@ -131,6 +135,11 @@ class Observatory {
     // WebSocket for live data — always try auto-detect on startup
     this._ws = null;
     this._liveData = null;
+    this._liveAtMs = NaN;       // performance.now() of the last live frame
+    this._reconnectTimer = null;
+    this._reconnectAttempt = 0;
+    this._wsGen = 0;            // bumped on every disconnect
+    this._demoReason = 'Looking for a sensing server...';
     // Deferred to after the first rendered frames. Scene construction and
     // shader compilation block the main thread for seconds under software
     // WebGL (a VM with no GPU), and the probe's abort timeout below is
@@ -454,7 +463,15 @@ class Observatory {
 
     const tryNext = (i) => {
       if (i >= unique.length) {
+        if (this.settings.dataSource === 'ws' && this.settings.wsUrl) {
+          // Live was chosen and saved: keep trying it, never substitute demo.
+          console.log('[Observatory] No server auto-detected; retrying saved', this.settings.wsUrl);
+          void this._connectWS(this.settings.wsUrl);
+          return;
+        }
         console.log('[Observatory] No sensing server detected, using demo mode');
+        this.settings.dataSource = 'demo';
+        this._demoReason = `No sensing server answered at ${unique.join(', ')}.`;
         return;
       }
       const base = unique[i];
@@ -479,30 +496,74 @@ class Observatory {
   }
 
   // async: `/ws/sensing` is gated (ADR-272); mint a single-use ticket first.
+  // A dropped or failed connection never falls back to demo: the page shows
+  // NO LIVE DATA over an empty room and keeps retrying with backoff.
   async _connectWS(url) {
     this._disconnectWS();
+    const gen = this._wsGen;
     let wsUrl = url;
     try { wsUrl = await withWsTicket(url); } catch { /* auth off or pre-ADR-272 server */ }
+    // The source may have changed while the ticket was being minted.
+    if (gen !== this._wsGen || this.settings.dataSource !== 'ws') return;
     try {
-      this._ws = new WebSocket(wsUrl);
-      this._ws.onopen = () => {
+      const ws = new WebSocket(wsUrl);
+      this._ws = ws;
+      ws.onopen = () => {
         console.log('[Observatory] WebSocket connected');
-        this._hud.updateSourceBadge('ws', this._ws);
+        this._reconnectAttempt = 0;
       };
-      this._ws.onmessage = (evt) => { try { this._liveData = JSON.parse(evt.data); } catch {} };
-      this._ws.onclose = () => {
-        console.log('[Observatory] WebSocket closed, falling back to demo');
+      ws.onmessage = (evt) => {
+        let msg;
+        try { msg = JSON.parse(evt.data); } catch { return; }
+        if (!isSensingFrame(msg)) return;
+        this._liveData = msg;
+        this._liveAtMs = performance.now();
+      };
+      ws.onclose = () => {
+        if (this._ws !== ws) return;
         this._ws = null;
-        this.settings.dataSource = 'demo';
-        this._hud.updateSourceBadge('demo', null);
+        this._liveData = null;
+        this._scheduleReconnect(url);
       };
-      this._ws.onerror = () => {};
-    } catch {}
+      ws.onerror = () => {};
+    } catch {
+      this._scheduleReconnect(url);
+    }
+  }
+
+  _scheduleReconnect(url) {
+    if (this.settings.dataSource !== 'ws') return;
+    clearTimeout(this._reconnectTimer);
+    const delay = reconnectDelayMs(this._reconnectAttempt);
+    this._reconnectAttempt += 1;
+    console.log(`[Observatory] No live connection; retry ${this._reconnectAttempt} in ${delay} ms`);
+    this._reconnectTimer = setTimeout(() => {
+      this._reconnectTimer = null;
+      if (this.settings.dataSource === 'ws') void this._connectWS(this.settings.wsUrl || url);
+    }, delay);
   }
 
   _disconnectWS() {
-    if (this._ws) { this._ws.close(); this._ws = null; }
+    this._wsGen = (this._wsGen || 0) + 1;   // orphan any connect still in flight
+    clearTimeout(this._reconnectTimer);
+    this._reconnectTimer = null;
+    if (this._ws) {
+      const ws = this._ws;
+      this._ws = null;                      // its onclose now sees a stale socket
+      ws.close();
+    }
     this._liveData = null;
+    this._liveAtMs = NaN;
+  }
+
+  /** What the viewer is looking at right now: 'demo', 'live' or 'no-data'. */
+  _frameSource() {
+    return frameSource({
+      dataSource: this.settings.dataSource,
+      liveFrame: this._liveData,
+      liveAtMs: this._liveAtMs,
+      nowMs: performance.now(),
+    });
   }
 
   // ========================================
@@ -514,12 +575,17 @@ class Observatory {
     const dt = Math.min(this._clock.getDelta(), 0.1);
     const elapsed = this._clock.getElapsedTime();
 
-    // Data source
-    if (this.settings.dataSource === 'ws' && this._liveData) {
-      this._currentData = this._liveData;
-    } else {
-      this._currentData = this._demoData.update(dt);
-    }
+    // Data source: demo frames only when demo was chosen; live mode without a
+    // current frame draws an empty room under a NO LIVE DATA banner.
+    const source = this._frameSource();
+    if (source === 'live') this._currentData = this._liveData;
+    else if (source === 'demo') this._currentData = this._demoData.update(dt);
+    else this._currentData = NO_DATA_FRAME;
+    this._hud.updateSource(source, {
+      reason: this._demoReason,
+      wsUrl: this.settings.wsUrl,
+      attempt: this._reconnectAttempt,
+    });
     const data = this._currentData;
 
     // Updates
