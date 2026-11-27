@@ -1,0 +1,248 @@
+{
+  "evidence": "SYNTHETIC",
+  "generator": "scenario-gen-1",
+  "summary": {
+    "empty_rooms_read_occupied": 5,
+    "empty_rooms_total": 5,
+    "still_person_held": 5,
+    "still_person_held_without_false_presence": 1,
+    "still_person_total": 5
+  },
+  "empty_false_presence_pct": {
+    "empty_s0": 100.0,
+    "empty_s1": 100.0,
+    "empty_s2": 100.0,
+    "empty_s3": 22.36,
+    "empty_s4": 100.0
+  },
+  "walk_detect_pct": {
+    "walk_s0": 99.27,
+    "walk_s1": 100.0,
+    "walk_s2": 100.0,
+    "walk_s3": 100.0,
+    "walk_s4": 100.0
+  },
+  "enter_still": {
+    "enter_still_s0": {
+      "empty_10_30_pct": 100.0,
+      "walking_30_40_pct": 100.0,
+      "still_40_100_pct": 100.0,
+      "still_100_240_pct": 100.0
+    },
+    "enter_still_s1": {
+      "empty_10_30_pct": 100.0,
+      "walking_30_40_pct": 100.0,
+      "still_40_100_pct": 100.0,
+      "still_100_240_pct": 100.0
+    },
+    "enter_still_s2": {
+      "empty_10_30_pct": 92.5,
+      "walking_30_40_pct": 100.0,
+      "still_40_100_pct": 100.0,
+      "still_100_240_pct": 100.0
+    },
+    "enter_still_s3": {
+      "empty_10_30_pct": 0.0,
+      "walking_30_40_pct": 95.5,
+      "still_40_100_pct": 100.0,
+      "still_100_240_pct": 100.0
+    },
+    "enter_still_s4": {
+      "empty_10_30_pct": 100.0,
+      "walking_30_40_pct": 100.0,
+      "still_40_100_pct": 100.0,
+      "still_100_240_pct": 100.0
+    }
+  },
+  "vitals": {
+    "-10dB": {
+      "breath_mae_bpm": 1.0,
+      "breath_missing": 0,
+      "hr_mae_bpm": 13.81,
+      "hr_missing": 0
+    },
+    "-15dB": {
+      "breath_mae_bpm": 0.79,
+      "breath_missing": 0,
+      "hr_mae_bpm": 13.48,
+      "hr_missing": 0
+    },
+    "-20dB": {
+      "breath_mae_bpm": 1.49,
+      "breath_missing": 0,
+      "hr_mae_bpm": 15.66,
+      "hr_missing": 0
+    }
+  },
+  "vitals_by_scenario": {
+    "vitals_00": {
+      "dyn_db": -10.0,
+      "breath_true_bpm": 21.5,
+      "breath_est_bpm": 21.44,
+      "heart_true_bpm": 57.2,
+      "heart_est_bpm": 58.66
+    },
+    "vitals_01": {
+      "dyn_db": -10.0,
+      "breath_true_bpm": 15.4,
+      "breath_est_bpm": 15.44,
+      "heart_true_bpm": 60.7,
+      "heart_est_bpm": 75.74
+    },
+    "vitals_02": {
+      "dyn_db": -10.0,
+      "breath_true_bpm": 9.2,
+      "breath_est_bpm": 9.31,
+      "heart_true_bpm": 90.2,
+      "heart_est_bpm": 86.01
+    },
+    "vitals_03": {
+      "dyn_db": -10.0,
+      "breath_true_bpm": 9.5,
+      "breath_est_bpm": 9.19,
+      "heart_true_bpm": 56.8,
+      "heart_est_bpm": 83.28
+    },
+    "vitals_04": {
+      "dyn_db": -10.0,
+      "breath_true_bpm": 14.2,
+      "breath_est_bpm": 14.04,
+      "heart_true_bpm": 89.5,
+      "heart_est_bpm": 89.98
+    },
+    "vitals_05": {
+      "dyn_db": -10.0,
+      "breath_true_bpm": 16.2,
+      "breath_est_bpm": 9.68,
+      "heart_true_bpm": 80.7,
+      "heart_est_bpm": 65.92
+    },
+    "vitals_06": {
+      "dyn_db": -10.0,
+      "breath_true_bpm": 20.4,
+      "breath_est_bpm": 20.49,
+      "heart_true_bpm": 98.1,
+      "heart_est_bpm": 94.48
+    },
+    "vitals_07": {
+      "dyn_db": -10.0,
+      "breath_true_bpm": 17.9,
+      "breath_est_bpm": 17.18,
+      "heart_true_bpm": 99.6,
+      "heart_est_bpm": 55.15
+    },
+    "vitals_08": {
+      "dyn_db": -15.0,
+      "breath_true_bpm": 11.1,
+      "breath_est_bpm": 11.32,
+      "heart_true_bpm": 67.0,
+      "heart_est_bpm": 68.32
+    },
+    "vitals_09": {
+      "dyn_db": -15.0,
+      "breath_true_bpm": 22.6,
+      "breath_est_bpm": 22.67,
+      "heart_true_bpm": 58.8,
+      "heart_est_bpm": 62.88
+    },
+    "vitals_10": {
+      "dyn_db": -15.0,
+      "breath_true_bpm": 22.8,
+      "breath_est_bpm": 24.39,
+      "heart_true_bpm": 97.8,
+      "heart_est_bpm": 64.95
+    },
+    "vitals_11": {
+      "dyn_db": -15.0,
+      "breath_true_bpm": 19.5,
+      "breath_est_bpm": 19.69,
+      "heart_true_bpm": 78.8,
+      "heart_est_bpm": 54.05
+    },
+    "vitals_12": {
+      "dyn_db": -15.0,
+      "breath_true_bpm": 23.2,
+      "breath_est_bpm": 22.99,
+      "heart_true_bpm": 83.5,
+      "heart_est_bpm": 62.36
+    },
+    "vitals_13": {
+      "dyn_db": -15.0,
+      "breath_true_bpm": 10.7,
+      "breath_est_bpm": 7.03,
+      "heart_true_bpm": 64.7,
+      "heart_est_bpm": 76.96
+    },
+    "vitals_14": {
+      "dyn_db": -15.0,
+      "breath_true_bpm": 9.0,
+      "breath_est_bpm": 9.08,
+      "heart_true_bpm": 65.7,
+      "heart_est_bpm": 59.62
+    },
+    "vitals_15": {
+      "dyn_db": -15.0,
+      "breath_true_bpm": 17.1,
+      "breath_est_bpm": 16.83,
+      "heart_true_bpm": 74.3,
+      "heart_est_bpm": 68.95
+    },
+    "vitals_16": {
+      "dyn_db": -20.0,
+      "breath_true_bpm": 17.7,
+      "breath_est_bpm": 17.37,
+      "heart_true_bpm": 77.8,
+      "heart_est_bpm": 80.45
+    },
+    "vitals_17": {
+      "dyn_db": -20.0,
+      "breath_true_bpm": 11.0,
+      "breath_est_bpm": 18.87,
+      "heart_true_bpm": 62.9,
+      "heart_est_bpm": 99.07
+    },
+    "vitals_18": {
+      "dyn_db": -20.0,
+      "breath_true_bpm": 12.0,
+      "breath_est_bpm": 12.01,
+      "heart_true_bpm": 82.3,
+      "heart_est_bpm": 78.69
+    },
+    "vitals_19": {
+      "dyn_db": -20.0,
+      "breath_true_bpm": 16.5,
+      "breath_est_bpm": 19.74,
+      "heart_true_bpm": 95.2,
+      "heart_est_bpm": 89.19
+    },
+    "vitals_20": {
+      "dyn_db": -20.0,
+      "breath_true_bpm": 18.3,
+      "breath_est_bpm": 18.15,
+      "heart_true_bpm": 61.1,
+      "heart_est_bpm": 74.92
+    },
+    "vitals_21": {
+      "dyn_db": -20.0,
+      "breath_true_bpm": 9.9,
+      "breath_est_bpm": 9.84,
+      "heart_true_bpm": 71.4,
+      "heart_est_bpm": 88.76
+    },
+    "vitals_22": {
+      "dyn_db": -20.0,
+      "breath_true_bpm": 21.0,
+      "breath_est_bpm": 20.94,
+      "heart_true_bpm": 55.0,
+      "heart_est_bpm": 89.52
+    },
+    "vitals_23": {
+      "dyn_db": -20.0,
+      "breath_true_bpm": 9.1,
+      "breath_est_bpm": 8.9,
+      "heart_true_bpm": 70.5,
+      "heart_est_bpm": 81.67
+    }
+  },
+  "hr_chance_mae_bpm": 13.09
+}
