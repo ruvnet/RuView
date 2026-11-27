@@ -1,0 +1,223 @@
+ESP32-S3 CSI node boot and runtime log for docs/tutorials/esp32-s3-csi-quickstart.md
+
+Captured 2026-10-22 on the guide author's Windows 11 host over a CH343 USB
+serial bridge at COM5, 115200 baud. The node was reset through the USB serial
+adapter (RTS pulse) and the console was read from the first byte of the ROM
+banner; nothing was written to the node.
+
+Board: ESP32-S3 (QFN56 rev 0.2), 16 MB flash, mxic SPI flash in DIO mode.
+Firmware: 0.8.15, built Oct 21 2026 22:01:09 with ESP-IDF v5.4.
+
+The node was provisioned with target_ip=192.168.0.57, an address that is not
+present on the LAN, so every UDP send failed and the CSI yield was throttled
+by the adaptive controller. That is the failure this guide documents.
+
+Redactions: the home network SSID, the AP BSSID and the node's own MAC address
+are replaced with placeholders. The private LAN addresses are kept because the
+diagnostic depends on them.
+ESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0x1 (POWERON),boot:0x8 (SPI_FAST_FLASH_BOOT)
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce2810,len:0x1120
+load:0x403c8700,len:0x4
+load:0x403c8704,len:0xb2c
+load:0x403cb700,len:0x2d64
+entry 0x403c88a8
+I (225) cpu_start: Multicore app
+I (234) cpu_start: Pro cpu start user code
+I (234) cpu_start: cpu freq: 160000000 Hz
+I (234) app_init: Application information:
+I (234) app_init: Project name:     esp32-csi-node
+I (238) app_init: App version:      0.8.15
+I (242) app_init: Compile time:     Oct 21 2026 22:01:09
+I (247) app_init: ELF file SHA256:  4e94cf258...
+I (252) app_init: ESP-IDF:          v5.4
+I (255) efuse_init: Min chip rev:     v0.0
+I (259) efuse_init: Max chip rev:     v0.99 
+I (263) efuse_init: Chip rev:         v0.2
+I (267) heap_init: Initializing. RAM available for dynamic allocation:
+I (273) heap_init: At 3FCAF258 len 0003A4B8 (233 KiB): RAM
+I (278) heap_init: At 3FCE9710 len 00005724 (21 KiB): RAM
+I (283) heap_init: At 3FCF0000 len 00008000 (32 KiB): DRAM
+I (289) heap_init: At 600FE11C len 00001ECC (7 KiB): RTCRAM
+I (295) spi_flash: detected chip: mxic
+I (297) spi_flash: flash io: dio
+I (301) sleep_gpio: Configure to isolate all GPIO pins in sleep state
+I (307) sleep_gpio: Enable automatic switching of GPIO sleep configuration
+I (313) esp_core_dump_flash: Init core dump to flash
+I (318) esp_core_dump_flash: Found partition 'coredump' @ 820000 65536 bytes
+I (348) esp_core_dump_flash: Core dump data checksum is correct
+I (348) esp_core_dump_flash: Found core dump 20388 bytes in flash @ 0x820000
+I (349) main_task: Started on CPU0
+I (359) main_task: Calling app_main()
+I (379) nvs_config: NVS override: ssid=<configured>
+I (379) nvs_config: NVS override: password=***
+I (379) nvs_config: NVS override: target_ip=192.168.0.57
+I (379) nvs_config: NVS override: node_id=1
+I (389) nvs_config: NVS override: vital_window=256
+I (389) nvs_config: NVS override: top_k_count=32
+W (399) nvs_config: wasm_verify=1 but no wasm_pubkey in NVS ??? uploads will be rejected
+I (409) nvs_config: NVS override: csi_channel=6
+I (409) csi_collector: Early capture node_id=1 (before WiFi init, #232/#390)
+I (419) main: ESP32-S3 CSI Node (ADR-018 / ADR-110) ??? v0.8.15 ??? Node ID: 1
+I (419) ota_health: running ota_0 state VALID: no health check
+I (429) serial_onboard: bounded serial onboarding ready
+I (429) main: Onboard WS2812: 40 Hz gamma flicker (GENUS), colour=CSI motion via ruv-neural-viz, GPIO 48
+I (439) pp: pp rom version: e7ae62f
+I (449) net80211: net80211 rom version: e7ae62f
+I (459) wifi:wifi driver task: 3fcbdce8, prio:23, stack:6656, core=0
+I (469) wifi:wifi firmware version: 48ea317a7
+I (469) wifi:wifi certification version: v7.0
+I (469) wifi:config NVS flash: enabled
+I (469) wifi:config nano formatting: disabled
+I (469) wifi:Init data frame dynamic rx buffer num: 32
+I (479) wifi:Init static rx mgmt buffer num: 5
+I (479) wifi:Init management short buffer num: 32
+I (489) wifi:Init dynamic tx buffer num: 64
+I (489) wifi:Init static tx FG buffer num: 2
+I (489) wifi:Init static rx buffer size: 2212
+I (499) wifi:Init static rx buffer num: 10
+I (499) wifi:Init dynamic rx buffer num: 32
+I (509) wifi_init: rx ba win: 6
+I (509) wifi_init: accept mbox: 6
+I (509) wifi_init: tcpip mbox: 64
+I (509) wifi_init: udp mbox: 32
+I (519) wifi_init: tcp mbox: 6
+I (519) wifi_init: tcp tx win: 5760
+I (519) wifi_init: tcp rx win: 5760
+I (529) wifi_init: tcp mss: 1440
+I (529) wifi_init: WiFi IRAM OP enabled
+I (529) wifi_init: WiFi RX IRAM OP enabled
+I (539) phy_init: phy_version 680,a6008b2,Jun  4 2024,16:41:10
+I (579) wifi:mode : sta (<NODE_MAC>)
+I (579) wifi:enable tsf
+I (579) main: WiFi STA initialized, connecting to SSID: <SSID>
+I (679) wifi:new:<6,1>, old:<1,0>, ap:<255,255>, sta:<6,1>, prof:1, snd_ch_cfg:0x0
+I (679) wifi:state: init -> auth (0xb0)
+I (699) wifi:state: auth -> assoc (0x0)
+I (749) wifi:state: assoc -> run (0x10)
+I (779) wifi:connected with <SSID>, aid = 2, channel 6, 40U, bssid = <BSSID>
+I (789) wifi:security: WPA2-PSK, phy: bgn, rssi: -49
+I (789) wifi:pm start, type: 1
+
+I (789) wifi:dp: 1, bi: 102400, li: 3, scale listen interval from 307200 us to 307200 us
+I (799) wifi:set rx beacon pti, rx_bcn_pti: 0, bcn_timeout: 25000, mt_pti: 0, mt_time: 10000
+I (819) wifi:<ba-add>idx:0 (ifx:0, <BSSID>), tid:6, ssn:2, winSize:64
+I (879) wifi:AP's beacon interval = 102400 us, DTIM period = 1
+I (1839) esp_netif_handlers: sta ip: 192.168.0.107, mask: 255.255.255.0, gw: 192.168.0.1
+I (1839) main: Got IP: 192.168.0.107
+I (1839) main: Connected to WiFi
+I (1839) stream_sender: UDP sender initialized: 192.168.0.57:5005
+I (1839) main: reset reason: power-on (1)
+I (1859) node_log: logging active: boot_id=43 recovered=32 records, head=32
+W (1869) node_log: record write failed; disabling to protect the volume
+I (1869) main: on-node log active: boot_id=43, 32 records retained
+I (1869) csi_collector: node_id=1 verified (early capture matches g_nvs_config)
+I (1879) csi_collector: Using NVS channel override: 6
+I (1879) wifi:Set ps type: 0, coexist: 0
+
+I (1889) csi_collector: WiFi modem sleep disabled (WIFI_PS_NONE) for CSI capture
+I (1889) wifi:ic_enable_sniffer
+I (1899) csi_collector: Promiscuous mode enabled (MGMT-only, RuView#396)
+I (1899) csi_collector: CSI collection initialized (node_id=1, channel=6)
+I (1909) csi_collector: edge DSP cadence=20Hz; raw CSI network cadence remains independent
+I (1919) csi_collector: self-ping started -> 192.168.0.1 @50Hz (CSI yield depends on AP reply rate, #2287)
+I (1929) wifi:<ba-add>idx:1 (ifx:0, <BSSID>), tid:0, ssn:0, winSize:64
+I (1939) ESPNOW: espnow [version: 2.0] init
+I (1939) c6_espnow: init done: local_id=<NODE_MAC> leader=yes(candidate) period=100ms
+I (1949) edge_proc: Initializing edge processing (tier=2, top_k=32, vital_interval=1000ms, presence_thresh=0.000)
+I (1959) edge_proc: Edge DSP task created on core 1 (stack=8192, priority=5)
+I (1959) edge_proc: Edge DSP task started on core 1 (tier=2)
+I (1959) ota_update: OTA PSK loaded from NVS (64 chars) ??? authentication enabled
+I (1979) ota_update: OTA HTTP server started on port 8032
+I (1979) ota_update:   GET  /ota/status ??? firmware version info
+I (1989) ota_update:   POST /ota        ??? upload new firmware binary
+W (1989) wasm_rt: WASM Tier 3 disabled (WASM3 not available)
+I (1999) wasm_upload: WASM upload endpoints registered:
+I (1999) wasm_upload:   POST   /wasm/upload    ??? upload .wasm binary
+I (2009) wasm_upload:   GET    /wasm/list      ??? list modules
+I (2009) wasm_upload:   POST   /wasm/start/:id ??? start module
+I (2019) wasm_upload:   POST   /wasm/stop/:id  ??? stop module
+I (2029) wasm_upload:   DELETE /wasm/:id       ??? unload module
+I (2029) main: WASM on_timer() periodic: 1000 ms
+I (2039) mmwave: Probing UART1 (TX=17, RX=18) for mmWave sensor...
+I (2039) c6_espnow: tx#1 (fail=0) rx#0 (match=0) leader=1 offset_us=0 smoothed=0
+I (2039) mmwave: Probing at 115200 baud (MR60BHA2)...
+I (3149) mmwave: Probing at 256000 baud (LD2410)...
+I (4249) mmwave: No mmWave sensor detected on UART1
+I (4249) main: No mmWave sensor detected (CSI-only mode)
+I (4249) main: Swarm bridge disabled (no seed_url configured)
+I (4249) rv_radio_esp32: ESP32 radio ops registered as active binding
+I (4259) rv_radio_esp32: ESP32 radio ops: init (current ch=1 bw=20)
+I (4259) adaptive_ctrl: adaptive controller online: fast=200ms med=1000ms slow=30000ms (channel_switch=0 role_change=0 aggressive=0)
+I (4269) power_mgmt: Power management disabled (duty_cycle=100%)
+I (4279) csi_collector: CSI filter upgraded to MGMT+DATA (no display, RuView#893)
+I (4289) main: CSI streaming active ??? 192.168.0.57:5005 (edge_tier=2, OTA=ready, WASM=ready, mmWave=off, swarm=off, adapt=on)
+I (4349) csi_collector: CSI cb #1: len=376 rssi=-52 ch=6
+I (4459) adaptive_ctrl: state 5 ??? 8
+W (4459) rv_mesh: rv_mesh_send: stream_sender failed (len=48)
+I (4529) csi_collector: CSI cb #2: len=376 rssi=-52 ch=6
+W (4529) stream_sender: sendto ENOMEM to 192.168.0.57:5005 - the aggregator may not be answering on that address (ARP unresolved) or lwIP is out of packet buffers; backing off for 100 ms (streak 1)
+W (4539) csi_collector: sendto failed (fail #1)
+I (4689) csi_collector: CSI cb #3: len=376 rssi=-52 ch=6
+I (4689) stream_sender: ENOMEM backoff expired, resuming sends (0 were suppressed)
+W (4689) stream_sender: sendto ENOMEM to 192.168.0.57:5005 - the aggregator may not be answering on that address (ARP unresolved) or lwIP is out of packet buffers; backing off for 200 ms (streak 2)
+W (4709) csi_collector: sendto failed (fail #2)
+W (4849) stream_sender: sendto suppressed (ENOMEM backoff, 1 dropped)
+W (4849) csi_collector: sendto failed (fail #3)
+I (5039) stream_sender: ENOMEM backoff expired, resuming sends (1 were suppressed)
+W (5039) stream_sender: sendto ENOMEM to 192.168.0.57:5005 - the aggregator may not be answering on that address (ARP unresolved) or lwIP is out of packet buffers; backing off for 400 ms (streak 3)
+W (5049) csi_collector: sendto failed (fail #4)
+W (5209) stream_sender: sendto suppressed (ENOMEM backoff, 1 dropped)
+W (5209) csi_collector: sendto failed (fail #5)
+I (5259) adaptive_ctrl: medium tick: state=8 yield=0pps dsp=20.0Hz motion=0.00 presence=0.00 rssi=-49
+W (5259) adaptive_ctrl: feature_state emit failed
+I (5509) stream_sender: ENOMEM backoff expired, resuming sends (3 were suppressed)
+W (5509) stream_sender: sendto ENOMEM to 192.168.0.57:5005 - the aggregator may not be answering on that address (ARP unresolved) or lwIP is out of packet buffers; backing off for 800 ms (streak 4)
+W (5529) stream_sender: sendto suppressed (ENOMEM backoff, 1 dropped)
+I (5659) adaptive_ctrl: state 8 ??? 5
+I (6259) adaptive_ctrl: medium tick: state=5 yield=7pps dsp=17.0Hz motion=0.00 presence=0.00 rssi=-48
+W (6259) adaptive_ctrl: feature_state emit failed
+I (6329) stream_sender: ENOMEM backoff expired, resuming sends (5 were suppressed)
+W (6329) stream_sender: sendto ENOMEM to 192.168.0.57:5005 - the aggregator may not be answering on that address (ARP unresolved) or lwIP is out of packet buffers; backing off for 1600 ms (streak 5)
+W (6499) stream_sender: sendto suppressed (ENOMEM backoff, 1 dropped)
+I (6659) adaptive_ctrl: state 5 ??? 8
+W (6659) rv_mesh: rv_mesh_send: stream_sender failed (len=48)
+I (7039) c6_espnow: tx#51 (fail=0) rx#0 (match=0) leader=1 offset_us=0 smoothed=0
+I (7259) adaptive_ctrl: medium tick: state=8 yield=3pps dsp=14.8Hz motion=0.00 presence=0.00 rssi=-49
+W (7259) adaptive_ctrl: feature_state emit failed
+I (7659) csi_collector: sync-pkt #1 (sr=-1) node=1 flags=0x03 local_us=7364972 epoch_us=7364973 seq=20
+I (8119) stream_sender: ENOMEM backoff expired, resuming sends (13 were suppressed)
+W (8119) stream_sender: sendto ENOMEM to 192.168.0.57:5005 - the aggregator may not be answering on that address (ARP unresolved) or lwIP is out of packet buffers; backing off for 2000 ms (streak 6)
+I (8259) adaptive_ctrl: medium tick: state=8 yield=4pps dsp=13.1Hz motion=0.00 presence=0.00 rssi=-49
+W (8259) adaptive_ctrl: feature_state emit failed
+W (8329) stream_sender: sendto suppressed (ENOMEM backoff, 1 dropped)
+I (8859) adaptive_ctrl: state 8 ??? 5
+I (9259) adaptive_ctrl: medium tick: state=5 yield=7pps dsp=11.8Hz motion=0.00 presence=0.00 rssi=-49
+I (10209) stream_sender: ENOMEM backoff expired, resuming sends (16 were suppressed)
+I (10209) stream_sender: sendto to 192.168.0.57:5005 succeeded after 6 failed attempts
+I (10259) adaptive_ctrl: medium tick: state=5 yield=5pps dsp=10.8Hz motion=0.00 presence=0.00 rssi=-48
+W (10369) stream_sender: sendto ENOMEM to 192.168.0.57:5005 - the aggregator may not be answering on that address (ARP unresolved) or lwIP is out of packet buffers; backing off for 100 ms (streak 1)
+I (10569) stream_sender: ENOMEM backoff expired, resuming sends (0 were suppressed)
+W (10569) stream_sender: sendto ENOMEM to 192.168.0.57:5005 - the aggregator may not be answering on that address (ARP unresolved) or lwIP is out of packet buffers; backing off for 200 ms (streak 2)
+W (10729) stream_sender: sendto suppressed (ENOMEM backoff, 1 dropped)
+I (10899) stream_sender: ENOMEM backoff expired, resuming sends (1 were suppressed)
+W (10899) stream_sender: sendto ENOMEM to 192.168.0.57:5005 - the aggregator may not be answering on that address (ARP unresolved) or lwIP is out of packet buffers; backing off for 400 ms (streak 3)
+I (10909) csi_collector: sync-pkt #2 (sr=-1) node=1 flags=0x03 local_us=10617153 epoch_us=10617160 seq=40
+W (11089) stream_sender: sendto suppressed (ENOMEM backoff, 1 dropped)
+I (11259) adaptive_ctrl: medium tick: state=5 yield=5pps dsp=10.1Hz motion=0.00 presence=0.00 rssi=-48
+W (11259) adaptive_ctrl: feature_state emit failed
+I (11349) stream_sender: ENOMEM backoff expired, resuming sends (4 were suppressed)
+W (11349) stream_sender: sendto ENOMEM to 192.168.0.57:5005 - the aggregator may not be answering on that address (ARP unresolved) or lwIP is out of packet buffers; backing off for 800 ms (streak 4)
+W (11409) stream_sender: sendto suppressed (ENOMEM backoff, 1 dropped)
+I (12039) c6_espnow: tx#101 (fail=0) rx#0 (match=0) leader=1 offset_us=0 smoothed=0
+I (12259) adaptive_ctrl: medium tick: state=5 yield=5pps dsp=10.1Hz motion=0.00 presence=0.00 rssi=-49
+W (12259) adaptive_ctrl: feature_state emit failed
+I (12259) stream_sender: ENOMEM backoff expired, resuming sends (5 were suppressed)
+W (12269) stream_sender: sendto ENOMEM to 192.168.0.57:5005 - the aggregator may not be answering on that address (ARP unresolved) or lwIP is out of packet buffers; backing off for 1600 ms (streak 5)
+W (12289) stream_sender: sendto suppressed (ENOMEM backoff, 1 dropped)
+I (13259) adaptive_ctrl: medium tick: state=5 yield=6pps dsp=9.6Hz motion=0.00 presence=0.00 rssi=-49
+W (13259) adaptive_ctrl: feature_state emit failed
+I (13659) csi_collector: sync-pkt #3 (sr=32) node=1 flags=0x03 local_us=13364492 epoch_us=13364493 seq=60
