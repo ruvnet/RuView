@@ -1,6 +1,6 @@
-name: nvsim Dashboard → GitHub Pages
+name: V.I.S.I.O.N. Dashboard → GitHub Pages
 
-# Deploys the nvsim Vite/Lit dashboard to gh-pages/nvsim/ — preserving
+# Deploys the V.I.S.I.O.N. Vite/Lit dashboard to gh-pages/nvsim/ — preserving
 # the existing observatory/, pose-fusion/, and root index.html demos
 # already published from gh-pages. ADR-092 §9.
 
@@ -10,6 +10,8 @@ on:
     paths:
       - 'v2/crates/nvsim/**'
       - 'dashboard/**'
+      - 'docs/vision-control-center.html'
+      - 'docs/about-vision.html'
       - '.github/workflows/dashboard-pages.yml'
   workflow_dispatch:
 
@@ -69,10 +71,15 @@ jobs:
         working-directory: dashboard
         run: npm ci
 
+      - name: Add V.I.S.I.O.N. pages to dashboard output
+        run: |
+          cp docs/vision-control-center.html dashboard/public/control-center.html
+          cp docs/about-vision.html dashboard/public/about.html
+
       - name: Build dashboard
         working-directory: dashboard
         env:
-          NVSIM_BASE: /RuView/nvsim/
+          NVSIM_BASE: /VISION/nvsim/
         run: npm run build
 
       - name: Deploy to gh-pages/nvsim/
@@ -82,7 +89,7 @@ jobs:
           publish_dir: ./dashboard/dist
           destination_dir: nvsim
           # CRITICAL: preserves observatory/, pose-fusion/, root index.html
-          # and any other RuView demos already on gh-pages.
+          # and any other V.I.S.I.O.N. demos already on gh-pages.
           keep_files: true
           commit_message: 'deploy(nvsim): ${{ github.sha }}'
           user_name: 'github-actions[bot]'
