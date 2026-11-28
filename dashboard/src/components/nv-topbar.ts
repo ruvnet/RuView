@@ -36,6 +36,8 @@ export class NvTopbar extends LitElement {
     .pill.seed { color: var(--ink-3); cursor: pointer; }
     .pill.seed:hover { border-color: var(--line-2); }
     .pill.seed b { color: var(--accent); font-weight: 600; }
+    a.nav-link { display:inline-flex; align-items:center; padding:6px 10px; border:1px solid var(--line); border-radius:8px; color:var(--ink-2); font-size:12.5px; text-decoration:none; white-space:nowrap; }
+    a.nav-link:hover { border-color:var(--line-2); color:var(--ink); background:var(--bg-3); }
     .pill.wasm { cursor: pointer; }
     .pill.wasm:hover { border-color: var(--line-2); }
     button {
@@ -100,11 +102,13 @@ export class NvTopbar extends LitElement {
     const seedHex = seed.value.toString(16).toUpperCase().padStart(8, '0');
     return html`
       <div class="crumbs">
-        <span class="home">RuView</span><span class="sep">/</span>
+        <span class="home">V.I.S.I.O.N.</span><span class="sep">/</span>
         <span>nvsim</span><span class="sep">/</span>
         <span class="cur" id="scene-name">${sceneName.value}</span>
       </div>
       <div class="spacer"></div>
+      <a class="nav-link" href="${import.meta.env.BASE_URL}control-center.html">Control Center</a>
+      <a class="nav-link" href="${import.meta.env.BASE_URL}about.html">About</a>
       <span class="pill" id="fps-pill">
         <span class="dot"></span>
         <span id="fps-val">${fps.value > 0 ? (fps.value / 1000).toFixed(2) + ' kHz' : 'idle'}</span>
