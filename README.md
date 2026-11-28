@@ -1,19 +1,21 @@
 # V.I.S.I.O.N.
 
-> **V.I.S.I.O.N.** stands for **Virtual Intelligence for Sensing, Interpretation & Observation of Networks** — a Wi-Fi sensing and smart-environment project.
+> **V.I.S.I.O.N.** means **Virtual Intelligence for Sensing, Interpretation & Observation of Networks** — a Wi-Fi sensing and smart-environment research project.
 >
-> This repository is a personal fork and rebranding of [RuView](https://github.com/ruvnet/RuView). The original project name remains in upstream references, package names, paths, and technical documentation where needed for compatibility and attribution.
+> V.I.S.I.O.N. is the project’s public-facing name. This repository is a personal fork of [RuView](https://github.com/ruvnet/RuView); the upstream name is retained in original attribution, technical identifiers, package names, and paths where compatibility requires it.
 
-> **V.I.S.I.O.N. Control Center:** [Open the interactive dashboard prototype](docs/vision-control-center.html). It currently uses clearly labeled demo data and is not connected to physical sensors.
+> **V.I.S.I.O.N. Control Center:** [Open the deployed dashboard](https://lokilancer.github.io/VISION/nvsim/) · [Open Control Center directly](https://lokilancer.github.io/VISION/nvsim/control-center.html) · [About V.I.S.I.O.N.](https://lokilancer.github.io/VISION/nvsim/about.html)
+
+> **Prototype status:** Control Center currently uses demo data. It is not connected to physical sensors or a live sensing backend.
 
 
 <p align="center">
   <a href="https://cognitum.one/seed">
-    <img src="assets/ruview-hero-h3-v3.gif" alt="RuView - WiFi DensePose — animated visualization of real-time pose estimation, breathing, and heart-rate sensing through WiFi" width="100%">
+    <img src="assets/ruview-hero-h3-v3.gif" alt="V.I.S.I.O.N. — inherited upstream research visualization of real-time pose estimation, breathing, and heart-rate sensing through WiFi" width="100%">
   </a>
 </p>
 
-[![RuView: spaces become signals, with an animated conceptual RF field](assets/readme/hero-spatial-v6.svg)](docs/user-guide.md)
+[![V.I.S.I.O.N.: spaces become signals, with an animated conceptual RF field](assets/readme/hero-spatial-v6.svg)](docs/user-guide.md)
 
 <table>
 <tr>
@@ -35,7 +37,7 @@
 </p>
 
 
-## **See through walls with WiFi** ##
+## V.I.S.I.O.N. — Wi-Fi sensing research ##
 
 **Turn ordinary WiFi into a spatial intelligence / sensing system.** Detect people, measure breathing and heart rate, track movement, and monitor rooms — through walls, in the dark, with no cameras or wearables. Just physics.
 
@@ -45,7 +47,7 @@ Works natively with the four major smart-home ecosystems: **[Home Assistant](doc
 
 > Drop into any **Home Assistant** install with one `--mqtt` flag. Or pair into **Apple Home / Google Home / Alexa / SmartThings** as a Matter Bridge. Ships 21 entities per node (11 raw signals + 10 inferred semantic states: someone-sleeping, possible-distress, room-active, elderly-inactivity-anomaly, meeting-in-progress, bathroom-occupied, fall-risk-elevated, bed-exit, no-movement, multi-room-transition) plus 3 starter HA Blueprints. See [`docs/integrations/home-assistant.md`](docs/integrations/home-assistant.md) · [ADR-115](docs/adr/ADR-115-home-assistant-integration.md).
 
-### π RuView is a WiFi sensing platform that turns radio signals into spatial intelligence.
+### V.I.S.I.O.N. explores how radio signals can inform spatial sensing.
 
 Every WiFi router already fills your space with radio waves. When people move, breathe, or even sit still, they disturb those waves in measurable ways. RuView captures these disturbances using Channel State Information (CSI) from low-cost ESP32 sensors and turns them into actionable data: who's there, what they're doing, and whether they're okay.
 
@@ -853,4 +855,4 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 ---
 
-**WiFi DensePose** — Privacy-preserving human pose estimation through WiFi signals.
+**V.I.S.I.O.N.** — Wi-Fi sensing research and smart-environment exploration.
