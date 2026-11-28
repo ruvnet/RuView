@@ -4,6 +4,8 @@
 >
 > This repository is a personal fork and rebranding of [RuView](https://github.com/ruvnet/RuView). The original project name remains in upstream references, package names, paths, and technical documentation where needed for compatibility and attribution.
 
+> **V.I.S.I.O.N. Control Center:** [Open the interactive dashboard prototype](docs/vision-control-center.html). It currently uses clearly labeled demo data and is not connected to physical sensors.
+
 
 <p align="center">
   <a href="https://cognitum.one/seed">
