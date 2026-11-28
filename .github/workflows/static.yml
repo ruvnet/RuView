@@ -1,29 +1,22 @@
-# Simple workflow for deploying static content to GitHub Pages
+# Build the V.I.S.I.O.N. dashboard and publish it with the repository's static demos.
 name: Deploy static content to Pages
 
 on:
-  # Runs on pushes targeting the default branch
   push:
     branches: ["main"]
-
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
-# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
 permissions:
   contents: read
   pages: write
   id-token: write
 
-# Allow only one concurrent deployment, skipping runs queued between the run in-progress and latest queued.
-# However, do NOT cancel in-progress runs as we want to allow these production deployments to complete.
 concurrency:
   group: "pages"
   cancel-in-progress: false
 
 jobs:
-  # Single deploy job since we're just deploying
-  deploy:
+  build-and-deploy:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -31,13 +24,85 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
-      - name: Upload artifact
+
+      - name: Install Rust + wasm32 target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: |
+          curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+          which wasm-pack
+
+      - name: Build nvsim WASM
+        working-directory: v2
+        run: |
+          wasm-pack build crates/nvsim \
+            --target web \
+            --out-dir ../../dashboard/public/nvsim-pkg \
+            --release \
+            -- --no-default-features --features wasm
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Install dashboard dependencies
+        working-directory: dashboard
+        run: npm ci
+
+      - name: Add V.I.S.I.O.N. pages to dashboard
+        run: |
+          cp docs/vision-control-center.html dashboard/public/control-center.html
+          cp docs/about-vision.html dashboard/public/about.html
+
+      - name: Build dashboard for project Pages path
+        working-directory: dashboard
+        env:
+          NVSIM_BASE: /VISION/nvsim/
+        run: npm run build
+
+      - name: Assemble Pages site
+        run: |
+          mkdir -p site
+          rsync -a --exclude='.git/' --exclude='site/' --exclude='dashboard/' --exclude='v2/target/' ./ site/
+          mkdir -p site/nvsim
+          cp -a dashboard/dist/. site/nvsim/
+          cat > site/index.html <<'EOF'
+          <!doctype html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width,initial-scale=1">
+            <meta name="theme-color" content="#080d0b">
+            <title>V.I.S.I.O.N. — Project Hub</title>
+            <style>
+              :root{color-scheme:dark;--bg:#080d0b;--panel:#101a16;--line:#263b30;--lime:#b6ff45;--muted:#9bb2a3;--fg:#edf6ef}
+              *{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 70% 0,#17271b,transparent 40%),var(--bg);color:var(--fg);font:16px/1.6 system-ui,sans-serif}
+              main{max-width:900px;margin:auto;padding:10vh 24px}small{color:var(--lime);letter-spacing:.16em;font-weight:700}h1{font-size:clamp(40px,8vw,76px);line-height:1.03;margin:16px 0}p{color:var(--muted);max-width:650px}
+              .links{display:flex;flex-wrap:wrap;gap:12px;margin:28px 0}.links a{display:inline-block;padding:12px 18px;border:1px solid var(--line);border-radius:12px;color:var(--fg);text-decoration:none;background:var(--panel)}.links a.primary{background:var(--lime);color:#10170c;border-color:var(--lime);font-weight:800}
+            </style>
+          </head>
+          <body><main><small>V.I.S.I.O.N. // PROJECT HUB</small><h1>Virtual Intelligence for Sensing, Interpretation &amp; Observation of Networks</h1>
+          <p>Explore the V.I.S.I.O.N. dashboard, its control-center prototype, and project information.</p>
+          <div class="links"><a class="primary" href="./nvsim/">Open Dashboard</a><a href="./nvsim/control-center.html">Control Center</a><a href="./nvsim/about.html">About V.I.S.I.O.N.</a><a href="https://github.com/lokilancer/VISION">GitHub Repository</a></div>
+          </main></body></html>
+          EOF
+
+      - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # Upload entire repository
-          path: '.'
+          path: ./site
+
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5
