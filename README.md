@@ -1,4 +1,9 @@
-# π RuView
+# V.I.S.I.O.N.
+
+> **V.I.S.I.O.N.** stands for **Virtual Intelligence for Sensing, Interpretation & Observation of Networks** — a Wi-Fi sensing and smart-environment project.
+>
+> This repository is a personal fork and rebranding of [RuView](https://github.com/ruvnet/RuView). The original project name remains in upstream references, package names, paths, and technical documentation where needed for compatibility and attribution.
+
 
 <p align="center">
   <a href="https://cognitum.one/seed">
