@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>V.I.S.I.O.N. | Control Center</title>
+<meta name="description" content="V.I.S.I.O.N. local Wi-Fi sensing control-center concept.">
+<style>
+:root{color-scheme:dark;--bg:#080d0b;--panel:#101a16;--line:#263b30;--lime:#b6ff45;--muted:#9bb2a3;--white:#edf6ef}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 75% 0,#17271b 0,transparent 38%),var(--bg);color:var(--white);font:15px/1.5 system-ui,Segoe UI,sans-serif}
+header{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:24px max(5vw,20px);border-bottom:1px solid var(--line)}
+.brand{font-weight:800;letter-spacing:.13em}.brand span{color:var(--lime)}.tag{color:var(--muted);font-size:12px;letter-spacing:.1em}
+main{max-width:1100px;margin:auto;padding:32px 20px}.hero{display:flex;justify-content:space-between;align-items:end;gap:20px;margin-bottom:24px}.hero h1{font-size:clamp(30px,5vw,52px);line-height:1.05;margin:8px 0}.hero p{color:var(--muted);max-width:620px}
+.badge{border:1px solid #7b9b4b;color:var(--lime);padding:7px 12px;border-radius:999px;font-size:12px;white-space:nowrap}
+.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.panel{background:linear-gradient(150deg,#142019,var(--panel));border:1px solid var(--line);border-radius:16px;padding:20px}.panel h2{font-size:14px;color:var(--muted);font-weight:600;margin:0 0 12px}.value{font-size:32px;font-weight:750}.small{font-size:12px;color:var(--muted)}.wide{grid-column:span 2}.status{display:flex;align-items:center;gap:8px;color:var(--lime);font-size:13px}.dot{width:8px;height:8px;border-radius:50%;background:var(--lime);box-shadow:0 0 12px #b6ff4580}
+button{background:var(--lime);color:#10170c;border:0;border-radius:10px;padding:10px 14px;font-weight:750;cursor:pointer}button.secondary{background:#1d2c23;color:var(--white);border:1px solid var(--line)}button:focus-visible{outline:2px solid white;outline-offset:3px}
+.rows{display:grid;gap:12px}.row{display:flex;justify-content:space-between;gap:12px;align-items:center}.switch{width:44px;height:25px;border-radius:99px;background:#304137;padding:3px;border:1px solid #4a6553;cursor:pointer}.switch i{display:block;width:17px;height:17px;border-radius:50%;background:#c5d2c9;transition:transform .15s}.switch[aria-checked="true"]{background:#557e25}.switch[aria-checked="true"] i{transform:translateX(19px);background:var(--lime)}
+canvas{width:100%;height:150px;display:block}.notice{margin-top:18px;border:1px dashed #435b47;border-radius:12px;padding:14px;color:var(--muted);font-size:12px}
+footer{padding:24px 20px;text-align:center;color:var(--muted);border-top:1px solid var(--line);font-size:12px}
+@media(max-width:760px){.grid{grid-template-columns:1fr}.wide{grid-column:auto}.hero{align-items:start;flex-direction:column}header{align-items:start;flex-direction:column}}
+</style>
+</head>
+<body>
+<header><div class="brand">V.I.S.I.O.N.<span> //</span> CONTROL</div><div class="tag">LOCAL SENSING CONCEPT UI</div></header>
+<main>
+<section class="hero"><div><div class="tag">VIRTUAL INTELLIGENCE FOR SENSING, INTERPRETATION &amp; OBSERVATION OF NETWORKS</div><h1>Control Center</h1><p>A clean starting dashboard for your V.I.S.I.O.N. fork. Connect real, consent-based sensor data through a future adapter; this page currently runs in demo mode.</p></div><span class="badge" id="mode">● DEMO MODE</span></section>
+<section class="grid">
+<article class="panel"><h2>Sensor connection</h2><div class="status"><span class="dot"></span><span id="connectText">Demo node active</span></div><div class="value" id="nodeCount">01</div><div class="small">simulated node · no hardware connected</div></article>
+<article class="panel"><h2>Room status</h2><div class="value" id="roomStatus">Idle</div><div class="small">demo state only</div></article>
+<article class="panel"><h2>Privacy</h2><div class="value">Local-first</div><div class="small">No data sent by this page</div></article>
+<article class="panel wide"><h2>Signal activity · simulated</h2><canvas id="chart" width="800" height="180" aria-label="Simulated signal activity graph"></canvas><div class="small">Illustrative waveform, not measured CSI or a person-detection result.</div></article>
+<article class="panel"><h2>Demo controls</h2><div class="rows">
+<div class="row"><span>Enable demo activity</span><button class="switch" id="activity" role="switch" aria-checked="false" aria-label="Enable demo activity"><i></i></button></div>
+<div class="row"><span>Show signal graph</span><button class="switch" id="graphToggle" role="switch" aria-checked="true" aria-label="Show signal graph"><i></i></button></div>
+<button class="secondary" id="reset">Reset demo</button>
+</div></article>
+</section>
+<div class="notice"><strong>Important:</strong> This is a front-end prototype with simulated values. It does not connect to RuView sensors, identify people, estimate health/vitals, or store/stream data. Use sensing only with informed consent and visible notice to everyone in the monitored space.</div>
+</main>
+<footer>V.I.S.I.O.N. · Original codebase attribution: RuView · UI prototype</footer>
+<script>
+const activity=document.querySelector('#activity'), graphToggle=document.querySelector('#graphToggle'), chart=document.querySelector('#chart'), room=document.querySelector('#roomStatus');
+function toggle(el,on){el.setAttribute('aria-checked',String(on))}
+function draw(active=true){const ctx=chart.getContext('2d'),w=chart.width,h=chart.height;ctx.clearRect(0,0,w,h);ctx.strokeStyle='#263b30';ctx.lineWidth=1;for(let y=20;y<h;y+=35){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke()}ctx.strokeStyle='#b6ff45';ctx.lineWidth=2;ctx.beginPath();for(let x=0;x<w;x++){const amp=active?30:7;const y=h/2+Math.sin(x*.035)*amp+Math.sin(x*.11)*amp*.25;if(x===0)ctx.moveTo(x,y);else ctx.lineTo(x,y)}ctx.stroke()}
+activity.addEventListener('click',()=>{const on=activity.getAttribute('aria-checked')!=='true';toggle(activity,on);room.textContent=on?'Demo activity':'Idle';draw(on)});
+graphToggle.addEventListener('click',()=>{const on=graphToggle.getAttribute('aria-checked')!=='true';toggle(graphToggle,on);chart.style.display=on?'block':'none'});
+document.querySelector('#reset').addEventListener('click',()=>{toggle(activity,false);toggle(graphToggle,true);chart.style.display='block';room.textContent='Idle';draw(false)});
+draw(false);
+</script>
+</body></html>
